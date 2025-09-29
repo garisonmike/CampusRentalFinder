@@ -1,0 +1,27 @@
+# Python / Django
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.sqlite3
+db.sqlite3
+media/
+logs/
+venv/
+.env
+
+# Node / React
+node_modules/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System files
+.DS_Store
+Thumbs.db
+*.swp
+
+# VS Code
+.vscode/
