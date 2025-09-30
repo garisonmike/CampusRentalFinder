@@ -1,109 +1,146 @@
-import { HomeIcon, StarIcon, UserGroupIcon } from '@heroicons/react/24/solid'
+import { HomeIcon as HouseIcon, MagnifyingGlassIcon, ShieldCheckIcon, StarIcon, UserGroupIcon } from '@heroicons/react/24/outline'
+import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { Link } from 'react-router-dom'
 
 const HomePage = () => {
     return (
-        <div className="min-h-screen">
+        <div className="min-h-screen bg-dark-900">
             {/* Hero Section */}
-            <section className="bg-gradient-to-r from-primary-600 to-primary-800 text-white">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
-                    <div className="text-center">
-                        <h1 className="text-4xl md:text-6xl font-bold mb-6">
+            <section className="relative bg-gradient-to-br from-dark-900 via-dark-800 to-dark-900 text-white py-24">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="text-center max-w-4xl mx-auto">
+                        <h1 className="text-5xl md:text-6xl font-bold mb-6 leading-tight">
                             Find Your Perfect
-                            <span className="block text-primary-200">Student Housing</span>
+                            <span className="block text-transparent bg-clip-text bg-gradient-to-r from-primary-400 to-primary-600">
+                                Student Housing
+                            </span>
                         </h1>
-                        <p className="text-xl md:text-2xl mb-8 max-w-3xl mx-auto">
-                            Connect with verified landlords and discover quality rental properties
-                            near your university campus.
+                        <p className="text-xl text-gray-300 mb-8 max-w-2xl mx-auto">
+                            Connect with verified landlords and discover safe, affordable rentals near your campus.
+                            Join thousands of students who've found their ideal home.
                         </p>
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+
+                        {/* Search Bar */}
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
                             <Link
                                 to="/rentals"
-                                className="bg-white text-primary-600 px-8 py-3 rounded-lg font-semibold hover:bg-zinc-100 transition-colors"
+                                className="inline-flex items-center justify-center space-x-2 px-8 py-4 bg-dark-800 border border-dark-700 text-white rounded-lg hover:bg-dark-700 transition-all"
                             >
-                                Browse Rentals
+                                <MagnifyingGlassIcon className="h-5 w-5" />
+                                <span>Browse Rentals</span>
                             </Link>
                             <Link
-                                to="/register"
-                                className="border-2 border-white text-white px-8 py-3 rounded-lg font-semibold hover:bg-white hover:text-primary-600 transition-colors"
+                                to="/rentals/create"
+                                className="inline-flex items-center justify-center space-x-2 px-8 py-4 bg-primary-600 border border-primary-600 text-white rounded-lg hover:bg-primary-700 transition-all"
                             >
-                                Get Started
+                                <HouseIcon className="h-5 w-5" />
+                                <span>List a Rental</span>
                             </Link>
                         </div>
                     </div>
                 </div>
             </section>
 
-            {/* Features Section */}
-            <section className="py-16 bg-zinc-50">
+            {/* Why Choose Section */}
+            <section className="py-20 bg-dark-900">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="text-center mb-12">
-                        <h2 className="text-3xl font-bold text-gray-900 mb-4">
-                            Why Choose Our Platform?
+                    <div className="text-center mb-16">
+                        <h2 className="text-4xl font-bold text-white mb-4">
+                            Why Choose CampusRentalFinder?
                         </h2>
-                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                            We make finding student housing simple, safe, and reliable.
+                        <p className="text-xl text-gray-400">
+                            We prioritize safety, transparency, and student needs
                         </p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {/* Feature 1 */}
-                        <div className="text-center">
-                            <div className="bg-primary-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <HomeIcon className="h-8 w-8 text-primary-600" />
+                        {/* Feature 1 - Verified Landlords */}
+                        <div className="bg-dark-800 border border-dark-700 rounded-2xl p-8 hover:border-primary-600 transition-all">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="mb-6">
+                                    <ShieldCheckIcon className="h-16 w-16 text-primary-500" />
+                                </div>
+                                <h3 className="text-2xl font-semibold text-white mb-4">
+                                    Verified Landlords
+                                </h3>
+                                <p className="text-gray-400 mb-6">
+                                    All landlords go through our comprehensive verification process
+                                </p>
+                                <ul className="text-left space-y-3 w-full">
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Background checks</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Property verification</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Reviews & ratings</span>
+                                    </li>
+                                </ul>
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                                Quality Properties
-                            </h3>
-                            <p className="text-gray-600">
-                                Browse verified rental properties with detailed photos and descriptions.
-                            </p>
                         </div>
 
-                        {/* Feature 2 */}
-                        <div className="text-center">
-                            <div className="bg-primary-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <UserGroupIcon className="h-8 w-8 text-primary-600" />
+                        {/* Feature 2 - Student-Focused */}
+                        <div className="bg-dark-800 border border-dark-700 rounded-2xl p-8 hover:border-primary-600 transition-all">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="mb-6">
+                                    <UserGroupIcon className="h-16 w-16 text-primary-500" />
+                                </div>
+                                <h3 className="text-2xl font-semibold text-white mb-4">
+                                    Student-Focused
+                                </h3>
+                                <p className="text-gray-400 mb-6">
+                                    Built specifically for university students and their unique needs
+                                </p>
+                                <ul className="text-left space-y-3 w-full">
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Campus proximity</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Student budgets</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>Roommate matching</span>
+                                    </li>
+                                </ul>
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                                Trusted Landlords
-                            </h3>
-                            <p className="text-gray-600">
-                                Connect with verified landlords who understand student needs.
-                            </p>
                         </div>
 
-                        {/* Feature 3 */}
-                        <div className="text-center">
-                            <div className="bg-primary-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <StarIcon className="h-8 w-8 text-primary-600" />
+                        {/* Feature 3 - Trusted Platform */}
+                        <div className="bg-dark-800 border border-dark-700 rounded-2xl p-8 hover:border-primary-600 transition-all">
+                            <div className="flex flex-col items-center text-center">
+                                <div className="mb-6">
+                                    <StarIcon className="h-16 w-16 text-primary-500" />
+                                </div>
+                                <h3 className="text-2xl font-semibold text-white mb-4">
+                                    Trusted Platform
+                                </h3>
+                                <p className="text-gray-400 mb-6">
+                                    Join thousands of satisfied students and landlords
+                                </p>
+                                <ul className="text-left space-y-3 w-full">
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>5000+ happy tenants</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>800+ verified properties</span>
+                                    </li>
+                                    <li className="flex items-start text-gray-300">
+                                        <CheckCircleIcon className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                                        <span>4.8/5 average rating</span>
+                                    </li>
+                                </ul>
                             </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                                Reviews & Ratings
-                            </h3>
-                            <p className="text-gray-600">
-                                Read honest reviews from other students to make informed decisions.
-                            </p>
                         </div>
                     </div>
-                </div>
-            </section>
-
-            {/* CTA Section */}
-            <section className="py-16 bg-white">
-                <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
-                    <h2 className="text-3xl font-bold text-gray-900 mb-4">
-                        Ready to Find Your New Home?
-                    </h2>
-                    <p className="text-lg text-gray-600 mb-8">
-                        Join thousands of students who have found their perfect rental through our platform.
-                    </p>
-                    <Link
-                        to="/register"
-                        className="bg-primary-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-primary-700 transition-colors"
-                    >
-                        Sign Up Today
-                    </Link>
                 </div>
             </section>
         </div>
