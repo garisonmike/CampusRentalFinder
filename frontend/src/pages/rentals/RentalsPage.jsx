@@ -22,7 +22,7 @@ const RentalsPage = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[1, 2, 3, 4, 5, 6].map((item) => (
                     <div key={item} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-                        <div className="bg-gray-200 h-48 flex items-center justify-center">
+                        <div className="bg-zinc-200 h-48 flex items-center justify-center">
                             <p className="text-gray-500">Property Image</p>
                         </div>
                         <div className="p-4">
