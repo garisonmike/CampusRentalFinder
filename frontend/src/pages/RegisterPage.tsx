@@ -1,16 +1,17 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuthStore } from '@/store/authStore';
 import { Building2 } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const RegisterPage = () => {
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -20,17 +21,25 @@ const RegisterPage = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (password !== confirmPassword) {
       alert('Passwords do not match');
       return;
     }
 
     try {
-      await register({ email, username, password, role, phone });
+      await register({
+        email,
+        password,
+        password_confirm: confirmPassword,
+        first_name: firstName,
+        last_name: lastName,
+        phone_number: phone,
+        user_type: role,
+      });
       navigate('/dashboard');
     } catch (error) {
-      // Error handled by store
+      // errors handled in store
     }
   };
 
@@ -44,7 +53,7 @@ const RegisterPage = () => {
           <CardTitle className="text-2xl">Create an Account</CardTitle>
           <CardDescription>Join CampusRentalFinder today</CardDescription>
         </CardHeader>
-        
+
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -58,19 +67,31 @@ const RegisterPage = () => {
                 required
               />
             </div>
-            
+
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="firstName">First Name</Label>
               <Input
-                id="username"
+                id="firstName"
                 type="text"
-                placeholder="johndoe"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                placeholder="John"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
                 required
               />
             </div>
-            
+
+            <div className="space-y-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                type="text"
+                placeholder="Doe"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="phone">Phone (optional)</Label>
               <Input
@@ -81,7 +102,7 @@ const RegisterPage = () => {
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label>I am a</Label>
               <RadioGroup value={role} onValueChange={(value) => setRole(value as 'tenant' | 'landlord')}>
@@ -95,7 +116,7 @@ const RegisterPage = () => {
                 </div>
               </RadioGroup>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -107,7 +128,7 @@ const RegisterPage = () => {
                 required
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
               <Input
@@ -120,12 +141,12 @@ const RegisterPage = () => {
               />
             </div>
           </CardContent>
-          
+
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? 'Creating account...' : 'Create Account'}
             </Button>
-            
+
             <p className="text-center text-sm text-muted-foreground">
               Already have an account?{' '}
               <Link to="/login" className="font-medium text-primary hover:underline">

@@ -48,11 +48,14 @@ export interface LoginCredentials {
 
 export interface RegisterData {
   email: string;
-  username: string;
   password: string;
-  role: 'tenant' | 'landlord';
-  phone?: string;
+  password_confirm: string;
+  first_name?: string;
+  last_name?: string;
+  phone_number?: string;
+  user_type: 'tenant' | 'landlord';
 }
+
 
 export interface AuthTokens {
   access: string;

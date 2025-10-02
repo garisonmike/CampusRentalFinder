@@ -34,12 +34,11 @@ from .serializers import (
 class UserRegistrationView(APIView):
     """
     User registration endpoint.
-    
-    Allows new users to register with different user types.
+    Returns JWT tokens immediately after successful signup.
     """
-    
+
     permission_classes = [AllowAny]
-    
+
     @extend_schema(
         summary="Register new user",
         description="Create a new user account with email and password",
@@ -51,36 +50,34 @@ class UserRegistrationView(APIView):
         tags=["Authentication"]
     )
     def post(self, request):
-        """Register a new user."""
         serializer = UserRegistrationSerializer(data=request.data)
-        
+
         if serializer.is_valid():
             user = serializer.save()
-            
-            # Generate JWT tokens
+
+            # Generate JWT tokens immediately
             refresh = RefreshToken.for_user(user)
-            
+
             return Response({
-                'message': _('User registered successfully'),
-                'user': UserSerializer(user).data,
-                'tokens': {
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
+                "message": _("User registered successfully"),
+                "user": UserSerializer(user).data,
+                "tokens": {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
                 }
             }, status=status.HTTP_201_CREATED)
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserLoginView(APIView):
     """
     User login endpoint.
-    
     Authenticates user and returns JWT tokens.
     """
-    
+
     permission_classes = [AllowAny]
-    
+
     @extend_schema(
         summary="User login",
         description="Authenticate user and return JWT tokens",
@@ -92,39 +89,36 @@ class UserLoginView(APIView):
         tags=["Authentication"]
     )
     def post(self, request):
-        """Login user with email and password."""
         serializer = UserLoginSerializer(
             data=request.data,
             context={'request': request}
         )
-        
+
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            
-            # Generate JWT tokens
+
             refresh = RefreshToken.for_user(user)
-            
+
             return Response({
-                'message': _('Login successful'),
-                'user': UserSerializer(user).data,
-                'tokens': {
-                    'access': str(refresh.access_token),
-                    'refresh': str(refresh),
+                "message": _("Login successful"),
+                "user": UserSerializer(user).data,
+                "tokens": {
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
                 }
             }, status=status.HTTP_200_OK)
-        
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserLogoutView(APIView):
     """
     User logout endpoint.
-    
     Blacklists the refresh token to log out user.
     """
-    
+
     permission_classes = [IsAuthenticated]
-    
+
     @extend_schema(
         summary="User logout",
         description="Logout user by blacklisting refresh token",
@@ -142,27 +136,26 @@ class UserLogoutView(APIView):
         tags=["Authentication"]
     )
     def post(self, request):
-        """Logout user by blacklisting refresh token."""
         try:
             refresh_token = request.data.get('refresh')
             if not refresh_token:
                 return Response(
-                    {'error': _('Refresh token is required')},
+                    {"error": _("Refresh token is required")},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             token = RefreshToken(refresh_token)
             token.blacklist()
-            
-            return Response({
-                'message': _('Logout successful')
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
+
+            return Response({"message": _("Logout successful")}, status=status.HTTP_200_OK)
+
+        except Exception:
             return Response(
-                {'error': _('Invalid token')},
+                {"error": _("Invalid token")},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+# (⚡ everything else stays exactly as in your file – no changes made to profile, password, admin, etc.)
 
 
 class UserProfileView(APIView):
