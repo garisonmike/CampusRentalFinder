@@ -16,14 +16,16 @@ const RegisterPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [userType, setUserType] = useState<'tenant' | 'landlord'>('tenant');
+  const [formError, setFormError] = useState<string | null>(null);
   const { register, isLoading } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
     if (password !== confirmPassword) {
-      alert('Passwords do not match');
+      setFormError('Passwords do not match');
       return;
     }
 
@@ -38,8 +40,11 @@ const RegisterPage = () => {
         phone_number: phoneNumber
       });
       navigate('/dashboard');
-    } catch (error) {
-      // Error handled by store
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message ||
+        error.response?.data?.detail ||
+        'Registration failed. Please try again.';
+      setFormError(errorMessage);
     }
   };
 
@@ -143,6 +148,11 @@ const RegisterPage = () => {
           </CardContent>
 
           <CardFooter className="flex flex-col gap-4">
+            {formError && (
+              <div className="w-full rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {formError}
+              </div>
+            )}
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? 'Creating account...' : 'Create Account'}
             </Button>

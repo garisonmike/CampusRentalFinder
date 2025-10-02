@@ -80,10 +80,9 @@ export const authApi = {
     return response.data;
   },
 
-  logout: async () => {
-    const response = await api.post('/auth/logout/');
-    return response.data;
-  },
+  logout: (data: { refresh: string }) =>
+    api.post("/auth/logout/", data),
+
 
   refreshToken: async (refreshToken: string) => {
     const response = await api.post<{ access: string }>('/auth/token/refresh/', { refresh: refreshToken });

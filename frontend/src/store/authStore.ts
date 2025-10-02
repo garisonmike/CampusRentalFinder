@@ -1,18 +1,8 @@
-import { authApi, profileApi } from '@/services/api';
-import type { LoginCredentials, User } from '@/types';
-import { toast } from 'sonner';
-import { create } from 'zustand';
-
-// Match Django serializer exactly
-export interface RegisterData {
-  email: string;
-  first_name: string;
-  last_name: string;
-  phone_number?: string;
-  user_type: 'tenant' | 'landlord';
-  password: string;
-  password_confirm: string;
-}
+// src/store/authStore.ts
+import { authApi, profileApi } from "@/services/api";
+import type { LoginCredentials, RegisterData, User } from "@/types";
+import { toast } from "sonner";
+import { create } from "zustand";
 
 interface AuthState {
   user: User | null;
@@ -26,7 +16,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  isAuthenticated: !!localStorage.getItem('access_token'),
+  isAuthenticated: !!localStorage.getItem("access_token"),
   isLoading: false,
 
   login: async (credentials: LoginCredentials) => {
@@ -34,14 +24,19 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isLoading: true });
       const { user, tokens } = await authApi.login(credentials);
 
-      localStorage.setItem('access_token', tokens.access);
-      localStorage.setItem('refresh_token', tokens.refresh);
+      localStorage.setItem("access_token", tokens.access);
+      localStorage.setItem("refresh_token", tokens.refresh);
 
       set({ user, isAuthenticated: true, isLoading: false });
-      toast.success('Welcome back!');
+      toast.success("Welcome back!");
     } catch (error: any) {
       set({ isLoading: false });
-      toast.error(error.response?.data?.message || 'Login failed');
+      const errorMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        JSON.stringify(error.response?.data) ||
+        "Login failed. Please try again.";
+      toast.error(errorMessage);
       throw error;
     }
   },
@@ -51,28 +46,38 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ isLoading: true });
       const { user, tokens } = await authApi.register(data);
 
-      localStorage.setItem('access_token', tokens.access);
-      localStorage.setItem('refresh_token', tokens.refresh);
+      localStorage.setItem("access_token", tokens.access);
+      localStorage.setItem("refresh_token", tokens.refresh);
 
       set({ user, isAuthenticated: true, isLoading: false });
-      toast.success('Account created successfully!');
+      toast.success("Account created successfully!");
     } catch (error: any) {
       set({ isLoading: false });
-      toast.error(error.response?.data?.message || 'Registration failed');
+      const errorMessage =
+        error.response?.data?.message ||
+        error.response?.data?.detail ||
+        JSON.stringify(error.response?.data) ||
+        "Registration failed. Please try again.";
+      toast.error(errorMessage);
       throw error;
     }
   },
 
   logout: async () => {
     try {
-      await authApi.logout();
-    } catch (error) {
-      console.error('Logout error:', error);
+      const refresh = localStorage.getItem("refresh_token");
+      if (refresh) {
+        // ✅ now we send refresh token
+        await authApi.logout({ refresh });
+      }
+    } catch (error: any) {
+      console.error("Logout error:", error);
+      toast.error("Logout failed, but tokens cleared locally.");
     } finally {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
       set({ user: null, isAuthenticated: false });
-      toast.success('Logged out successfully');
+      toast.success("Logged out successfully");
     }
   },
 
@@ -82,8 +87,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user = await profileApi.get();
       set({ user, isAuthenticated: true, isLoading: false });
     } catch (error) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },
