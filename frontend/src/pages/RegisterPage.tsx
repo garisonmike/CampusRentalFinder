@@ -14,8 +14,8 @@ const RegisterPage = () => {
   const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [role, setRole] = useState<'tenant' | 'landlord'>('tenant');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [userType, setUserType] = useState<'tenant' | 'landlord'>('tenant');
   const { register, isLoading } = useAuthStore();
   const navigate = useNavigate();
 
@@ -30,16 +30,16 @@ const RegisterPage = () => {
     try {
       await register({
         email,
-        password,
-        password_confirm: confirmPassword,
         first_name: firstName,
         last_name: lastName,
-        phone_number: phone,
-        user_type: role,
+        password,
+        password_confirm: confirmPassword,
+        user_type: userType,
+        phone_number: phoneNumber
       });
       navigate('/dashboard');
     } catch (error) {
-      // errors handled in store
+      // Error handled by store
     }
   };
 
@@ -93,19 +93,19 @@ const RegisterPage = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="phone">Phone (optional)</Label>
+              <Label htmlFor="phoneNumber">Phone Number (optional)</Label>
               <Input
-                id="phone"
+                id="phoneNumber"
                 type="tel"
                 placeholder="+1234567890"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
               />
             </div>
 
             <div className="space-y-2">
               <Label>I am a</Label>
-              <RadioGroup value={role} onValueChange={(value) => setRole(value as 'tenant' | 'landlord')}>
+              <RadioGroup value={userType} onValueChange={(value) => setUserType(value as 'tenant' | 'landlord')}>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="tenant" id="tenant" />
                   <Label htmlFor="tenant" className="font-normal">Tenant (looking for accommodation)</Label>

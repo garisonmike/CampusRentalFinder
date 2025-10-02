@@ -1,7 +1,18 @@
-import { create } from 'zustand';
 import { authApi, profileApi } from '@/services/api';
-import type { User, LoginCredentials, RegisterData } from '@/types';
+import type { LoginCredentials, User } from '@/types';
 import { toast } from 'sonner';
+import { create } from 'zustand';
+
+// Match Django serializer exactly
+export interface RegisterData {
+  email: string;
+  first_name: string;
+  last_name: string;
+  phone_number?: string;
+  user_type: 'tenant' | 'landlord';
+  password: string;
+  password_confirm: string;
+}
 
 interface AuthState {
   user: User | null;
@@ -22,10 +33,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       set({ isLoading: true });
       const { user, tokens } = await authApi.login(credentials);
-      
+
       localStorage.setItem('access_token', tokens.access);
       localStorage.setItem('refresh_token', tokens.refresh);
-      
+
       set({ user, isAuthenticated: true, isLoading: false });
       toast.success('Welcome back!');
     } catch (error: any) {
@@ -39,10 +50,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       set({ isLoading: true });
       const { user, tokens } = await authApi.register(data);
-      
+
       localStorage.setItem('access_token', tokens.access);
       localStorage.setItem('refresh_token', tokens.refresh);
-      
+
       set({ user, isAuthenticated: true, isLoading: false });
       toast.success('Account created successfully!');
     } catch (error: any) {
