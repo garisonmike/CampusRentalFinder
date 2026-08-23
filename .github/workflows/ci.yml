@@ -85,6 +85,20 @@ jobs:
       - name: pytest with coverage
         run: pytest --cov-report=term-missing --cov-report=xml
 
+      # The frontend generates its types from this file. If the API changed
+      # without regenerating it, the committed types are already stale.
+      - name: Check the committed OpenAPI schema is current
+        run: |
+          python manage.py spectacular --file /tmp/schema.yaml
+          if ! diff -q /tmp/schema.yaml ../frontend/src/api/schema.yaml > /dev/null; then
+            echo "::error::frontend/src/api/schema.yaml is out of date."
+            echo "Regenerate it with:"
+            echo "  cd backend && python manage.py spectacular --file ../frontend/src/api/schema.yaml"
+            echo "  cd ../frontend && npm run generate:types"
+            diff -u ../frontend/src/api/schema.yaml /tmp/schema.yaml | head -60
+            exit 1
+          fi
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,6 +128,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Types are generated, never hand-written. This fails if the committed
+      # schema.d.ts does not match the committed schema.yaml.
+      - name: Check generated API types are current
+        run: |
+          npm run generate:types
+          if ! git diff --quiet -- src/api/schema.d.ts; then
+            echo "::error::src/api/schema.d.ts is out of date. Run 'npm run generate:types' and commit."
+            git --no-pager diff -- src/api/schema.d.ts | head -60
+            exit 1
+          fi
+
       - name: eslint
         run: npm run lint
 
@@ -121,7 +146,7 @@ jobs:
         run: npm run typecheck
 
       - name: vitest
-        run: npm run test -- --run
+        run: npm run test:run
 
       - name: Build
         run: npm run build
