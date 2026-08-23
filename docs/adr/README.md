@@ -9,13 +9,13 @@ history.
 
 | # | Title | Status |
 |---|---|---|
-| [001](001-multi-tenancy.md) | Multi-tenancy via shared database, shared schema | Accepted |
-| [002](002-property-university-join.md) | Properties link to universities through a join model | Accepted |
-| [003](003-object-level-authorization.md) | Object-level authorization, not a user_type string | Accepted |
-| [004](004-review-integrity-via-tenancy.md) | Review integrity via a Tenancy record | Accepted |
-| [005](005-per-university-theming.md) | Per-university theming through database-stored design tokens | Accepted |
-| [006](006-geo-search.md) | Geo search stays simple initially | Accepted |
-| [007](007-media-object-storage.md) | Media on S3-compatible object storage | Accepted |
+| [001](001-multi-tenancy.md) | Multi-tenancy via shared database, shared schema | Accepted, amended 2026-08-24 |
+| [002](002-property-university-join.md) | Properties link to universities through a join model | Accepted, amended 2026-08-24 |
+| [003](003-object-level-authorization.md) | Object-level authorization, not a user_type string | Accepted, amended 2026-08-24 |
+| [004](004-review-integrity-via-tenancy.md) | Review integrity via a Tenancy record | Accepted, amended 2026-08-24 |
+| [005](005-per-university-theming.md) | Per-university theming through database-stored design tokens | Accepted, amended 2026-08-24 |
+| [006](006-geo-search.md) | Geo search stays simple initially | Accepted, amended 2026-08-24 |
+| [007](007-media-object-storage.md) | Media on S3-compatible object storage | Accepted, amended 2026-08-24 |
 
 ## Format
 
@@ -30,6 +30,8 @@ Status / Date / Deciders
 ## Alternatives considered
 ```
 
-The Consequences section is not a formality. Where the author of an ADR
-believes a decision has a genuine flaw, it is recorded there rather than
-quietly worked around in the implementation.
+The Consequences section is not a formality. Where design review finds a
+genuine flaw in a decision, it is recorded there rather than quietly worked
+around in the implementation. Several of the amendments dated 2026-08-24 came
+from exactly that: the objection is kept in the Decision section as the
+rationale for the change, so the reasoning is not lost.

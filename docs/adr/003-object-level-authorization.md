@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — caretaker capabilities and student verification resolved
 **Deciders:** Tech lead
 
 ## Context
@@ -49,8 +50,12 @@ CaretakerAssignment    (FK → User, FK → Property, FK → granted_by User)
     landlord. Carries a permission scope and may be revoked.
 
 StudentProfile         (1:1 → User, FK → University)
-    A user who belongs to an institution. Verification is by student email
-    domain (see below).
+    A user who belongs to an institution. Verification is optional and its
+    mechanism is per-university policy (see below).
+
+UniversityStaffProfile (1:1 → User, FK → University)
+    A member of university staff, scoped to one institution. Its only
+    capability today is that tenant's student verification queue.
 ```
 
 Field lists and constraints are in `docs/DOMAIN_MODEL.md`.
@@ -74,10 +79,116 @@ class IsPropertyManager(BasePermission):
 settable only through the Django admin or a management command — never through
 the API.
 
-**Student verification** is by email domain: `StudentProfile.is_verified`
-becomes true when the user confirms an address whose domain matches one of the
-`University.email_domains` entries (`students.ku.ac.ke`, `jkuat.ac.ke`, …).
-Verification is a property of the confirmed address, not of a self-declaration.
+### Caretaker capabilities
+
+Design review noted that "manage" was underspecified, and that the sharpest
+question was whether a caretaker may confirm a tenancy — because under the
+original ADR-004 that would let one actor manufacture reviewers unilaterally.
+
+**Resolved.** A caretaker **may**:
+
+- create and edit units
+- set vacancy counts
+- upload and manage photos
+- set availability
+- confirm or dispute tenancy claims
+- respond to inquiries
+
+A caretaker **may not**:
+
+- delete a property
+- transfer ownership
+- create or revoke caretaker assignments
+- edit the landlord profile or any billing or payout field
+- post a `ReviewResponse`
+
+The tenancy concern is resolved by the ADR-004 amendment rather than by
+withholding the capability: **the tenant now initiates the claim**, so
+confirmation is an acknowledgement of someone else's assertion, not the
+creation of a record out of nothing. Caretaker confirmation power therefore no
+longer lets anyone manufacture a reviewer on their own.
+
+Every caretaker action records the acting user. Confirmations additionally
+store which actor confirmed, via `Tenancy.confirmation_source` and the
+confirming user (ADR-004), so a pattern of one caretaker confirming implausible
+volumes is visible in the data.
+
+The capability list lives in `CaretakerAssignment.permissions`, so a landlord
+can grant a subset. The list above is the maximum an assignment may contain;
+values outside it are rejected at the model layer, not merely unused.
+
+### Student verification is per-university policy
+
+Design review flagged that email-domain verification is weaker than it sounds:
+Kenyan universities do not uniformly issue student addresses, alumni keep theirs
+for years, and staff often share the student domain. A single hard-coded
+mechanism would exclude real students at exactly the institutions we most want
+to sell to.
+
+**Resolved: verification is a policy each school chooses at onboarding, and it
+is changeable without a deploy. Verification is never required to use the
+platform by default — it earns a badge.**
+
+```
+University
+├── verification_methods_enabled   array ⊆ {email_domain, student_id_upload},
+│                                  may be empty
+├── student_email_domains          array, e.g. ['s.kyu.ac.ke']
+├── verification_required_to_review  bool, default False
+├── verification_required_to_signup  bool, default False
+└── id_review_retention_days       int, default 7
+
+StudentProfile
+├── verification_status   unverified | pending | verified | rejected
+├── verification_method   email_domain | manual_id | null
+├── verified_at
+├── verified_by           nullable FK → User
+└── rejection_reason
+
+StudentVerificationRequest        the manual upload flow
+├── student_profile, document reference
+├── submitted_at
+├── reviewer, decision, decided_at
+└── notes
+```
+
+**Email-domain verification.** The user submits a student address matching one
+of the university's domains and receives a signed single-use token by email. On
+confirmation the status goes straight to `verified`. No human in the loop.
+
+**Manual ID verification**, for schools that issue no student addresses. The
+student uploads a document; a university staff reviewer approves or rejects.
+
+This requires a role the model did not have. **Add `UniversityStaffProfile`,**
+scoped to exactly one university, whose only capability for now is the
+verification queue for their own tenant. Platform admins (`is_staff`) may also
+review.
+
+Reviews display a verified badge when the author's profile is verified. When
+`verification_required_to_review` is `False`, unverified students may still
+post; the badge is simply absent.
+
+### ID document handling
+
+**This is a legal requirement under Kenya's Data Protection Act 2019, not a
+preference.** A national ID or student card is personal data, and the Act
+obliges a data controller to collect no more than is necessary, to retain it no
+longer than necessary for the stated purpose, and to secure it. The rules
+below are the minimum that satisfies that:
+
+- **Private bucket only.** Never the public CDN, never a predictable URL.
+  Documents live in a bucket separate from listing photos, with its own
+  storage backend class (ADR-007). Access is by short-lived signed URL,
+  generated per reviewer request.
+- **Deletion is scheduled, not manual.** A job deletes the document
+  `id_review_retention_days` after a decision is recorded. The decision outcome
+  is retained; the image is not. Retention defaults to 7 days.
+- **Every read is logged** with reviewer, timestamp and the request that
+  produced it. An access log is what makes the retention promise auditable.
+- **The upload endpoint is rate-limited** and accepts images and PDF only, with
+  a size cap and content-type validation performed on the **actual bytes**, not
+  on the client-supplied header. A `Content-Type: image/png` on a payload that
+  is not a PNG is a rejection, not a stored file.
 
 ## Consequences
 
@@ -117,39 +228,44 @@ Verification is a property of the confirmed address, not of a self-declaration.
   `user_type` values are discarded rather than migrated. This is only true
   *now*; the window closes at first deploy.
 
-### Flaws worth stating plainly
+### Consequences of the verification resolution
 
-**1. Email-domain verification is weaker than it looks.** Three gaps:
+- **Verification is now optional by default, so the badge is the product, not a
+  gate.** That is the right trade — a system that cannot verify a real student
+  is worse than one that occasionally verifies a former one — but it means the
+  badge's meaning must be explained in the UI, or students will read its absence
+  as a warning rather than as "this school does not run verification".
+- **Two verification paths means two code paths and two test matrices**, and
+  `verification_method` must be recorded so a later audit can tell them apart.
+- **Manual review needs staffing**, and a queue nobody works is worse than no
+  queue at all: students sit in `pending` indefinitely. Surface queue age to
+  university staff, and let a school disable `student_id_upload` rather than
+  advertise a review it will not perform.
+- **`UniversityStaffProfile` is a third role model**, and it widens the blast
+  radius of a compromised account: that user can read ID documents for their
+  tenant. Scope it hard, log every read, and keep its capability list to the
+  verification queue until there is a concrete reason to widen it.
+- **Retention deletion must be verified, not assumed.** A job that silently
+  stops running turns a 7-day promise into indefinite storage. Alert on the
+  count of documents older than the retention window rather than on the job's
+  own success.
+- **`verification_required_to_signup` is a foot-gun** for a school that enables
+  it without issuing addresses to first-years in time. Warn in the admin when it
+  is set while `verification_methods_enabled` is empty; that combination locks
+  everyone out.
 
-- Kenyan universities do not uniformly issue student addresses, and where they
-  do, some are shared or short-lived. Verification-by-domain will exclude
-  legitimate students at exactly the institutions we most want to sell to.
-- Alumni keep their addresses for years. A domain match proves an address was
-  once issued, not that the holder is currently enrolled.
-- Staff addresses often share the student domain, so a lecturer verifies as a
-  student.
+### Consequences of the caretaker resolution
 
-None of these is fatal — the mechanism raises the cost of a fake review
-meaningfully, which is its real job. But it should not be described to a
-university as proof of enrolment. Plan for a manual fallback (student ID upload
-reviewed by staff) from the start, because a system that cannot verify a real
-student is worse than one that occasionally verifies a former one. **Recommend
-`StudentProfile.verification_method ∈ {email_domain, manual_id, none}` in the
-schema** so the two paths are distinguishable later.
-
-**2. The ADR does not say what a caretaker may actually do.** "Manage" is
-underspecified: may a caretaker change the price? Delete the property? Confirm
-a tenancy — which, under ADR-004, is what makes a review possible? That last
-one matters: a caretaker who can create tenancies can manufacture reviewers.
-The schema below reserves a `permissions` field for this, but the *policy*
-needs deciding before implementation.
-
-**Recommendation:** caretakers may update vacancy counts, upload photos, respond
-to enquiries, and confirm tenancies; they may **not** change price, delete the
-property, or grant further assignments. Confirming tenancies is included because
-in practice the caretaker is the person on site who knows who moved in — but it
-means caretaker assignment must itself be a trusted action, and revocation must
-be immediate.
+- **More queries per request.** `user.user_type == 'landlord'` was free; checking
+  an assignment and its permission list is a database hit per object-level
+  check. Cache a request-scoped map of the caller's assignments; measure before
+  optimising further.
+- **The permission list is data, so it can drift from the code that reads it.**
+  Define the allowed values in one enum, validate on write, and assert in a test
+  that no permission string is checked in code without existing in the enum.
+- **Revocation must be immediate.** Assignments are deactivated, not deleted, so
+  the check must filter on `is_active` every time — a cached permission map that
+  outlives a revocation is a real hole.
 
 ## Alternatives considered
 

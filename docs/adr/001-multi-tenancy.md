@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — canonical host and header fallback resolved
 **Deciders:** Tech lead
 
 ## Context
@@ -40,10 +41,48 @@ resolved for the current request.
    health probes, the schema, auth) may serve such a request; every
    tenant-scoped view returns 400.
 
-The header fallback **must be disabled in production settings.** If it were
-honoured on a deployed host, any client could set `X-University: <anything>`
-and read another tenant's scoped data. It is gated on a setting that is `True`
-in `dev.py` and `test.py` and `False` in `prod.py`.
+The header fallback is gated on `TENANT_HEADER_FALLBACK_ENABLED`, `True` in
+`dev.py` and `test.py`. In production it is not merely disabled but impossible
+— see below.
+
+### Public reads are canonical on a tenant-neutral host
+
+Design review raised a case the first draft of this decision did not settle: a
+property serving two nearby campuses is reachable at two hostnames, each showing
+a different distance figure, and share-a-link behaviour then depends on which
+subdomain the sender happened to be browsing. Canonical URLs, sitemaps and
+search indexing all degrade when the same property has N addresses.
+
+**Resolved: the tenant boundary sits in a different place for public reads than
+for everything else.**
+
+- **Public listing pages are canonical at `www.<domain>/listings/<slug>`.** That
+  host is tenant-neutral. It is what sitemaps advertise and what search engines
+  index.
+- **University subdomains still serve the branded experience.** A student
+  arriving at `kyu.example.co.ke/listings/wendani-hostel-c` gets KyU's colours,
+  logo and campus distances. That page emits
+  `<link rel="canonical" href="https://www.example.co.ke/listings/wendani-hostel-c">`
+  so the neutral URL accumulates ranking and is the one shared onward.
+- **Every write endpoint and every authenticated read stays strictly
+  subdomain-scoped.** Nothing here relaxes the boundary where it carries
+  security weight. The neutral host serves published public listing content and
+  nothing else.
+
+The subdomain is therefore a *presentation and default-filter* layer for
+anonymous browsing, and an *access boundary* for everything touching user data.
+
+### The header fallback must be impossible in production
+
+`X-University` exists so `localhost:8080` and the test suite can name a tenant.
+On a deployed host it would let any client set the header and read another
+tenant's scoped data.
+
+**Resolved: absence of the setting is not sufficient.**
+`config/settings/prod.py` raises `ImproperlyConfigured` at import time if
+`TENANT_HEADER_FALLBACK_ENABLED` is true, in the same way it already refuses to
+start without a real `SECRET_KEY`. A container misconfigured this way must fail
+to boot rather than serve traffic with a bypass available.
 
 **Querysets** go through a manager, not through ad-hoc `.filter()` calls in
 views:
@@ -95,26 +134,24 @@ site is greppable in one search.
   wildcard DNS record. Cheap, but it is a prerequisite for the first deploy,
   not an afterthought.
 
-### A flaw worth stating plainly
+### Consequences of the canonical-host resolution
 
-Resolving the tenant purely from the subdomain conflicts with the shared-property
-requirement in an edge case the ADR does not settle. If a student on
-`kyu.example.co.ke` opens a property that also serves JKUAT, the page shows
-"1.2 km from KyU". Share that link with a JKUAT friend and they see the same
-KyU-scoped page, because the subdomain in the URL — not the viewer — decides
-the tenant. That is *probably* fine (the property is genuinely relevant to
-both, and the distances are attributes of the join, not the property). But
-canonical URLs, sitemaps and SEO all get messy when the same property is
-reachable at N hostnames with N different distance figures.
-
-**Recommendation, for the tech lead to rule on:** serve properties from a
-tenant-neutral canonical host and treat the university subdomain as a
-*preference* layer (branding, default filters, distance display) rather than an
-access boundary for public listing pages. Keep strict subdomain scoping for
-authenticated and write endpoints, where it matters. This is not a change to
-the decision — it is a question about where the boundary sits for public reads,
-and it should be answered before the URL structure is built, because it is
-expensive to change afterwards.
+- **Two URL shapes to maintain.** `www` for public listings, subdomains for
+  everything else. The router and every link-building helper must know which
+  host a route belongs to, and getting it wrong on a write endpoint is a
+  security bug rather than a cosmetic one. Centralise host selection in one
+  helper; never build these URLs by string concatenation at call sites.
+- **The neutral host needs its own tenant story.** A property page on `www` has
+  no subdomain to resolve from, so it cannot say "1.2 km from your campus". It
+  shows every campus distance it holds, each labelled with its institution, and
+  offers a "view as <university>" link into the branded subdomain.
+- **Session cookies must be scoped to the exact subdomain, never to
+  `.example.co.ke`.** A parent-domain cookie would be readable by every tenant
+  subdomain, which is precisely the isolation failure this ADR exists to avoid.
+- **Wildcard TLS and DNS are still required** for the branded hosts, plus a
+  certificate covering `www`.
+- The `rel=canonical` tag is easy to forget on a new page type. Assert it in a
+  test for every public listing route.
 
 ## Alternatives considered
 

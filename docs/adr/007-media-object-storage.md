@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — django-rq adopted; second private bucket added
 **Deciders:** Tech lead
 
 ## Context
@@ -40,15 +41,29 @@ selected by environment variable, never by a code branch.
 
 ```python
 STORAGES = {
+    # Public listing photos and university logos.
     "default": {
         "BACKEND": "storages.backends.s3.S3Storage",
         "OPTIONS": {
-            "bucket_name": config("S3_BUCKET"),
+            "bucket_name": config("S3_MEDIA_BUCKET"),
             "endpoint_url": config("S3_ENDPOINT_URL"),
             "region_name": config("S3_REGION", default="auto"),
             "querystring_auth": False,   # listing photos are public
             "file_overwrite": False,
             "default_acl": None,         # R2 does not implement ACLs
+        },
+    },
+    # Verification documents. Never the CDN, never a predictable URL.
+    "documents": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": config("S3_DOCUMENTS_BUCKET"),
+            "endpoint_url": config("S3_ENDPOINT_URL"),
+            "region_name": config("S3_REGION", default="auto"),
+            "querystring_auth": True,    # signed URLs only
+            "querystring_expire": 300,   # five minutes
+            "file_overwrite": False,
+            "default_acl": None,
         },
     },
     "staticfiles": {...},                # WhiteNoise stays as it is
@@ -72,6 +87,58 @@ variants can be regenerated when the sizes change.
 `processing_status ∈ {pending, ready, failed}`; the API serves the original
 until variants are ready, so a slow job degrades quality rather than breaking
 the page.
+
+### The queue is django-rq on the existing Redis — RESOLVED
+
+Design review left the mechanism open and recommended Cloudflare Images if the
+pricing worked, on the grounds that it would delete this subsystem entirely —
+no queue, no worker, no variant bookkeeping.
+
+**That argument no longer holds, and the decision goes the other way.**
+
+By the time the other ADR amendments landed, a queue became mandatory
+regardless of how images are handled:
+
+| Job | Comes from |
+|---|---|
+| Auto-confirm tenancy claims past their deadline | ADR-004 |
+| Route walking distance and time | ADR-002 |
+| Delete verification documents after the retention window | ADR-003 |
+| Generate image variants | this ADR |
+
+Three of those four have nothing to do with images. Removing the image
+subsystem therefore no longer removes the queue, which was Cloudflare Images'
+main advantage — and adopting it would put a core asset behind per-image vendor
+pricing for a benefit we no longer get.
+
+**Resolved: `django-rq`, on the Redis instance already running.**
+
+- Redis is already a dependency, for the cache and the readiness probe. The
+  queue adds a worker process and no new infrastructure.
+- `django-rq` is a thin layer: a job is a function, and the admin gives a queue
+  view for free. Celery's extra machinery — its own result backend, beat, a
+  broker abstraction we do not need — is not repaid at this size.
+- Scheduled jobs (the confirmation deadline, the retention sweep) use
+  `rq-scheduler`, which django-rq integrates.
+- `UnitPhoto` **keeps** its variant key columns and `processing_status`.
+
+### Two buckets, not one
+
+ADR-003 introduced student ID document uploads, which are personal data under
+Kenya's Data Protection Act 2019.
+
+**Resolved: a second, private bucket with its own storage backend class.**
+
+| Bucket | Contents | Access |
+|---|---|---|
+| `media` (public) | Listing photos, university logos | `querystring_auth = False`, served through the CDN |
+| `documents` (private) | Student ID uploads, landlord ID documents | `querystring_auth = True`, short-lived signed URLs, no CDN |
+
+These are **separate `STORAGES` entries with separate backend classes**, not a
+key-prefix convention inside one bucket. A convention is one careless
+`default_storage.save()` away from publishing someone's national ID; a
+separate backend makes the public path unreachable from the document model's
+field. The retention job in ADR-003 deletes from the private bucket only.
 
 Static files are **not** affected: WhiteNoise continues to serve them from the
 image. This decision is about user uploads only.
@@ -99,10 +166,10 @@ image. This decision is about user uploads only.
 
 ### What it costs us
 
-- **A job queue is now a hard dependency**, and this ADR does not name one. See
-  the open question below. Until it is resolved, "asynchronous" is aspirational
-  and the implementation will quietly become synchronous — which is the failure
-  mode to watch for in review.
+- **A job queue is now a hard dependency.** Resolved above as django-rq; the
+  operational consequences are in the resolution section below. The failure mode
+  to watch for in review is an "asynchronous" step quietly implemented inline
+  because the worker was inconvenient to run locally.
 - **A new compose service.** MinIO adds a container, a console, credentials and
   a bucket-creation step to the local setup. That is friction on `git clone`
   and must be scripted, or new developers will hit an opaque
@@ -110,55 +177,44 @@ image. This decision is about user uploads only.
 - **An external dependency on the upload path.** R2 being unavailable means
   uploads fail. Acceptable — the alternative is worse — but the failure needs a
   clear user-facing message rather than a 500.
-- **`querystring_auth = False` makes every object public to anyone with the
-  URL.** Correct for listing photos, which are public content. It would be
-  wrong for anything else: if verification documents (student IDs, title deeds)
-  are ever stored, they need a **separate bucket** with signed URLs. Do not put
-  them in this one. Enforce it with distinct storage classes rather than a
-  convention about key prefixes.
-- **Costs scale with content.** R2 storage is cheap and egress is free, but
-  neither is zero, and an unbounded upload size is an unbounded bill. Enforce a
-  per-file limit (5 MB) and a per-unit photo count (12) at the serializer, and
-  reject non-image content types by inspecting the file, not the extension.
-- **Orphaned objects.** Deleting a `UnitPhoto` row does not delete the object.
-  `django-cleanup` or a periodic reconciliation job is needed, or the bucket
-  accumulates files nothing references — and they are invisible, because
-  nothing lists them.
 - **Local disk stays available accidentally.** `FileSystemStorage` remains
   Django's default, so any model field that forgets to name a storage backend
   silently writes to disk. Set the `default` storage as above so the fallback
   is object storage, not the other way round.
 
-### Flaws and gaps worth stating plainly
+### Consequences of the queue and bucket resolutions
 
-**1. "Image variants generated asynchronously" specifies an outcome, not a
-mechanism, and the choice is not free.** Three realistic options:
-
-| Option | Cost | Fit |
-|---|---|---|
-| **Celery + Redis** | A worker process, a beat scheduler if periodic jobs are wanted, real operational surface | The default answer; heavier than this workload needs |
-| **django-rq** or **RQ** | One worker, Redis only, far simpler API | Good fit — Redis is already a dependency for cache and readiness |
-| **Cloudflare Images** | No queue at all: upload once, request `?width=400` variants from the CDN | Removes the entire problem; costs per image and per delivery, and couples us to Cloudflare |
-
-**Recommendation: Cloudflare Images if the numbers work, `django-rq` if not.**
-Cloudflare Images deletes this whole subsystem — no queue, no worker, no
-variant bookkeeping, no orphan reconciliation for derived files — and we are
-already on Cloudflare for R2. If the per-image pricing does not suit, `django-rq`
-is the smallest thing that satisfies the ADR as written. **This needs a decision
-before the schema rewrite**, because `UnitPhoto`'s shape depends on it: with
-Cloudflare Images the variant key columns and `processing_status` disappear
-entirely.
-
-**2. R2 has no built-in image resizing**, unlike Cloudflare Images or imgproxy.
-The ADR pairs "never local disk" with "generate variants ourselves", which is
-the combination that forces the queue. Worth noticing that the two halves of
-this ADR are independent decisions.
-
-**3. Nothing here says what happens to media when a university is
-deactivated**, or whether buckets are shared across tenants. Recommend a single
-bucket with tenant-prefixed keys (`{university_subdomain}/properties/{id}/...`)
-— per-tenant buckets multiply credentials and lifecycle rules for no isolation
-benefit, since the objects are public anyway.
+- **A worker process is now part of every environment.** docker-compose gains an
+  `rq-worker` service and a scheduler; production gains a second deployable.
+  A queue whose worker is not running fails silently — claims never auto-confirm
+  (ADR-004), documents are never deleted (ADR-003), and nothing errors. Monitor
+  queue depth and oldest-job age, not worker liveness alone.
+- **Jobs must be idempotent.** RQ will retry, and the retention job in
+  particular must tolerate the document already being gone.
+- **Two buckets means two sets of credentials** and two lifecycle policies. The
+  private bucket additionally needs its CDN binding explicitly *absent*; on
+  Cloudflare, an R2 bucket with a public custom domain attached is public
+  regardless of what `querystring_auth` says on our side. Verify this at
+  provisioning time, not by inspection of the Django settings.
+- **`default_storage` now points at the public bucket**, so any model field that
+  forgets to name `storages["documents"]` writes a private document to a public
+  place. Give the document model an explicit `storage=` argument and assert it
+  in a test.
+- **MinIO must model both buckets locally**, or the split is untested until
+  production. The compose bootstrap creates both.
+- **Orphaned objects remain a real problem.** Deleting a `UnitPhoto` row does
+  not delete the object; `django-cleanup` or a periodic reconciliation job is
+  needed, or the bucket accumulates files nothing references — invisibly,
+  because nothing lists them.
+- **Costs scale with content.** R2 storage is cheap and egress is free, but
+  neither is zero. Enforce a per-file limit (5 MB) and a per-unit photo count
+  (12) at the serializer, and reject non-image content by inspecting bytes
+  rather than the declared type.
+- **Nothing here says what happens to media when a university is deactivated.**
+  Recommend a single public bucket with tenant-prefixed keys
+  (`{university_subdomain}/properties/{id}/...`); per-tenant buckets multiply
+  credentials and lifecycle rules for no isolation benefit, since those objects
+  are public anyway.
 
 ## Alternatives considered
 
@@ -178,13 +234,19 @@ R2's zero-egress pricing removes it. Note the escape hatch is cheap — the same
 backend class, three different environment variables — so this is a reversible
 decision.
 
-### Cloudinary / imgkit — rejected as the primary store
+### Cloudflare Images / Cloudinary — considered, rejected
 
-Upload, transform and CDN in one service, with resizing on the fly. Genuinely
-attractive and it would remove the queue question. Rejected as the *store* of
-record because it means originals live in a proprietary service with an
-export cost; retained as a candidate *in front of* R2. Cloudflare Images is the
-same idea, closer to where the data already is.
+Upload, transform and CDN in one service, with resizing on the fly. This was the
+leading candidate at review, on the strength of removing the queue entirely.
+
+Rejected once the other ADR amendments made a queue mandatory for reasons
+unrelated to images (see the resolution above). With the queue arriving anyway,
+what remained was per-image vendor pricing on the platform's core asset and
+originals living in a service with an export cost. The trade stopped being
+worth it.
+
+Still the right answer if the variant pipeline turns out to be a maintenance
+burden in practice; it slots in behind the same `UnitPhoto` interface.
 
 ### Serving media through nginx from a shared volume — rejected
 

@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — no change to the decision; distance field split per ADR-002
 **Deciders:** Tech lead
 
 ## Context
@@ -29,7 +30,12 @@ its geometry field types, and a class of migration that is awkward to reverse.
 ## Decision
 
 **Plain `latitude` / `longitude` floats on `Property`, plus the precomputed
-`distance_km` in `PropertyCampusDistance` (ADR-002). No PostGIS.**
+`straight_line_km` in `PropertyCampusDistance` (ADR-002). No PostGIS.**
+
+The decision itself is unchanged on review. Two notes carried over from ADR-002:
+the distance column is now split into an always-present `straight_line_km` and
+nullable routed fields, and the equator division-by-zero in the draft's
+bounding-box maths is corrected below.
 
 The campus-proximity query — the one that matters — becomes an indexed range
 scan on a stored column with no geometry involved:
@@ -37,14 +43,14 @@ scan on a stored column with no geometry involved:
 ```python
 Property.objects.filter(
     campus_distances__university=university,
-    campus_distances__distance_km__lte=2.0,
-).order_by("campus_distances__distance_km")
+    campus_distances__straight_line_km__lte=2.0,
+).order_by("campus_distances__straight_line_km")
 ```
 
-with `Index(fields=["university", "distance_km"])` on the join table.
+with `Index(fields=["university", "straight_line_km"])` on the join table.
 
 `Property.latitude` / `longitude` are stored for two purposes: rendering a pin
-on a map, and computing `distance_km` when the property or a campus moves.
+on a map, and computing `straight_line_km` when the property or a campus moves.
 **They are not queried directly.**
 
 Where an ad-hoc radius search is genuinely needed, compute the bounding box
@@ -71,8 +77,8 @@ reason the exact geometry does not earn its keep here yet.
   faster than a spatial index would be for this access pattern, because the work
   was done at write time.
 - Any Postgres will do — including managed instances that do not offer PostGIS.
-- `distance_km` is a plain number, so it is trivially testable and reviewable.
-  Nobody has to reason about SRIDs.
+- `straight_line_km` is a plain number, so it is trivially testable and
+  reviewable. Nobody has to reason about SRIDs.
 
 ### What it costs us
 
@@ -146,7 +152,7 @@ knowing the exit cost.
    `annotate(distance=Distance("location", origin)).order_by("distance")`.
    With `geography=True`, distances are in metres on a spheroid and are correct
    without projection juggling.
-8. **`PropertyCampusDistance.distance_km` stays.** It becomes a cached
+8. **`PropertyCampusDistance.straight_line_km` stays.** It becomes a cached
    denormalisation rather than the source of truth — still the fastest way to
    serve the primary query, now with a way to verify it. Add a periodic
    consistency check comparing the stored value to `ST_Distance`.

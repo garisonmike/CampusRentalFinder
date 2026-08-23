@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — claim-with-timeout adopted; minimum-stay enforcement settled
 **Deciders:** Tech lead
 
 ## Context
@@ -26,14 +27,27 @@ representation of a stay.
 cannot exist without one.**
 
 ```
+TenancyClaim
+├── unit                    FK → Unit (PROTECT)
+├── claimant                FK → User (PROTECT) — the tenant
+├── start_date, end_date
+├── status                  pending | confirmed | disputed | withdrawn | expired
+├── confirmation_deadline   claimed_at + TENANCY_CONFIRMATION_WINDOW_DAYS
+├── resolved_by             FK → User, nullable
+├── resolved_at, dispute_reason
+└── created_at, updated_at
+
 Tenancy
-├── unit              FK → Unit (PROTECT)
-├── tenant            FK → User (PROTECT)
-├── confirmed_by      FK → User — the landlord or assigned caretaker
-├── start_date        DateField
-├── end_date          DateField, nullable while ongoing
-├── monthly_rent_kes  the agreed rent, for the record
-├── status            active | ended | disputed
+├── unit                 FK → Unit (PROTECT)
+├── tenant               FK → User (PROTECT)
+├── claim                FK → TenancyClaim (SET_NULL) — where it came from
+├── confirmation_source  landlord | caretaker | auto | admin
+├── confirmed_by         FK → User, NULL when confirmation_source is 'auto'
+├── confirmed_at
+├── start_date           DateField
+├── end_date             DateField, nullable while ongoing
+├── monthly_rent_kes     the agreed rent, for the record
+├── status               active | ended | disputed
 └── created_at, updated_at
 
 Review
@@ -51,7 +65,10 @@ The five rules, and where each is enforced:
 |---|---|
 | A review must reference a tenancy | `NOT NULL` FK — schema |
 | One review per tenancy | `OneToOneField` → `UNIQUE` — schema |
-| Minimum stay before reviewing | `CheckConstraint` on the tenancy's duration — schema |
+| Tenancy dates are ordered | `CheckConstraint` — schema |
+| No overlapping confirmed tenancy per unit | `ExclusionConstraint` — schema |
+| One open claim per user per unit | partial `UniqueConstraint` — schema |
+| Minimum stay before reviewing | one service function, threshold in settings — see below |
 | Reviews freeze after an edit window | `editable_until` + permission class — schema stores it, view enforces it |
 | A landlord may respond once | `ReviewResponse` with a `OneToOneField` to `Review` — schema |
 
@@ -74,8 +91,22 @@ class Meta:
             fields=["unit", "tenant", "start_date"],
             name="uniq_tenancy_per_unit_tenant_start",
         ),
+        ExclusionConstraint(
+            name="no_overlapping_confirmed_tenancy",
+            expressions=[
+                ("unit", RangeOperators.EQUAL),
+                (
+                    DateRange("start_date", "end_date", RangeBoundary()),
+                    RangeOperators.OVERLAPS,
+                ),
+            ],
+            condition=Q(status="active"),
+        ),
     ]
 ```
+
+The exclusion constraint needs the `btree_gist` extension, added by a migration
+with `django.contrib.postgres.operations.BtreeGistExtension`.
 
 and on `Review`:
 
@@ -85,12 +116,64 @@ models.CheckConstraint(
 )
 ```
 
-**A tenancy is created only by a landlord or an assigned caretaker confirming
-that a tenant moved in through the platform.** It is never self-served by the
-tenant.
+### Tenancy is claimed by the tenant and confirmed on a timeout
 
-**Minimum stay:** 30 days between `start_date` and the earlier of `end_date`
-and today, before a review may be written.
+The first draft of this decision had the landlord create the tenancy. Design
+review rejected that: it gives one party unilateral control over whether a
+review can exist. A landlord who notices that confirming move-ins produces
+one-star reviews simply stops confirming, and the properties in the worst
+condition end up with the cleanest profiles — an inversion of the exact signal
+students need. The mechanism was sound against *fake* reviews and weak against
+*missing* ones.
+
+**Resolved: claim-with-timeout, adopted in full.**
+
+1. **A tenant creates a `TenancyClaim`** against a specific unit, with claimed
+   `start_date` and `end_date`.
+2. **The landlord and every assigned caretaker are notified.** They have
+   `settings.TENANCY_CONFIRMATION_WINDOW_DAYS` (7) to confirm or dispute.
+3. **Silence auto-confirms**, via a scheduled job on the ADR-007 queue. This is
+   the whole point: landlord silence becomes a signal, not a veto.
+4. **A dispute freezes the claim** and opens a moderation entry for platform
+   admins. A disputed claim yields no review until it is resolved.
+5. **`Tenancy` records `confirmation_source` ∈ {landlord, caretaker, auto,
+   admin}** and the confirming actor. This is retained from the original design
+   — it costs one column and it is a genuinely useful trust signal later, both
+   for surfacing "this landlord confirms 12% of claims" and for spotting a
+   caretaker confirming implausible volumes.
+
+Because the tenant now initiates, caretaker confirmation power no longer lets
+any single actor manufacture a reviewer (see ADR-003).
+
+**Abuse controls**, since the initiating party has changed:
+
+- **One open claim per user per unit**, as a partial unique constraint.
+- **A per-user rate limit on claim creation.**
+- **Claims whose date range overlaps an existing confirmed tenancy for the same
+  unit are rejected at the database level**, using a PostgreSQL
+  `ExclusionConstraint` over `(unit, daterange(start_date, end_date))` with the
+  `btree_gist` extension. This is enforced in the schema rather than in a
+  serializer because a serializer cannot see a concurrent insert.
+
+### Minimum stay is a service function, not a constraint
+
+Design review was right that a 30-day minimum stay cannot be a
+`CheckConstraint`: Postgres cannot reference "today", so an *ongoing* tenancy's
+eligibility is not expressible there.
+
+**Resolved:**
+
+- The threshold lives in `settings.REVIEW_MINIMUM_STAY_DAYS`, so changing policy
+  is not a migration.
+- It is enforced in **one** well-named service function —
+  `assert_tenancy_is_reviewable(tenancy)` — that every path goes through: the
+  serializer, the admin, and any future endpoint. Tested directly, at the
+  boundary, rather than only through the API.
+- **Everything that can be a database constraint still must be.** One review per
+  tenancy (`OneToOneField` → `UNIQUE`), date ordering
+  (`end_date >= start_date`), the rating range, and the overlap exclusion above
+  are all schema-level. The service function covers only the one rule the
+  database genuinely cannot express.
 
 **Edit window:** 14 days from creation, stored in `editable_until`. After that
 the review is immutable — including to its author.
@@ -118,10 +201,9 @@ the review is immutable — including to its author.
   landlord-confirmed historical tenancies during onboarding; run a launch period
   where properties display "no reviews yet" honestly rather than hiding the
   section; recruit reviews from a handful of partner hostels first.
-- **Landlords control the gate.** A landlord who never confirms a tenancy never
-  receives a review. Since reviews carry reputational risk, the incentive runs
-  the wrong way for exactly the landlords a student most needs warning about.
-  See the flaw below — **this is the decision's central weakness.**
+- **Landlord friction remains, even though the veto is gone.** A landlord who
+  ignores every claim still adds seven days of latency to every review. The
+  timeout removes the incentive problem, not the delay.
 - **Extra friction in the happy path.** Somebody must remember to confirm the
   move-in. Every un-confirmed tenancy is a review that will never be written.
   Confirmation must be one tap from the enquiry thread, not a form buried in a
@@ -131,55 +213,57 @@ the review is immutable — including to its author.
   it — but it means account deletion needs an anonymisation path rather than a
   cascade, which has GDPR-shaped implications if the platform ever operates
   under one.
-- **Disputes need somewhere to go.** `status='disputed'` exists; the workflow
-  around it does not. Without one, a landlord who disputes a tenancy has no
-  recourse except support email.
+- **Disputes need a workflow, not just a status.** See the resolution
+  consequences below; this is now on the critical path rather than a loose end.
 
-### Flaws worth stating plainly
+### Consequences of the claim-with-timeout resolution
 
-**1. Landlord-controlled tenancy creation makes the review supply
-self-censoring — and it undercuts the point.**
+- **The suppression incentive is gone**, which was the point. Landlord silence
+  now produces a confirmed tenancy after seven days rather than a permanent
+  veto, so the only way to stop a review is an active dispute — which is
+  recorded, visible to moderators, and countable.
+- **The abuse surface moves to the tenant.** Someone can now claim a tenancy
+  they never had. The three controls above are what stand between that and a
+  fake review, and none is optional: the exclusion constraint in particular is
+  the only thing that stops two people claiming the same unit for the same
+  dates. Treat a regression in any of them as a security bug.
+- **Auto-confirmation depends on a scheduled job actually running.** If the
+  worker stops, claims sit in `pending` and no review is ever written — a silent
+  failure that looks like a quiet week. Alert on the count of claims past their
+  `confirmation_deadline` that are still pending, not on the job's own success.
+- **Disputes now need a moderation workflow**, and platform admins are the
+  bottleneck. A dispute queue nobody works blocks the reviews it touches
+  indefinitely. Surface queue age, and set an expectation for resolution time
+  before the feature ships.
+- **`confirmation_source` will skew towards `auto`** early on, while landlords
+  are unfamiliar with the flow. That is expected and not itself a signal; only
+  a *per-landlord* pattern is. Do not surface the raw distribution to students
+  until there is enough volume for it to mean something.
+- **Two records where there was one.** `TenancyClaim` and `Tenancy` both exist,
+  and the relationship between them must stay clear: the claim is the request,
+  the tenancy is the fact. Do not let code start reading claims where it means
+  tenancies.
 
-The mechanism is sound against *fake* reviews. It is weak against *missing*
-ones, and missing reviews are how a bad landlord stays unrated. A landlord who
-learns that confirming move-ins produces one-star reviews will simply stop
-confirming, and the properties with the worst conditions end up with the
-cleanest-looking profiles — the exact inversion of the signal students need.
+### Consequences of the minimum-stay resolution
 
-I do not think this invalidates the decision; a tenancy record is still the
-right anchor. But the decision as written gives one party unilateral control
-over the evidence, and that needs a counterweight. Options, in rough order of
-cost:
+- **One rule lives outside the database**, and that is a deliberate, documented
+  exception rather than a pattern to copy. Every other invariant here is a
+  constraint.
+- **`assert_tenancy_is_reviewable` is a chokepoint that must not be bypassed.**
+  Assert in a test that the review serializer calls it; a future endpoint that
+  forgets is exactly how this rule erodes.
+- Changing `REVIEW_MINIMUM_STAY_DAYS` retroactively changes who may review.
+  That is usually wanted, but it means the setting is policy, not configuration
+  — change it deliberately.
 
-- **Tenant-initiated with landlord confirmation, and a timeout.** The tenant
-  claims a tenancy; the landlord has 7 days to confirm or dispute; silence
-  auto-confirms. This keeps a landlord's *active* dispute meaningful while
-  removing the value of ignoring the request. It is the smallest change that
-  fixes the incentive.
-- **Publish the confirmation rate.** A property page showing "confirms 12% of
-  reported tenancies" makes non-confirmation itself a visible signal.
-- **Unverified reviews, clearly labelled and never counted in the average.**
-  Preserves ADR-004's integrity property for the headline number while giving
-  students somewhere to warn each other.
+### Still open, and not blocking
 
-**Recommendation: adopt the timeout variant.** It is a modest change to the
-schema (a `claimed_by` field, a `confirmation_deadline`, and a scheduled job)
-and it converts landlord silence from a veto into a signal. **This needs a
-decision before the schema rewrite starts** — retrofitting the claim/confirm
-flow after tenancies exist is materially harder than building it in.
-
-**2. A 30-day minimum stay is a policy number in a schema constraint.**
-`CheckConstraint` cannot reference "today", so the duration check can only
-constrain `end_date` against `start_date` — an *ongoing* tenancy's eligibility
-still has to be evaluated in application code. Expect the rule to live in two
-places, and test both. If the number changes later, a constraint change is a
-migration; keep the *policy* threshold in settings and let the constraint
-enforce only the invariant that cannot vary (`end_date >= start_date`).
-
-**3. One review per tenancy, but tenancies can be renewed.** A student who
-stays two academic years under two tenancy records gets two reviews of the same
-unit, which reads as inflated volume. Either treat a renewal as one continuing
-tenancy, or de-duplicate by `(unit, tenant)` when computing the average.
+- **One review per tenancy, but tenancies renew.** A student who stays two
+  academic years under two tenancy records gets two reviews of the same unit,
+  which reads as inflated volume. Either treat a renewal as one continuing
+  tenancy, or de-duplicate by `(unit, tenant)` when computing the average. This
+  can be decided when the aggregate rating is implemented; it does not affect
+  the schema.
 
 ## Alternatives considered
 

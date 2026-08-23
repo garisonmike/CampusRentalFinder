@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-23
+**Amended:** 2026-08-24 — gradient tokens rewritten to reference var(--primary)
 **Deciders:** Tech lead
 
 ## Context
@@ -135,12 +136,40 @@ our side prevents a determined brand guideline from doing it. **Semantics:**
 happens to be red must not have its delete buttons blend into its primary
 buttons.
 
-`--gradient-hero` and `--gradient-card` currently hard-code the green literally
-rather than referencing `--primary`. **They must be rewritten to
-`linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary-dark)) 100%)`
-as part of this work**, or the hero section will stay green on every tenant
-while everything around it rebrands. This is the one existing-CSS change the
-decision requires.
+### The two gradient tokens — RESOLVED
+
+Design review found that `--gradient-hero` and `--gradient-card` hard-code the
+stock green as a literal rather than referencing `--primary`:
+
+```css
+--gradient-hero: linear-gradient(135deg, hsl(142 71% 45%) 0%, hsl(142 71% 35%) 100%);
+--gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(142 71% 98%) 100%);
+```
+
+Left as they are, the hero section and card backgrounds would stay green on
+every tenant while everything around them rebranded — the most visible surface
+on the page being the one that ignores the university's colour.
+
+**Resolved: both are rewritten to reference the token.**
+
+```css
+--gradient-hero: linear-gradient(
+  135deg,
+  hsl(var(--primary)) 0%,
+  hsl(var(--primary-dark)) 100%
+);
+--gradient-card: linear-gradient(
+  180deg,
+  hsl(var(--card)) 0%,
+  hsl(var(--primary) / 0.04) 100%
+);
+```
+
+`--gradient-card` uses `--card` for its start rather than a literal white, so it
+also survives dark mode, and the primary tint is applied at 4% opacity through
+the slash syntax that space-separated HSL components make possible. This is the
+one change to existing CSS the decision requires, and it is what makes the
+opacity modifier worth insisting on in the storage format.
 
 ### Dark mode
 
@@ -185,7 +214,7 @@ dark theme (raising L by ~5 points, as the stock palette already does: light
   to the favicon, so mobile browser chrome and the tab icon need separate
   handling from the same config payload.
 
-### A flaw worth stating plainly
+### Open, and not blocking: three colours may not satisfy a brand team
 
 **Three colours is probably not enough to make a university's brand team say
 yes.** Institutional identity usually involves a specific typeface, a logo with
