@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { getErrorMessage } from '@/lib/errors';
 import { rentalsApi, reviewsApi } from '@/services/api';
 import { useAuthStore } from '@/store/authStore';
 import type { Rental, Review } from '@/types';
@@ -70,8 +71,8 @@ const RentalDetailPage = () => {
       setRating(5);
       toast.success('Review submitted successfully!');
       loadRental();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to submit review');
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Failed to submit review'));
     } finally {
       setIsSubmitting(false);
     }

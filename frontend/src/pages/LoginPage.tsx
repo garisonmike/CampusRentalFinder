@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getErrorMessage } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 import { Building2 } from 'lucide-react';
 import { useState } from 'react';
@@ -20,11 +21,8 @@ const LoginPage = () => {
     try {
       await login({ email, password });
       navigate('/dashboard');
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message ||
-        error.response?.data?.detail ||
-        'Login failed. Please check your credentials.';
-      setFormError(errorMessage);
+    } catch (error: unknown) {
+      setFormError(getErrorMessage(error, 'Login failed. Please check your credentials.'));
     }
   };
 

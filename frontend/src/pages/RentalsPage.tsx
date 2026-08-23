@@ -27,7 +27,7 @@ const RentalsPage = () => {
   const loadRentals = async () => {
     try {
       setIsLoading(true);
-      const params: any = {};
+      const params: Parameters<typeof rentalsApi.getAll>[0] = {};
       if (searchQuery) params.search = searchQuery;
       if (city) params.city = city;
       if (minPrice) params.min_price = parseInt(minPrice);

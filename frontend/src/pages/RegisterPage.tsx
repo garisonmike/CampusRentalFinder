@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { getErrorMessage } from '@/lib/errors';
 import { useAuthStore } from '@/store/authStore';
 import { Building2 } from 'lucide-react';
 import { useState } from 'react';
@@ -40,11 +41,8 @@ const RegisterPage = () => {
         phone_number: phoneNumber
       });
       navigate('/dashboard');
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message ||
-        error.response?.data?.detail ||
-        'Registration failed. Please try again.';
-      setFormError(errorMessage);
+    } catch (error: unknown) {
+      setFormError(getErrorMessage(error, 'Registration failed. Please try again.'));
     }
   };
 

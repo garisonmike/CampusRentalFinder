@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import RentalCard from '@/components/RentalCard';
 import { Card, CardContent } from '@/components/ui/card';
+import type { Rental } from '@/types';
 import { Heart } from 'lucide-react';
 
 const FavoritesPage = () => {
   // This would normally fetch from an API
-  const [favorites] = useState([]);
+  const [favorites] = useState<Rental[]>([]);
 
   return (
     <div className="min-h-screen py-8">
@@ -27,7 +28,7 @@ const FavoritesPage = () => {
           </Card>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {favorites.map((rental: any) => (
+            {favorites.map((rental) => (
               <RentalCard key={rental.id} rental={rental} />
             ))}
           </div>

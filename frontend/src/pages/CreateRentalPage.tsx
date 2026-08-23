@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getErrorMessage } from '@/lib/errors';
 import { rentalsApi } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -42,8 +43,8 @@ const CreateRentalPage = () => {
       await rentalsApi.create(formDataObj);
       toast.success('Rental created successfully!');
       navigate('/dashboard');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to create rental');
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Failed to create rental'));
     } finally {
       setIsLoading(false);
     }

@@ -1,4 +1,5 @@
 // src/store/authStore.ts
+import { getErrorMessage } from "@/lib/errors";
 import { authApi, profileApi } from "@/services/api";
 import type { LoginCredentials, RegisterData, User } from "@/types";
 import { toast } from "sonner";
@@ -29,14 +30,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       set({ user, isAuthenticated: true, isLoading: false });
       toast.success("Welcome back!");
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({ isLoading: false });
-      const errorMessage =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        JSON.stringify(error.response?.data) ||
-        "Login failed. Please try again.";
-      toast.error(errorMessage);
+      toast.error(getErrorMessage(error, "Login failed. Please try again."));
       throw error;
     }
   },
@@ -51,14 +47,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       set({ user, isAuthenticated: true, isLoading: false });
       toast.success("Account created successfully!");
-    } catch (error: any) {
+    } catch (error: unknown) {
       set({ isLoading: false });
-      const errorMessage =
-        error.response?.data?.message ||
-        error.response?.data?.detail ||
-        JSON.stringify(error.response?.data) ||
-        "Registration failed. Please try again.";
-      toast.error(errorMessage);
+      toast.error(getErrorMessage(error, "Registration failed. Please try again."));
       throw error;
     }
   },
@@ -70,7 +61,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         // ✅ now we send refresh token
         await authApi.logout({ refresh });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Logout error:", error);
       toast.error("Logout failed, but tokens cleared locally.");
     } finally {
