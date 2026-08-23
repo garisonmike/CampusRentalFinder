@@ -115,6 +115,9 @@ ehthumbs.db
 desktop.ini
 
 # ---------------------------------------------------------------------------
-# Local-only assistant scratch file; the shared guide is docs/ENGINEERING.md
+# Local-only editor scratch files. The shared guide is docs/ENGINEERING.md.
 # ---------------------------------------------------------------------------
 CLAUDE.md
+AGENTS.md
+.cursorrules
+.aider*
