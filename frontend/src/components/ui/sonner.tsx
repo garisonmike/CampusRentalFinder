@@ -1,14 +1,19 @@
-import { useTheme } from "next-themes";
 import { Toaster as Sonner, toast } from "sonner";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
-const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
-
+/**
+ * Toast host.
+ *
+ * The shadcn original read the theme from next-themes, which this project no
+ * longer uses. Sonner's own "system" setting follows prefers-color-scheme
+ * directly, which is what the stylesheet does too.
+ */
+export function Toaster(props: ToasterProps) {
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="system"
+      position="top-right"
       className="toaster group"
       toastOptions={{
         classNames: {
@@ -22,6 +27,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
       {...props}
     />
   );
-};
+}
 
-export { Toaster, toast };
+export { toast };

@@ -1,0 +1,48 @@
+import { lazy } from "react";
+import { Route, Routes } from "react-router-dom";
+
+import { AuthGuard, RoleGuard } from "@/app/guards";
+import { RootLayout } from "@/app/layout/RootLayout";
+
+// Route-level code splitting. Each route is its own chunk, so the initial
+// bundle carries the shell and nothing else.
+const HomeRoute = lazy(() => import("@/app/routes/HomeRoute"));
+const ListingsRoute = lazy(() => import("@/app/routes/ListingsRoute"));
+const LoginRoute = lazy(() => import("@/app/routes/LoginRoute"));
+const DashboardRoute = lazy(() => import("@/app/routes/DashboardRoute"));
+const AdminRoute = lazy(() => import("@/app/routes/AdminRoute"));
+const ForbiddenRoute = lazy(() => import("@/app/routes/ForbiddenRoute"));
+const NotFoundRoute = lazy(() => import("@/app/routes/NotFoundRoute"));
+
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route element={<RootLayout />}>
+        <Route index element={<HomeRoute />} />
+        <Route path="listings" element={<ListingsRoute />} />
+        <Route path="login" element={<LoginRoute />} />
+
+        <Route
+          path="dashboard"
+          element={
+            <AuthGuard>
+              <DashboardRoute />
+            </AuthGuard>
+          }
+        />
+
+        <Route
+          path="admin"
+          element={
+            <RoleGuard roles={["staff"]}>
+              <AdminRoute />
+            </RoleGuard>
+          }
+        />
+
+        <Route path="forbidden" element={<ForbiddenRoute />} />
+        <Route path="*" element={<NotFoundRoute />} />
+      </Route>
+    </Routes>
+  );
+}

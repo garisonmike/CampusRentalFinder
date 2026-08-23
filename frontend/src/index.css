@@ -2,9 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Design tokens.
+ *
+ * Every colour is a space-separated HSL triple with no hsl() wrapper, which is
+ * what lets `hsl(var(--primary) / 0.5)` work for opacity variants and what
+ * lets the tenant theme provider write these values straight from the API.
+ *
+ * NOTE: --primary, --secondary, --accent and their derived tokens are
+ * overwritten at runtime as inline styles on :root by TenantThemeProvider
+ * (ADR-005). The values below are the neutral defaults used before the tenant
+ * config resolves, and when there is no tenant. If a colour in the browser
+ * does not match this file, that is why.
+ */
 
 @layer base {
   :root {
@@ -41,8 +50,18 @@ All colors MUST be HSL.
     /* Custom tokens */
     --primary-light: 142 71% 55%;
     --primary-dark: 142 71% 35%;
-    --gradient-hero: linear-gradient(135deg, hsl(142 71% 45%) 0%, hsl(142 71% 35%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(142 71% 98%) 100%);
+    /* ADR-005: these reference the token rather than a literal, so they
+       rebrand with --primary instead of staying green on every tenant. */
+    --gradient-hero: linear-gradient(
+      135deg,
+      hsl(var(--primary)) 0%,
+      hsl(var(--primary-dark)) 100%
+    );
+    --gradient-card: linear-gradient(
+      180deg,
+      hsl(var(--card)) 0%,
+      hsl(var(--primary) / 0.04) 100%
+    );
     --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.05);
     --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.1);
     --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.1);
