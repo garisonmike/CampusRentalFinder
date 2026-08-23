@@ -20,21 +20,19 @@ from .views import (
 
 # Create router for viewsets
 router = DefaultRouter()
-router.register(r'properties', RentalViewSet, basename='rentals')
-router.register(r'images', RentalImageViewSet, basename='rental-images')
-router.register(r'inquiries', RentalInquiryViewSet, basename='rental-inquiries')
-router.register(r'admin/properties', AdminRentalViewSet, basename='admin-rentals')
+router.register(r"properties", RentalViewSet, basename="rentals")
+router.register(r"images", RentalImageViewSet, basename="rental-images")
+router.register(r"inquiries", RentalInquiryViewSet, basename="rental-inquiries")
+router.register(r"admin/properties", AdminRentalViewSet, basename="admin-rentals")
 
-app_name = 'rentals'
+app_name = "rentals"
 
 urlpatterns = [
     # Featured and recent rentals (public endpoints)
-    path('featured/', featured_rentals, name='featured-rentals'),
-    path('recent/', recent_rentals, name='recent-rentals'),
-    
+    path("featured/", featured_rentals, name="featured-rentals"),
+    path("recent/", recent_rentals, name="recent-rentals"),
     # Admin statistics
-    path('admin/statistics/', rental_statistics, name='rental-statistics'),
-    
+    path("admin/statistics/", rental_statistics, name="rental-statistics"),
     # Include router URLs
-    path('', include(router.urls)),
+    path("", include(router.urls)),
 ]
