@@ -1,0 +1,4 @@
+# Deployed environments. Includes everything in base, plus the WSGI server.
+-r base.txt
+
+gunicorn==23.0.0

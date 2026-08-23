@@ -1,0 +1,22 @@
+# Local development and CI. Includes everything in base.
+-r base.txt
+
+# --- Testing ---------------------------------------------------------------
+pytest==8.4.2
+pytest-django==4.11.1
+pytest-cov==7.0.0
+factory_boy==3.3.3
+Faker==37.12.0
+
+# --- Linting, formatting, typing -------------------------------------------
+# ruff replaces black + isort + flake8; all three are intentionally absent.
+ruff==0.14.4
+mypy==1.18.2
+django-stubs[compatible-mypy]==5.2.7
+djangorestframework-stubs==3.16.5
+
+# --- Git hooks -------------------------------------------------------------
+pre-commit==4.4.0
+
+# --- Developer conveniences ------------------------------------------------
+django-extensions==4.1

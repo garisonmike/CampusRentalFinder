@@ -1,0 +1,38 @@
+# Runtime dependencies. Every version is pinned exactly; upgrade deliberately.
+#
+# NOTE: Django was moved from 4.2.7 to the 5.2 LTS line during the baseline
+# hardening pass. 4.2.x does not support Python 3.13 and psycopg2-binary 2.9.9
+# has no 3.13 wheel, so the old pins could not be installed at all. See
+# docs/AUDIT.md, "Dependency review".
+
+# --- Framework -------------------------------------------------------------
+Django==5.2.17
+djangorestframework==3.16.1
+
+# --- Database --------------------------------------------------------------
+# psycopg 3 is the supported driver for Django 5.x and has cp313 wheels.
+psycopg[binary]==3.2.12
+dj-database-url==3.0.1
+
+# --- Authentication --------------------------------------------------------
+djangorestframework-simplejwt==5.5.1
+
+# --- API surface -----------------------------------------------------------
+django-cors-headers==4.9.0
+django-filter==25.2
+drf-spectacular==0.28.0
+
+# --- Media -----------------------------------------------------------------
+Pillow==12.0.0
+
+# --- Configuration ---------------------------------------------------------
+python-decouple==3.8
+
+# --- Caching / queues ------------------------------------------------------
+redis==6.4.0
+
+# --- Observability ---------------------------------------------------------
+structlog==25.5.0
+
+# --- Static files ----------------------------------------------------------
+whitenoise==6.11.0
