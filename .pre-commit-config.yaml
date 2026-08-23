@@ -1,0 +1,61 @@
+# Run `pre-commit install` once after cloning.
+# Hooks run against the backend; the frontend is covered by its own npm scripts
+# and by the CI workflow.
+default_language_version:
+  python: python3.13
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # ruff replaces black + isort + flake8. Lint first, then format.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: ["--fix", "--exit-non-zero-on-fix"]
+        files: ^backend/
+      - id: ruff-format
+        name: ruff (format)
+        files: ^backend/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        files: ^backend/
+        args: ["--config-file=backend/pyproject.toml"]
+        additional_dependencies:
+          - django-stubs[compatible-mypy]==5.2.7
+          - djangorestframework-stubs==3.16.5
+          - django==5.2.17
+          - djangorestframework==3.16.1
+          - drf-spectacular==0.28.0
+          - structlog==25.5.0
+          - types-redis
+
+  - repo: local
+    hooks:
+      # Catches the classic "changed a model, forgot makemigrations" commit.
+      # Runs without a database: --check --dry-run only needs the model state.
+      - id: django-missing-migrations
+        name: django makemigrations --check
+        entry: python backend/manage.py makemigrations --check --dry-run
+        language: system
+        pass_filenames: false
+        files: ^backend/.*/models\.py$
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          PYTHONPATH: backend

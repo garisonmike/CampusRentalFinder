@@ -5,6 +5,82 @@ description = "Backend for CampusRentalFinder, a multi-university student rental
 requires-python = ">=3.13"
 
 # --------------------------------------------------------------------------
+# Ruff -- replaces black, isort and flake8
+# --------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["*/migrations/*", ".venv", "staticfiles", "media"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "DJ",   # flake8-django
+    "S",    # flake8-bandit
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "B008",    # function call in default argument -- common and safe in DRF
+    "RUF012",  # ClassVar annotations on Django/DRF class attributes add noise
+    "DJ001",   # null=True on CharField -- present in the legacy models, to be
+               # resolved by the schema rewrite rather than a blanket edit now
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",    # assert is the point of a test
+    "S105",    # hard-coded test passwords
+    "S106",
+    "ARG",
+]
+"*/settings/*" = ["F403", "F405"]  # star imports are the settings-split idiom
+"config/settings/test.py" = ["S105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["accounts", "config", "rentals", "reviews", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# --------------------------------------------------------------------------
+# mypy -- non-strict; the goal is to catch obvious mistakes, not to gate work
+# --------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+ignore_missing_imports = true
+follow_imports = "normal"
+warn_redundant_casts = true
+warn_unused_ignores = false
+warn_return_any = false
+check_untyped_defs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+no_implicit_optional = true
+show_error_codes = true
+exclude = ['migrations/', '\.venv/']
+
+[[tool.mypy.overrides]]
+module = ["*.migrations.*"]
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+# --------------------------------------------------------------------------
 # pytest
 # --------------------------------------------------------------------------
 
