@@ -4,13 +4,14 @@ Rental models for the rental platform.
 This module contains models for rental properties, images, and related functionality.
 """
 
-from django.db import models
-from django.conf import settings
-from django.core.validators import MinValueValidator, MaxValueValidator
-from django.utils.translation import gettext_lazy as _
-from django.urls import reverse
-import uuid
 import os
+import uuid
+
+from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 
 
 def rental_image_upload_path(instance, filename):
@@ -260,6 +261,18 @@ class Rental(models.Model):
         """String representation of the rental."""
         return f"{self.title} - ${self.price}/month"
 
+    def save(self, *args, **kwargs):
+        """Override save method for custom validation."""
+        # Validate lease duration
+        if self.lease_duration_max and self.lease_duration_max < self.lease_duration_min:
+            raise ValueError(_("Maximum lease duration cannot be less than minimum"))
+
+        # Set default contact info if not provided
+        if not self.contact_email:
+            self.contact_email = self.landlord.email
+
+        super().save(*args, **kwargs)
+
     def get_absolute_url(self):
         """Get the absolute URL for this rental."""
         return reverse("rentals:detail", kwargs={"pk": self.pk})
@@ -301,18 +314,6 @@ class Rental(models.Model):
     def get_contact_phone(self):
         """Get contact phone, fallback to landlord phone."""
         return self.contact_phone or self.landlord.phone_number
-
-    def save(self, *args, **kwargs):
-        """Override save method for custom validation."""
-        # Validate lease duration
-        if self.lease_duration_max and self.lease_duration_max < self.lease_duration_min:
-            raise ValueError(_("Maximum lease duration cannot be less than minimum"))
-
-        # Set default contact info if not provided
-        if not self.contact_email:
-            self.contact_email = self.landlord.email
-
-        super().save(*args, **kwargs)
 
 
 class RentalImage(models.Model):

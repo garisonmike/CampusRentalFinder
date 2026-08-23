@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
@@ -6,16 +6,16 @@ from rest_framework_simplejwt.views import (
 )
 
 from .views import (
-    UserRegistrationView,
+    AdminUserViewSet,
+    PasswordChangeView,
     UserLoginView,
     UserLogoutView,
-    UserProfileView,
-    PasswordChangeView,
     UserProfilePreferencesView,
+    UserProfileView,
+    UserRegistrationView,
     current_user,
-    verify_user,
     user_statistics,
-    AdminUserViewSet,
+    verify_user,
 )
 
 # Router for admin viewset

@@ -5,18 +5,18 @@ This module defines URL patterns for review management,
 helpfulness voting, reporting, and admin operations.
 """
 
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    ReviewViewSet,
-    LandlordResponseView,
-    AdminReviewViewSet,
     AdminReviewReportViewSet,
-    rental_reviews,
-    rental_review_statistics,
-    review_statistics,
+    AdminReviewViewSet,
+    LandlordResponseView,
+    ReviewViewSet,
     recent_reviews,
+    rental_review_statistics,
+    rental_reviews,
+    review_statistics,
     top_rated_reviews,
 )
 

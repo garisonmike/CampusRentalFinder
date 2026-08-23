@@ -5,29 +5,28 @@ This module contains views for user authentication, registration,
 profile management, and admin operations.
 """
 
-from rest_framework import status, permissions
-from rest_framework.decorators import api_view, permission_classes, action
+from django.contrib.auth import update_session_auth_hash
+from django.utils.translation import gettext_lazy as _
+from drf_spectacular.openapi import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import status
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
-from django.contrib.auth import update_session_auth_hash
-from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-from drf_spectacular.openapi import OpenApiTypes
 
 from .models import User, UserProfile
 from .serializers import (
-    UserRegistrationSerializer,
-    UserLoginSerializer,
-    UserSerializer,
-    UserDetailSerializer,
-    UserUpdateSerializer,
-    PasswordChangeSerializer,
-    UserProfileUpdateSerializer,
     AdminUserSerializer,
+    PasswordChangeSerializer,
+    UserDetailSerializer,
+    UserLoginSerializer,
+    UserProfileUpdateSerializer,
+    UserRegistrationSerializer,
+    UserSerializer,
+    UserUpdateSerializer,
 )
 
 
@@ -144,7 +143,7 @@ class UserLogoutView(APIView):
             return Response({"error": _("Invalid token")}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# (⚡ everything else stays exactly as in your file – no changes made to profile, password, admin, etc.)
+# NOTE: profile, password and admin views below are unchanged from the first draft.
 
 
 class UserProfileView(APIView):

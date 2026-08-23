@@ -5,11 +5,12 @@ This module contains serializers for user authentication, registration,
 and profile management operations.
 """
 
-from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
+
 from .models import User, UserProfile
 
 
@@ -65,7 +66,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         try:
             validate_password(value)
         except ValidationError as e:
-            raise serializers.ValidationError(e.messages)
+            raise serializers.ValidationError(e.messages) from e
         return value
 
     def validate(self, data):
@@ -274,10 +275,12 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     def validate_phone_number(self, value):
         """Validate phone number format."""
-        if value and not value.startswith("+"):
-            # Add basic format validation
-            if len(value.replace(" ", "").replace("-", "")) < 10:
-                raise serializers.ValidationError(_("Phone number must be at least 10 digits."))
+        if (
+            value
+            and not value.startswith("+")
+            and len(value.replace(" ", "").replace("-", "")) < 10
+        ):
+            raise serializers.ValidationError(_("Phone number must be at least 10 digits."))
         return value
 
 
@@ -317,7 +320,7 @@ class PasswordChangeSerializer(serializers.Serializer):
         try:
             validate_password(value, user=self.context["request"].user)
         except ValidationError as e:
-            raise serializers.ValidationError(e.messages)
+            raise serializers.ValidationError(e.messages) from e
         return value
 
     def validate(self, data):

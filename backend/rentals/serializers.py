@@ -4,12 +4,13 @@ Serializers for the rentals app.
 This module contains serializers for rental properties, images, and related operations.
 """
 
-from rest_framework import serializers
-from django.utils.translation import gettext_lazy as _
-from django.contrib.auth import get_user_model
 from datetime import date
 
-from .models import Rental, RentalImage, RentalFavorite, RentalInquiry
+from django.contrib.auth import get_user_model
+from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
+
+from .models import Rental, RentalFavorite, RentalImage, RentalInquiry
 
 User = get_user_model()
 
@@ -412,7 +413,7 @@ class RentalInquirySerializer(serializers.ModelSerializer):
     Serializer for rental inquiries.
     """
 
-    tenant = serializers.StringRelatedField(read_only=True)
+    tenant: serializers.StringRelatedField = serializers.StringRelatedField(read_only=True)
     rental_title = serializers.CharField(source="rental.title", read_only=True)
 
     class Meta:
@@ -586,11 +587,10 @@ class RentalSearchSerializer(serializers.Serializer):
         longitude = data.get("longitude")
         radius = data.get("radius")
 
-        if any([latitude, longitude, radius]):
-            if not all([latitude, longitude, radius]):
-                raise serializers.ValidationError(
-                    _("Latitude, longitude, and radius are all required for location-based search.")
-                )
+        if any([latitude, longitude, radius]) and not all([latitude, longitude, radius]):
+            raise serializers.ValidationError(
+                _("Latitude, longitude, and radius are all required for location-based search.")
+            )
 
         return data
 

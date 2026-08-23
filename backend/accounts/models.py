@@ -6,8 +6,10 @@ to support different user types (tenant, landlord, admin).
 """
 
 from django.contrib.auth.models import AbstractUser
-from django.db import models
 from django.core.validators import RegexValidator
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
 
@@ -220,11 +222,7 @@ class UserProfile(models.Model):
         return f"Profile for {self.user.get_full_name()}"
 
 
-# Signal to create UserProfile automatically
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-
-
+# Signals keeping UserProfile in step with User.
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     """Create UserProfile when User is created."""

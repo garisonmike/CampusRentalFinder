@@ -4,11 +4,13 @@ Review models for the rental platform.
 This module contains models for rental property reviews and ratings.
 """
 
-from django.db import models
 from django.conf import settings
-from django.core.validators import MinValueValidator, MaxValueValidator
-from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+from django.utils.translation import gettext_lazy as _
 
 
 class Review(models.Model):
@@ -194,16 +196,22 @@ class Review(models.Model):
         """String representation of the review."""
         return f"Review by {self.tenant.get_full_name()} for {self.rental.title} - {self.rating}★"
 
+    def save(self, *args, **kwargs):
+        """Override save method for custom operations."""
+        # Auto-generate title if not provided
+        if not self.title:
+            rating_text = dict(self.RATING_CHOICES)[self.rating]
+            self.title = f"{rating_text} experience"
+
+        super().save(*args, **kwargs)
+
     def clean(self):
         """Custom validation."""
         super().clean()
 
         # Validate move-out date is after move-in date
-        if self.move_in_date and self.move_out_date:
-            if self.move_out_date <= self.move_in_date:
-                raise ValidationError(
-                    {"move_out_date": _("Move-out date must be after move-in date.")}
-                )
+        if self.move_in_date and self.move_out_date and self.move_out_date <= self.move_in_date:
+            raise ValidationError({"move_out_date": _("Move-out date must be after move-in date.")})
 
         # Ensure tenant can only review each property once
         if self.pk is None:  # New review
@@ -226,15 +234,6 @@ class Review(models.Model):
         if self.total_votes > 0:
             return round((self.helpful_votes / self.total_votes) * 100, 1)
         return 0
-
-    def save(self, *args, **kwargs):
-        """Override save method for custom operations."""
-        # Auto-generate title if not provided
-        if not self.title:
-            rating_text = dict(self.RATING_CHOICES)[self.rating]
-            self.title = f"{rating_text} experience"
-
-        super().save(*args, **kwargs)
 
 
 class ReviewHelpfulness(models.Model):
@@ -347,11 +346,7 @@ class ReviewReport(models.Model):
         return f"Report by {self.reporter.get_full_name()} for review #{self.review.id}"
 
 
-# Signal handlers for maintaining review statistics
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
-
-
+# Signal handlers maintaining the denormalised helpfulness counters.
 @receiver(post_save, sender=ReviewHelpfulness)
 def update_review_helpfulness_on_save(sender, instance, created, **kwargs):
     """Update review helpfulness counts when a vote is saved."""

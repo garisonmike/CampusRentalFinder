@@ -4,31 +4,34 @@ Views for the reviews app.
 This module contains views for review management, helpfulness voting, and reporting.
 """
 
-from rest_framework import status, permissions, filters
-from rest_framework.decorators import api_view, permission_classes, action
+import contextlib
+from datetime import datetime, timedelta
+
+from django.db.models import Avg, Count, Q
+from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
+from drf_spectacular.openapi import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import filters, permissions, status
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
-from django.db.models import Q, Avg, Count, F
-from django.utils.translation import gettext_lazy as _
-from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-from drf_spectacular.openapi import OpenApiTypes
-from datetime import date, datetime, timedelta
 
 from rentals.models import Rental
-from .models import Review, ReviewHelpfulness, ReviewReport
+
+from .models import Review, ReviewReport
 from .serializers import (
-    ReviewListSerializer,
-    ReviewDetailSerializer,
-    ReviewCreateSerializer,
-    ReviewUpdateSerializer,
-    LandlordResponseSerializer,
-    ReviewHelpfulnessSerializer,
-    ReviewReportSerializer,
-    AdminReviewSerializer,
     AdminReviewReportSerializer,
+    AdminReviewSerializer,
+    LandlordResponseSerializer,
+    ReviewCreateSerializer,
+    ReviewDetailSerializer,
+    ReviewHelpfulnessSerializer,
+    ReviewListSerializer,
+    ReviewReportSerializer,
+    ReviewUpdateSerializer,
 )
 
 
@@ -92,17 +95,13 @@ class ReviewViewSet(ModelViewSet):
         # Filter by rating
         min_rating = self.request.query_params.get("min_rating")
         if min_rating:
-            try:
+            with contextlib.suppress(ValueError):
                 queryset = queryset.filter(rating__gte=int(min_rating))
-            except ValueError:
-                pass
 
         max_rating = self.request.query_params.get("max_rating")
         if max_rating:
-            try:
+            with contextlib.suppress(ValueError):
                 queryset = queryset.filter(rating__lte=int(max_rating))
-            except ValueError:
-                pass
 
         # Filter by verification status
         verified_only = self.request.query_params.get("verified_only")

@@ -5,31 +5,30 @@ This module contains views for rental property management, search,
 favorites, and inquiries.
 """
 
-from rest_framework import status, permissions, filters
-from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
-from django.db.models import Q, Avg, Count, F
-from django.utils.translation import gettext_lazy as _
-from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-from drf_spectacular.openapi import OpenApiTypes
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
-from .models import Rental, RentalImage, RentalFavorite, RentalInquiry
+from django.db.models import Avg, Count, Q
+from django.utils.translation import gettext_lazy as _
+from drf_spectacular.openapi import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import filters, permissions, status
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
+
+from .models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from .serializers import (
-    RentalListSerializer,
-    RentalDetailSerializer,
-    RentalCreateSerializer,
-    RentalUpdateSerializer,
-    RentalImageSerializer,
-    RentalFavoriteSerializer,
-    RentalInquirySerializer,
-    RentalInquiryReplySerializer,
-    RentalSearchSerializer,
     AdminRentalSerializer,
+    RentalCreateSerializer,
+    RentalDetailSerializer,
+    RentalFavoriteSerializer,
+    RentalImageSerializer,
+    RentalInquiryReplySerializer,
+    RentalInquirySerializer,
+    RentalListSerializer,
+    RentalSearchSerializer,
+    RentalUpdateSerializer,
 )
 
 
@@ -484,7 +483,6 @@ def recent_rentals(request):
 @permission_classes([IsAdminUser])
 def rental_statistics(request):
     """Get rental statistics for admin dashboard."""
-    from django.db.models import Avg, Count
 
     stats = {
         "total_rentals": Rental.objects.count(),
