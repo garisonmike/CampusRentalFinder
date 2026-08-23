@@ -2,6 +2,7 @@
 
 **Status:** Proposed — the schema rewrite implements this.
 **Date:** 2026-08-23
+**Updated:** 2026-08-24 — reflects the ADR amendments of the same date
 
 This is the target schema described in ADR-001 through ADR-007. It is not what
 the code contains today; `docs/AUDIT.md` §2 describes that.
@@ -37,15 +38,23 @@ actually exist around a Kenyan campus.
 | `slug` | `SlugField(50)` | unique |
 | `subdomain` | `CharField(63)` | unique, indexed. `kyu` → `kyu.example.co.ke` |
 | `domain` | `CharField(255)` | `ku.ac.ke` |
-| `email_domains` | `ArrayField(CharField(255))` | `["students.ku.ac.ke", "ku.ac.ke"]` — student verification (ADR-003) |
 | `county` | `CharField(50)` | `choices=KENYAN_COUNTIES`, 47 entries |
 | `town` | `CharField(100)` | "Nairobi", "Juja", "Eldoret" |
-| `logo_url` | `URLField` | on the media CDN (ADR-007) |
+| `logo_url` | `URLField` | public media bucket (ADR-007) |
 | `favicon_url` | `URLField` | blank |
 | `primary_hsl` | `CharField(32)` | `"142 71% 45%"` — validated (ADR-005) |
 | `secondary_hsl` | `CharField(32)` | |
 | `accent_hsl` | `CharField(32)` | |
+| `verification_methods_enabled` | `ArrayField(CharField(24))` | subset of `{email_domain, student_id_upload}`; **may be empty** |
+| `student_email_domains` | `ArrayField(CharField(255))` | `["s.kyu.ac.ke"]` |
+| `verification_required_to_review` | `BooleanField` | default **`False`** |
+| `verification_required_to_signup` | `BooleanField` | default **`False`** |
+| `id_review_retention_days` | `PositiveSmallIntegerField` | default **7** (ADR-003) |
 | `is_active` | `BooleanField` | default `True` |
+
+Verification is a per-university policy chosen at onboarding and changeable
+without a deploy (ADR-003). By default it is off, and it earns a badge rather
+than gating anything.
 
 **Constraints / indexes**
 
@@ -54,6 +63,9 @@ actually exist around a Kenyan campus.
   tenancy middleware, so it must be covering
 - `CheckConstraint` on each `*_hsl` field matching
   `^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$`
+- `CheckConstraint` — `id_review_retention_days` between 1 and 90
+- `CheckConstraint` — `verification_required_to_signup` may not be true while
+  `verification_methods_enabled` is empty; that combination locks everyone out
 
 ### `Campus`
 
@@ -131,9 +143,18 @@ landlord.
 | `revoked_at` | `DateTimeField` | null |
 | `revoked_by` | FK → `User` | `SET_NULL` |
 
-`permissions` values: `manage_vacancy`, `manage_photos`, `respond_inquiries`,
-`confirm_tenancy`. **Not** `change_price`, `delete_property` or
-`grant_assignments` — see ADR-003's second flagged flaw, which is still open.
+`permissions` values, fixed by ADR-003 and validated against an enum on write:
+
+`manage_units`, `manage_vacancy`, `manage_photos`, `set_availability`,
+`resolve_tenancy_claims`, `respond_inquiries`.
+
+Explicitly **not** available to a caretaker: deleting a property, transferring
+ownership, creating or revoking assignments, editing the landlord profile or
+any payout field, and posting a `ReviewResponse`.
+
+`resolve_tenancy_claims` is safe to grant because the tenant initiates the
+claim (ADR-004), so confirming is acknowledging someone else's assertion rather
+than creating a record from nothing.
 
 **Constraints / indexes**
 
@@ -141,16 +162,40 @@ landlord.
 - `Index(fields=["property", "is_active"])` — the object-permission check
 - `Index(fields=["user", "is_active"])`
 
+### `UniversityStaffProfile`
+
+A member of university staff, scoped to exactly one institution. Its only
+capability today is that tenant's student verification queue (ADR-003).
+
+| Field | Type | Notes |
+|---|---|---|
+| `user` | `OneToOneField` → `User` | `CASCADE` |
+| `university` | FK → `University` | `PROTECT` |
+| `job_title` | `CharField(120)` | blank |
+| `can_review_verifications` | `BooleanField` | default `True` |
+| `is_active` | `BooleanField` | |
+
+**Constraints / indexes**
+
+- `UNIQUE (user)`
+- `Index(fields=["university", "is_active"])`
+
+This role can read student ID documents for its own tenant, so it widens the
+blast radius of a compromised account. Every document read is logged (see
+`VerificationDocumentAccess`).
+
 ### `StudentProfile`
 
 | Field | Type | Notes |
 |---|---|---|
 | `user` | `OneToOneField` → `User` | `CASCADE` |
 | `university` | FK → `University` | `PROTECT` |
-| `student_email` | `EmailField` | blank; must match a `university.email_domains` entry |
-| `verification_method` | `CharField` | `none \| email_domain \| manual_id` (ADR-003 flaw 1) |
-| `is_verified` | `BooleanField` | |
+| `student_email` | `EmailField` | blank; must match a `University.student_email_domains` entry |
+| `verification_status` | `CharField(16)` | `unverified \| pending \| verified \| rejected` |
+| `verification_method` | `CharField(16)` | `email_domain \| manual_id`, null when unverified |
 | `verified_at` | `DateTimeField` | null |
+| `verified_by` | FK → `User` | `SET_NULL`, null — null for the automated email path |
+| `rejection_reason` | `CharField(255)` | blank |
 | `year_of_study` | `PositiveSmallIntegerField` | null, 1..8 |
 | `course` | `CharField(200)` | blank |
 
@@ -158,8 +203,76 @@ landlord.
 
 - `UNIQUE (user)`
 - `UniqueConstraint(fields=["student_email"], condition=~Q(student_email=""), name="uniq_student_email")`
-- `Index(fields=["university", "is_verified"])`
-- `CheckConstraint(condition=Q(is_verified=False) | ~Q(verification_method="none"), name="verified_needs_a_method")`
+- `Index(fields=["university", "verification_status"])`
+- `CheckConstraint` — `verification_status='verified'` requires a non-null
+  `verification_method`
+- `CheckConstraint` — `verification_status='rejected'` requires a
+  `rejection_reason`
+
+### `StudentEmailVerification`
+
+The automated path. No human in the loop: the student confirms an address whose
+domain matches the university's, and the status goes straight to `verified`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `student_profile` | FK → `StudentProfile` | `CASCADE` |
+| `email` | `EmailField` | the address being proved |
+| `token_hash` | `CharField(64)` | SHA-256 of a single-use signed token; the token itself is never stored |
+| `expires_at` | `DateTimeField` | |
+| `consumed_at` | `DateTimeField` | null |
+
+**Constraints / indexes**
+
+- `UNIQUE (token_hash)`
+- `Index(fields=["student_profile", "consumed_at"])`
+- `CheckConstraint` — `expires_at > created_at`
+
+### `StudentVerificationRequest`
+
+The manual path, for schools that issue no student addresses.
+
+| Field | Type | Notes |
+|---|---|---|
+| `student_profile` | FK → `StudentProfile` | `CASCADE` |
+| `document_key` | `CharField(500)` | key in the **private** documents bucket (ADR-007) |
+| `document_content_type` | `CharField(64)` | validated against actual bytes, not the header |
+| `document_byte_size` | `PositiveIntegerField` | capped |
+| `submitted_at` | `DateTimeField` | |
+| `status` | `CharField(16)` | `pending \| approved \| rejected \| withdrawn` |
+| `reviewer` | FK → `User` | `SET_NULL`, null — university staff or platform staff |
+| `decided_at` | `DateTimeField` | null |
+| `notes` | `TextField` | blank, staff-visible only |
+| `document_deleted_at` | `DateTimeField` | null — set by the retention job |
+
+**Constraints / indexes**
+
+- `UniqueConstraint(fields=["student_profile"], condition=Q(status="pending"), name="one_open_verification_request")`
+- `Index(fields=["status", "submitted_at"])` — the queue, oldest first
+- `Index(fields=["decided_at"], condition=Q(document_deleted_at__isnull=True))` —
+  what the retention job scans
+- `CheckConstraint` — a non-`pending` status requires `decided_at`
+
+**Retention.** The document is deleted `University.id_review_retention_days`
+after `decided_at` by a scheduled job. The decision is retained; the image is
+not. `document_deleted_at` records that it happened, so a document past its
+window with a null value here is an alertable condition — the retention promise
+must be verified, not assumed.
+
+### `VerificationDocumentAccess`
+
+Every read of an ID document, logged. This is what makes the retention and
+access promises in ADR-003 auditable.
+
+| Field | Type | Notes |
+|---|---|---|
+| `request` | FK → `StudentVerificationRequest` | `CASCADE` |
+| `reader` | FK → `User` | `PROTECT` |
+| `accessed_at` | `DateTimeField` | |
+| `ip_address` | `GenericIPAddressField` | null |
+| `user_agent` | `CharField(255)` | blank |
+
+**Indexes:** `Index(fields=["request", "-accessed_at"])`, `Index(fields=["reader", "-accessed_at"])`
 
 ---
 
@@ -273,9 +386,10 @@ place for.
 | `sort_order` | `PositiveSmallIntegerField` | |
 | `width`, `height` | `PositiveSmallIntegerField` | null; for layout stability |
 
-If ADR-007's open question resolves to Cloudflare Images, the three variant key
-columns and `processing_status` are dropped and a single `image_id` replaces
-them.
+ADR-007 resolved to django-rq generating variants ourselves, so these columns
+stay. Keys refer to the **public** media bucket; verification documents live in
+a separate private bucket with its own storage backend and never share this
+one.
 
 **Constraints / indexes**
 
@@ -289,8 +403,11 @@ them.
 | `property` | FK → `Property` | `CASCADE` |
 | `university` | FK → `University` | `PROTECT` |
 | `campus` | FK → `Campus` | `PROTECT` |
-| `distance_km` | `Decimal(5,2)` | haversine, computed on save |
-| `walking_minutes` | `PositiveSmallIntegerField` | **null** unless routed — ADR-002's flagged flaw |
+| `straight_line_km` | `Decimal(5,2)` | **NOT NULL** — haversine, computed on save |
+| `walking_distance_km` | `Decimal(5,2)` | **null** until the routing job runs |
+| `walking_minutes` | `PositiveSmallIntegerField` | **null** until the routing job runs |
+| `routed_at` | `DateTimeField` | null — when routing last succeeded |
+| `route_provider` | `CharField(32)` | blank; `openrouteservice`, … |
 | `matatu_route` | `CharField(50)` | blank; "Route 45" |
 | `is_primary` | `BooleanField` | the campus this listing is marketed against |
 
@@ -298,8 +415,17 @@ them.
 
 - `UNIQUE (property, campus)`
 - `UniqueConstraint(fields=["property"], condition=Q(is_primary=True), name="one_primary_campus")`
-- `Index(fields=["university", "distance_km"])` — **the platform's primary query**
-- `CheckConstraint(condition=Q(distance_km__gte=0) & Q(distance_km__lte=500), name="distance_sane")`
+- `Index(fields=["university", "straight_line_km"])` — **the platform's primary query**
+- `Index(fields=["routed_at"])` — the routing job takes the oldest first
+- `CheckConstraint` — `0 <= straight_line_km <= 500`
+- `CheckConstraint` — `walking_minutes` and `walking_distance_km` are either
+  both null or both set, and `routed_at` is non-null whenever they are
+
+The two distance figures mean different things and must never be conflated
+(ADR-002). `straight_line_km` is an honest lower bound and is always present;
+walking figures come only from a routing provider and stay null otherwise.
+**Walking time is never derived from straight-line distance**, and any UI
+showing the straight-line figure must label it as such.
 
 A property with zero rows here is invisible to every tenant. Enforce ≥ 1 at the
 serializer and monitor for orphans (ADR-002).
@@ -332,6 +458,37 @@ intent to take the unit.
 - `Index(fields=["applicant", "-created_at"])`
 - `CheckConstraint(condition=Q(decided_at__isnull=True) | Q(decided_by__isnull=False), name="decision_has_an_author")`
 
+### `TenancyClaim` (ADR-004)
+
+**The tenant initiates.** The landlord and any assigned caretaker have
+`settings.TENANCY_CONFIRMATION_WINDOW_DAYS` (7) to confirm or dispute; silence
+auto-confirms via a scheduled job. Landlord silence is a signal, not a veto.
+
+| Field | Type | Notes |
+|---|---|---|
+| `unit` | FK → `Unit` | `PROTECT` |
+| `claimant` | FK → `User` | `PROTECT` — the tenant |
+| `start_date` | `DateField` | |
+| `end_date` | `DateField` | null while ongoing |
+| `monthly_rent_kes` | `Decimal(10,2)` | as claimed |
+| `status` | `CharField(16)` | `pending \| confirmed \| disputed \| withdrawn` |
+| `confirmation_deadline` | `DateTimeField` | `created_at + window` |
+| `resolved_by` | FK → `User` | `SET_NULL`, null — null when auto-confirmed |
+| `resolved_at` | `DateTimeField` | null |
+| `dispute_reason` | `TextField` | blank |
+
+**Constraints / indexes**
+
+- `UniqueConstraint(fields=["unit", "claimant"], condition=Q(status="pending"), name="one_open_claim_per_unit")`
+- `CheckConstraint` — `end_date` is null or `>= start_date`
+- `CheckConstraint` — a non-`pending` status requires `resolved_at`
+- `Index(fields=["status", "confirmation_deadline"])` — what the auto-confirm
+  job scans, and what an alert on overdue pending claims reads
+- `Index(fields=["claimant", "-created_at"])` — the per-user rate limit
+
+A disputed claim freezes and opens a moderation entry for platform admins; it
+yields no review until resolved.
+
 ### `Tenancy` (ADR-004)
 
 The evidence that a stay happened. Nothing else can vouch for a review.
@@ -340,22 +497,31 @@ The evidence that a stay happened. Nothing else can vouch for a review.
 |---|---|---|
 | `unit` | FK → `Unit` | `PROTECT` |
 | `tenant` | FK → `User` | `PROTECT` |
-| `application` | FK → `Application` | `SET_NULL`, null — where it came from |
-| `confirmed_by` | FK → `User` | `PROTECT` — landlord or assigned caretaker |
+| `claim` | FK → `TenancyClaim` | `SET_NULL`, null — where it came from |
+| `application` | FK → `Application` | `SET_NULL`, null |
+| `confirmation_source` | `CharField(16)` | `landlord \| caretaker \| auto \| admin` |
+| `confirmed_by` | FK → `User` | `SET_NULL`, **null when `confirmation_source='auto'`** |
 | `confirmed_at` | `DateTimeField` | |
 | `start_date` | `DateField` | |
 | `end_date` | `DateField` | null while ongoing |
 | `monthly_rent_kes` | `Decimal(10,2)` | the agreed figure, for the record |
-| `status` | `CharField(20)` | `active \| ended \| disputed` |
+| `status` | `CharField(16)` | `active \| ended \| disputed` |
 
-If ADR-004's recommended claim/confirm-with-timeout variant is adopted, add
-`claimed_by`, `claimed_at` and `confirmation_deadline`. **That decision is
-open** and it is cheaper to make now than later.
+`confirmation_source` is a cheap and durable trust signal: it supports
+"this landlord confirms 12% of claims" later, and surfaces a caretaker
+confirming implausible volumes.
 
 **Constraints / indexes**
 
 - `CheckConstraint(condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")), name="tenancy_end_after_start")`
 - `UniqueConstraint(fields=["unit", "tenant", "start_date"], name="uniq_tenancy_per_unit_tenant_start")`
+- **`ExclusionConstraint`** over `(unit =, daterange(start_date, end_date) &&)`
+  where `status='active'`, named `no_overlapping_confirmed_tenancy`. Requires
+  the `btree_gist` extension, added by
+  `django.contrib.postgres.operations.BtreeGistExtension`. A serializer cannot
+  see a concurrent insert; this can.
+- `CheckConstraint` — `confirmed_by` is null if and only if
+  `confirmation_source = 'auto'`
 - `Index(fields=["tenant", "-start_date"])`
 - `Index(fields=["unit", "status"])`
 - `CheckConstraint(condition=Q(monthly_rent_kes__gt=0), name="tenancy_rent_positive")`
@@ -381,6 +547,11 @@ open** and it is cheaper to make now than later.
 | `is_published` | `BooleanField` | default `True` |
 | `hidden_reason` | `CharField(200)` | blank; staff only |
 
+The verified badge is read from `review.tenancy.tenant.student_profile.verification_status`
+at render time, not copied onto the review. When the university has
+`verification_required_to_review = False` (the default), an unverified student
+may still post and the badge is simply absent (ADR-003).
+
 The reviewer is `review.tenancy.tenant`; the unit is `review.tenancy.unit`.
 Neither is duplicated onto the review — a denormalised copy is a chance for the
 two to disagree, and disagreement here is the trust property failing.
@@ -392,9 +563,13 @@ two to disagree, and disagreement here is the trust property failing.
 - `Index(fields=["is_published", "-created_at"])`
 - `Index(fields=["tenancy"])`
 
-The minimum-stay rule (30 days) cannot be a `CheckConstraint`, because it
-compares against "today" for an ongoing tenancy. It is enforced in the
-serializer, and the threshold lives in settings — ADR-004's flagged flaw 2.
+The minimum-stay rule cannot be a `CheckConstraint`, because it compares
+against "today" for an ongoing tenancy. Resolved in ADR-004: the threshold is
+`settings.REVIEW_MINIMUM_STAY_DAYS` (30), and it is enforced in **one** service
+function, `assert_tenancy_is_reviewable(tenancy)`, that the serializer, the
+admin and any future path all go through. It is tested directly at that
+boundary, not only through the API. This is the single documented exception —
+every other invariant here is a database constraint.
 
 ### `ReviewResponse`
 
@@ -453,16 +628,22 @@ reply and no conversation.
 ```
 University 1──* Campus
 University 1──* StudentProfile
+University 1──* UniversityStaffProfile
 University 1──* PropertyCampusDistance *──1 Property     (ADR-002: many-to-many
                                                           carrying distance)
 Campus     1──* PropertyCampusDistance
 
 User 1──1 LandlordProfile 1──* Property 1──* Unit 1──* UnitPhoto
-User 1──1 StudentProfile
+User 1──1 StudentProfile 1──* StudentEmailVerification
+                         1──* StudentVerificationRequest 1──* VerificationDocumentAccess
+User 1──1 UniversityStaffProfile
 User 1──* CaretakerAssignment *──1 Property
 
-Unit 1──* Application *──1 User
-Unit 1──* Tenancy     *──1 User
+Unit 1──* Application   *──1 User
+Unit 1──* TenancyClaim  *──1 User                        (ADR-004: the TENANT
+                                                          initiates)
+TenancyClaim 0..1──1 Tenancy
+Unit 1──* Tenancy       *──1 User
 Application 0..1──1 Tenancy
 
 Tenancy 1──0..1 Review 1──0..1 ReviewResponse            (ADR-004: a review
@@ -482,15 +663,39 @@ Reached through `PropertyCampusDistance`:
 |---|---|
 | `Property` | via `campus_distances__university` |
 | `Unit`, `UnitPhoto` | via `property` |
-| `Application`, `Tenancy`, `Inquiry` | via `unit__property` |
+| `Application`, `TenancyClaim`, `Tenancy`, `Inquiry` | via `unit__property` |
 | `Review`, `ReviewResponse` | via `tenancy__unit__property` |
-| `StudentProfile` | direct FK |
+| `StudentProfile`, `UniversityStaffProfile` | direct FK |
+| `StudentVerificationRequest` | via `student_profile__university` |
 | `User`, `LandlordProfile` | **not scoped** — a landlord may serve several universities |
 | `CaretakerAssignment` | via `property` |
 
 `User` being unscoped is deliberate and worth noting in review: it means user
 enumeration is not tenant-isolated, so any endpoint exposing user data needs its
 own authorization check rather than relying on the tenant filter.
+
+## Background jobs (ADR-007: django-rq on Redis)
+
+Four jobs are load-bearing. Each fails silently if the worker stops, so each
+needs an alert on its *backlog* rather than on its own success.
+
+| Job | Trigger | Alert on |
+|---|---|---|
+| Auto-confirm tenancy claims | scheduled, hourly | `TenancyClaim` rows past `confirmation_deadline` still `pending` |
+| Route campus walking distance | on `PropertyCampusDistance` create; periodic refresh of oldest `routed_at` | rows with null `walking_minutes` older than a day; provider quota |
+| Delete verification documents | scheduled, hourly | `StudentVerificationRequest` past its retention window with `document_deleted_at` null |
+| Generate image variants | on `UnitPhoto` create | `UnitPhoto` rows in `processing_status='pending'` older than an hour |
+
+## Storage buckets (ADR-007)
+
+| Bucket | Contents | Access |
+|---|---|---|
+| public media | `UnitPhoto` originals and variants, `University.logo_url` | unsigned, CDN-served |
+| private documents | `StudentVerificationRequest.document_key`, `LandlordProfile.id_document_url` | signed URLs, 5-minute expiry, never CDN |
+
+Separate `STORAGES` entries with separate backend classes, not a key-prefix
+convention: a convention is one careless `default_storage.save()` away from
+publishing someone's national ID.
 
 ## Migration note
 

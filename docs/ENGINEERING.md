@@ -16,8 +16,13 @@ If you find dollars, miles, ZIP codes or `state` in new code, it is wrong.
 JWT via `djangorestframework-simplejwt` (with `token_blacklist`), OpenAPI via
 `drf-spectacular`, filtering via `django-filter`, logging via `structlog`.
 
-**Frontend** — React 18, TypeScript, Vite 6, Tailwind + shadcn/ui, Zustand,
-TanStack Query, axios, React Router 6.
+**Frontend** — React 18, TypeScript, Vite 6, Tailwind + a small set of shadcn
+primitives, Zustand, TanStack Query, axios, React Router 6. API types are
+**generated** from the OpenAPI schema by openapi-typescript.
+
+**Queue** — django-rq on the same Redis (ADR-007). Four jobs depend on it:
+tenancy auto-confirmation, campus routing, verification-document retention, and
+image variants.
 
 **Tooling** — `ruff` (lint **and** format — no black, no isort, no flake8),
 `mypy` (non-strict), `pytest` + `pytest-django` + `factory_boy`, `vitest` +
@@ -41,10 +46,20 @@ backend/
   requirements/{base,dev,prod}.txt
   pyproject.toml             ruff + mypy + pytest + coverage config
 frontend/
-  src/{pages,components,services,store,types,lib,test}/
-  src/components/ui/         vendored shadcn — do not hand-edit
+  src/
+    api/          client.ts (axios, JWT, single-flight refresh, pagination)
+                  tokens.ts, types.ts
+                  schema.yaml + schema.d.ts   GENERATED — never hand-edit
+    app/          App.tsx, router.tsx, guards.tsx, ErrorBoundary.tsx
+                  layout/   RootLayout, Header, Footer, SkipLink
+                  routes/   one file per route, lazily imported
+    stores/       auth.ts
+    theme/        TenantThemeProvider.tsx, tokens.ts   (ADR-005)
+    components/ui/  four vendored shadcn primitives — re-generate, do not edit
+    lib/          utils.ts, errors.ts
+    test/         setup.ts, utils.tsx, msw/
 docs/
-  AUDIT.md  DOMAIN_MODEL.md  adr/
+  AUDIT.md  DOMAIN_MODEL.md  ENGINEERING.md  adr/
 ```
 
 `DJANGO_SETTINGS_MODULE` defaults to `config.settings.dev` in `manage.py`,
@@ -82,6 +97,21 @@ python manage.py runserver
 cd frontend && npm ci && npm run dev     # :8080
 ```
 
+### API types are generated
+
+`src/api/schema.yaml` comes from the backend; `src/api/schema.d.ts` comes from
+it. Both are committed, and CI fails if either drifts. After any change to a
+serializer, view or URL:
+
+```bash
+cd backend  && python manage.py spectacular --file ../frontend/src/api/schema.yaml
+cd frontend && npm run generate:types
+```
+
+Nothing under `src/api/` describes a response shape by hand. The previous
+client's hand-written types were wrong in six places, one of which silently
+disabled navigation.
+
 ---
 
 ## Tests
@@ -114,7 +144,19 @@ model instances.
 
 **Frontend**: `renderWithProviders` from `src/test/utils.tsx` wraps a component
 in the same providers `App.tsx` uses. Pass `route` and `path` for pages reading
-`useParams`.
+`useParams`, and `withTenant: false` when a test drives the theme provider
+itself.
+
+API calls are intercepted by **MSW** (`src/test/msw/`), configured with
+`onUnhandledRequest: "error"` — an un-stubbed request fails the test rather
+than escaping to the network.
+
+A guard test must render a real route table, not a catch-all. `<Route path="*">`
+makes a guard's redirect land back on the guard, which loops forever.
+
+The tests that matter most are the ones covering behaviour that is painful to
+debug from a bug report: the single-flight refresh queue, both guards, token
+derivation, theme application, and a vitest-axe assertion on the shell.
 
 ### A note on the contract tests
 
@@ -167,9 +209,21 @@ subset locally.
 ### TypeScript
 
 - No `any`. Catch `unknown` and use `getErrorMessage` from `@/lib/errors`.
-- `src/components/ui/*` is vendored shadcn. Re-generate rather than hand-edit.
-- Types should be generated from the OpenAPI schema, not hand-written —
-  `src/types/index.ts` is currently hand-written and wrong in six places.
+- **API types are generated.** Never hand-write a request or response shape;
+  import from `@/api/types`.
+- **List responses are envelopes**, never arrays. Use `getPage` and read
+  `.results`.
+- `src/components/ui/*` is vendored shadcn. Re-add from the shadcn CLI rather
+  than hand-editing, and only what a screen actually uses.
+- Accessibility is not a later pass: semantic landmarks, a visible focus ring on
+  every interactive element, labelled form controls, and one `<h1>` per page.
+
+### Theming
+
+`src/theme/tokens.ts` owns the ADR-005 token derivation. It emits exactly nine
+custom properties and deliberately never touches backgrounds, borders or
+`--destructive`. If a colour in the browser does not match `index.css`, it is
+because `TenantThemeProvider` set an inline value on `:root`.
 
 ### Migrations
 
@@ -212,68 +266,79 @@ test(reviews): pin the unreachable report action
 
 ## Architecture decisions
 
-Full text in `docs/adr/`. Summaries, so the reasoning travels with the code:
+Full text in `docs/adr/`. All seven were amended on 2026-08-24 to record the
+resolutions from design review. Summaries, so the reasoning travels with the
+code:
 
 **ADR-001 — Multi-tenancy: shared database, shared schema.** `University` is
-the tenant, resolved from the subdomain (`kyu.example.co.ke`), falling back to
-an `X-University` header **in dev and test only**. A middleware resolves it into
-request context; tenant-scoped querysets go through a manager that filters by
-it. Rejected `django-tenants` (migration pain for a small team; a property near
-two campuses must appear under both, which schema isolation makes awkward).
-*Open:* whether public listing pages should be served from a tenant-neutral
-canonical host.
+the tenant, resolved from the subdomain. **Public listing pages are canonical
+at `www/listings/<slug>`;** branded subdomains emit `rel=canonical` at the
+neutral host. Writes and authenticated reads stay strictly subdomain-scoped.
+The `X-University` dev fallback **must raise `ImproperlyConfigured` at import
+time in prod** — absence is not enough. Session cookies are scoped to the exact
+subdomain, never the parent domain.
 
 **ADR-002 — Properties link to universities through a join model.**
-`PropertyCampusDistance` carries `distance_km` and `walking_minutes`; one
-property serves many institutions. *Open:* how those two numbers are populated
-— haversine understates real walking distance, and a routing API implies a job
-queue.
+`PropertyCampusDistance` carries an always-present `straight_line_km`
+(haversine on save) and nullable `walking_distance_km` / `walking_minutes`
+populated only by an async routing job behind a swappable `RouteProvider`
+(OpenRouteService first). **Walking time is never derived from straight-line
+distance**, and UI showing the straight-line figure must label it. The draft's
+bounding-box longitude term divided by zero at the equator; the correct factor
+is `cos(radians(lat))`.
 
 **ADR-003 — Authorization is object-level.** `User` holds identity and auth
-only; `LandlordProfile`, `CaretakerAssignment` (scoped to specific properties,
-granted by a landlord) and `StudentProfile` carry capability. DRF permission
-classes check relationships, not string equality. This closes a live
-privilege-escalation path: `user_type` is currently client-settable at
-registration and grants edit rights over every listing. *Open:* the exact
-caretaker permission set.
+only; `LandlordProfile`, `CaretakerAssignment`, `StudentProfile` and
+`UniversityStaffProfile` carry capability. A caretaker may manage units,
+vacancy, photos, availability, tenancy claims and inquiries — **not** delete a
+property, transfer ownership, grant assignments, touch payout fields, or post a
+`ReviewResponse`. Student verification is **per-university policy, off by
+default**, earning a badge rather than gating access. **ID documents are
+regulated personal data under Kenya's Data Protection Act 2019:** private
+bucket only, signed URLs, scheduled deletion after
+`id_review_retention_days`, every read logged, byte-level content-type
+validation on upload.
 
-**ADR-004 — Review integrity via a `Tenancy` record.** A `Tenancy` is created
-when a landlord or caretaker confirms a move-in. `Review` has a required
-`OneToOneField` to it, a 30-day minimum stay, a 14-day edit window, and one
-landlord response via `ReviewResponse`. **Enforced by schema constraints, not
-only serializers** — this is the platform's core trust property. *Open, and
-important:* landlord-controlled confirmation lets a bad landlord suppress
-reviews by never confirming. The ADR recommends a claim-with-timeout variant.
+**ADR-004 — Review integrity via a `Tenancy` record.** **The tenant creates a
+`TenancyClaim`;** the landlord and caretakers have 7 days to confirm or
+dispute, and silence auto-confirms. Landlord silence is a signal, not a veto.
+`Tenancy` records `confirmation_source ∈ {landlord, caretaker, auto, admin}`.
+Overlapping confirmed tenancies are blocked by an `ExclusionConstraint`
+(`btree_gist`); one open claim per user per unit; claims are rate-limited. The
+30-day minimum stay cannot be a `CheckConstraint` for an ongoing tenancy, so it
+lives in `settings.REVIEW_MINIMUM_STAY_DAYS` behind the single service function
+`assert_tenancy_is_reviewable()`. Everything else stays a database constraint.
 
 **ADR-005 — Per-university theming via database-stored design tokens.**
-`University` holds primary/secondary/accent as HSL triples plus logo and
-display name. A public unauthenticated endpoint returns the active tenant's
-config; React applies it to `:root` before first paint. **Three tokens are
-overridden** (`--primary`, `--secondary`, `--accent`), four derived
-(`--*-foreground` by contrast, `--ring`), two adjusted
-(`--primary-light/-dark`). The other 17 — backgrounds, borders, `--destructive`
-— are deliberately left alone. `--gradient-hero` and `--gradient-card` must be
-rewritten to reference `var(--primary)`; they currently hard-code the green.
+`University` holds primary/secondary/accent as HSL triples. A public
+unauthenticated endpoint returns the tenant config; the React app applies it to
+`:root`. **Three tokens overridden, four derived** (`--*-foreground` by WCAG
+contrast, `--ring`), **two adjusted** (`--primary-light/-dark`). The other 17 —
+backgrounds, borders, `--destructive` — are deliberately untouched.
+`--gradient-hero` and `--gradient-card` now reference `var(--primary)`.
 
 **ADR-006 — Geo search stays simple.** lat/lng floats plus precomputed campus
-distances; no PostGIS. Triggers for revisiting: map-viewport search,
-arbitrary-origin radius at scale, polygon queries, SQL distance ordering from a
-non-campus origin, or ~50k properties. The ADR documents the migration in full.
-Note the draft's bounding-box maths divides by zero at the equator.
+distances; no PostGIS. Triggers for revisiting, and the full migration path,
+are in the ADR.
 
-**ADR-007 — Media on S3-compatible object storage.** `django-storages`;
-Cloudflare R2 in production (zero egress), MinIO in local Docker, never local
-disk. Image variants generated asynchronously. *Open:* which queue — the ADR
-recommends Cloudflare Images if the pricing works, `django-rq` otherwise. This
-changes `UnitPhoto`'s shape, so decide before the rewrite.
-
----
+**ADR-007 — Media on S3-compatible object storage, django-rq for jobs.**
+Cloudflare R2 in production, MinIO locally, never local disk. **Cloudflare
+Images was rejected**: a queue is now required by three jobs unrelated to
+images, so removing the image subsystem no longer removes the queue.
+**Two buckets** — public media and a private documents bucket with its own
+storage backend class. Never merge them.
 
 ## Where things stand
 
-The plumbing (Docker, DRF, JWT, the shadcn token system) is sound and is being
-kept. The domain model is a US apartment-listing schema with "campus" bolted
-on, and it is being replaced per `docs/DOMAIN_MODEL.md`.
+The backend plumbing (Docker, DRF, JWT, the settings split, CI) is sound and is
+being kept. The **frontend has been rebuilt** on a generated API contract; only
+the shell exists, deliberately, because the API contract changes with the
+schema rewrite.
+
+The **domain model is still the original draft** — a US apartment-listing schema
+with "campus" bolted on — and is being replaced per `docs/DOMAIN_MODEL.md`.
 
 **Read `docs/AUDIT.md` before touching the existing apps.** Several endpoints
-are broken in ways that look like your bug and are not.
+are broken in ways that look like your bug and are not: the rental detail
+endpoint 500s for every non-owner, review reporting is unreachable by anyone,
+and `user_type` is client-settable at registration.
