@@ -1,7 +1,8 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuthStore } from '@/store/authStore';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
-import { Home, Building2, User, LogOut, Heart, LayoutDashboard, Shield } from 'lucide-react';
+import { useAuthStore } from '@/store/authStore';
+import { Building2, Heart, Home, LayoutDashboard, LogOut, Shield, User } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const Navbar = () => {
   const { isAuthenticated, user, logout } = useAuthStore();
@@ -36,14 +37,14 @@ const Navbar = () => {
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>
               </Link>
-              
+
               {user?.role === 'tenant' && (
                 <Link to="/favorites" className="flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary">
                   <Heart className="h-4 w-4" />
                   <span className="hidden sm:inline">Favorites</span>
                 </Link>
               )}
-              
+
               {user?.role === 'admin' && (
                 <Link to="/admin" className="flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary">
                   <Shield className="h-4 w-4" />
@@ -57,14 +58,18 @@ const Navbar = () => {
                   <span className="hidden sm:inline">{user?.username}</span>
                 </Button>
               </Link>
-              
+
               <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2">
                 <LogOut className="h-4 w-4" />
                 <span className="hidden sm:inline">Logout</span>
               </Button>
+
+              <ThemeToggle />
             </>
           ) : (
             <>
+              <ThemeToggle />
+
               <Link to="/login">
                 <Button variant="ghost" size="sm">Login</Button>
               </Link>

@@ -12,7 +12,10 @@ import type {
 import axios from 'axios';
 
 // Base URL must match Django backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+// In production (Docker), use the nginx proxy path
+// In development, use the full backend URL
+const API_BASE_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.MODE === 'production' ? '/api/v1' : 'http://localhost:8000/api/v1');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
