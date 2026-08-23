@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from config.logging_config import configure_logging
+
 from .base import *
 from .base import BASE_DIR, SIMPLE_JWT
 
@@ -29,3 +31,5 @@ STORAGES = {
 }
 
 MEDIA_ROOT = BASE_DIR / "test-media"
+
+configure_logging(level="WARNING", json_output=False)

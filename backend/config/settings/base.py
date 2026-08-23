@@ -242,26 +242,8 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="noreply@campusrentalfinder.co.ke")
 
 # --------------------------------------------------------------------------
-# Logging
+# Logging (structlog; see config/logging_config.py)
 # --------------------------------------------------------------------------
 
 LOG_LEVEL = config("LOG_LEVEL", default="INFO")
-
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} {name} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
-    },
-    "root": {"handlers": ["console"], "level": LOG_LEVEL},
-    "loggers": {
-        "django": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
-        "campusrental": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
-    },
-}
+LOG_JSON = config("LOG_JSON", default=False, cast=bool)

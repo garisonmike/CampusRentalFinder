@@ -11,6 +11,8 @@ from __future__ import annotations
 from decouple import Csv, config
 from django.core.exceptions import ImproperlyConfigured
 
+from config.logging_config import configure_logging
+
 from .base import *
 from .base import SIMPLE_JWT
 
@@ -70,3 +72,8 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = False  # the SPA must read this to send X-CSRFToken
 CSRF_COOKIE_SAMESITE = "Lax"
+
+configure_logging(
+    level=config("LOG_LEVEL", default="INFO"),
+    json_output=config("LOG_JSON", default=True, cast=bool),
+)

@@ -3,7 +3,6 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.http import JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -11,10 +10,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
-def health_check(request):
-    """Minimal health check. Replaced by real probes in a later change."""
-    return JsonResponse({"status": "ok"})
-
+from config.health import health_live, health_ready
 
 api_v1_patterns = [
     path("auth/", include("accounts.urls")),
@@ -29,7 +25,9 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
-    path("health/", health_check, name="health-check"),
+    # Probes
+    path("health/live/", health_live, name="health-live"),
+    path("health/ready/", health_ready, name="health-ready"),
 ]
 
 if settings.DEBUG:

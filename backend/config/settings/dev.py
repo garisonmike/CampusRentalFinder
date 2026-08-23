@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from decouple import Csv, config
 
+from config.logging_config import configure_logging
+
 from .base import *
-from .base import BASE_DIR, SIMPLE_JWT
+from .base import BASE_DIR, LOG_JSON, SIMPLE_JWT
 
 DEBUG = True
 
@@ -48,3 +50,5 @@ STORAGES = {
 }
 
 MEDIA_ROOT = BASE_DIR / "media"
+
+configure_logging(level=config("LOG_LEVEL", default="DEBUG"), json_output=LOG_JSON)
