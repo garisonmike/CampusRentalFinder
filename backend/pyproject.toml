@@ -1,0 +1,64 @@
+[project]
+name = "campusrentalfinder-backend"
+version = "0.1.0"
+description = "Backend for CampusRentalFinder, a multi-university student rental platform."
+requires-python = ">=3.13"
+
+# --------------------------------------------------------------------------
+# pytest
+# --------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=accounts",
+    "--cov=config",
+    "--cov=rentals",
+    "--cov=reviews",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml",
+    "--cov-fail-under=70",
+]
+markers = [
+    "smoke: minimal checks that the project boots and its plumbing works",
+]
+filterwarnings = [
+    "error::DeprecationWarning:accounts.*",
+    "error::DeprecationWarning:rentals.*",
+    "error::DeprecationWarning:reviews.*",
+    "error::DeprecationWarning:config.*",
+]
+
+# --------------------------------------------------------------------------
+# coverage
+# --------------------------------------------------------------------------
+
+[tool.coverage.run]
+branch = true
+source = ["accounts", "config", "rentals", "reviews"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/__init__.py",
+    "config/wsgi.py",
+    "config/asgi.py",
+    "manage.py",
+]
+
+[tool.coverage.report]
+# 70 is a deliberately low floor for the current draft. Raise it as the
+# schema rewrite lands with its own tests.
+fail_under = 70
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
