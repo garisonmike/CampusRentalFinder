@@ -80,6 +80,11 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "reviews:rental-review-statistics": HostClass.PUBLIC_CANONICAL,
     "reviews:recent-reviews": HostClass.PUBLIC_CANONICAL,
     "reviews:top-rated-reviews": HostClass.PUBLIC_CANONICAL,
+    # -- Tenant-scoped: the tenant's own configuration ---------------------
+    # Unauthenticated and read-only, but NOT public canonical: the response is
+    # the tenant's branding, so it is by definition not tenant-neutral. The
+    # neutral host has no tenant and correctly gets a 404 here.
+    "universities:tenant-config": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: authentication ------------------------------------
     "accounts:api-root": HostClass.TENANT_SCOPED,
     "accounts:register": HostClass.TENANT_SCOPED,

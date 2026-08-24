@@ -1083,6 +1083,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenant/config/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tenant configuration
+         * @description Branding and identity for the university serving this host. Unauthenticated: the login page itself has to be branded, and it renders before any token exists. Returns 404 on a host that resolves no tenant, so the client falls back to its neutral palette.
+         */
+        get: operations["tenant_config_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live/": {
         parameters: {
             query?: never;
@@ -3804,6 +3824,37 @@ export interface components {
          * @enum {string}
          */
         Status124Enum: "available" | "rented" | "pending" | "maintenance" | "inactive";
+        /**
+         * @description The public tenant configuration (ADR-005).
+         *
+         *     Deliberately small. It is fetched before first paint on every cold visit,
+         *     so anything not needed to render the shell does not belong here.
+         */
+        TenantConfig: {
+            /** @description The tenant host label: "kyu" serves kyu.example.co.ke. */
+            readonly subdomain: string;
+            readonly name: string;
+            /** @description Short form used in the interface, e.g. "KyU". */
+            readonly display_name: string;
+            /** Format: uri */
+            readonly logo_url: string;
+            /** Format: uri */
+            readonly favicon_url: string;
+            readonly theme: components["schemas"]["TenantTheme"];
+        };
+        /**
+         * @description The three tokens ADR-005 overrides.
+         *
+         *     Foregrounds, `--ring` and the light/dark primary variants are derived
+         *     client-side by WCAG contrast rather than sent, so a tenant cannot configure
+         *     an unreadable button.
+         */
+        TenantTheme: {
+            /** @description HSL triple, e.g. "142 71% 45%". */
+            primary: string;
+            secondary: string;
+            accent: string;
+        };
         TokenRefresh: {
             readonly access: string;
             refresh: string;
@@ -6294,6 +6345,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ReviewList"][];
                 };
+            };
+        };
+    };
+    tenant_config_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantConfig"];
+                };
+            };
+            /** @description No response body */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

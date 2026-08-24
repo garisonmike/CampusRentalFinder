@@ -2513,6 +2513,28 @@ paths:
                 items:
                   $ref: '#/components/schemas/ReviewList'
           description: ''
+  /api/v1/tenant/config/:
+    get:
+      operationId: tenant_config_retrieve
+      description: 'Branding and identity for the university serving this host. Unauthenticated:
+        the login page itself has to be branded, and it renders before any token exists.
+        Returns 404 on a host that resolves no tenant, so the client falls back to
+        its neutral palette.'
+      summary: Tenant configuration
+      tags:
+      - Tenant
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantConfig'
+          description: ''
+        '404':
+          description: No response body
   /health/live/:
     get:
       operationId: health_live_retrieve
@@ -6867,6 +6889,64 @@ components:
         * `pending` - Pending
         * `maintenance` - Under Maintenance
         * `inactive` - Inactive
+    TenantConfig:
+      type: object
+      description: |-
+        The public tenant configuration (ADR-005).
+
+        Deliberately small. It is fetched before first paint on every cold visit,
+        so anything not needed to render the shell does not belong here.
+      properties:
+        subdomain:
+          type: string
+          readOnly: true
+          description: 'The tenant host label: "kyu" serves kyu.example.co.ke.'
+        name:
+          type: string
+          readOnly: true
+        display_name:
+          type: string
+          readOnly: true
+          description: Short form used in the interface, e.g. "KyU".
+        logo_url:
+          type: string
+          format: uri
+          readOnly: true
+        favicon_url:
+          type: string
+          format: uri
+          readOnly: true
+        theme:
+          allOf:
+          - $ref: '#/components/schemas/TenantTheme'
+          readOnly: true
+      required:
+      - display_name
+      - favicon_url
+      - logo_url
+      - name
+      - subdomain
+      - theme
+    TenantTheme:
+      type: object
+      description: |-
+        The three tokens ADR-005 overrides.
+
+        Foregrounds, `--ring` and the light/dark primary variants are derived
+        client-side by WCAG contrast rather than sent, so a tenant cannot configure
+        an unreadable button.
+      properties:
+        primary:
+          type: string
+          description: HSL triple, e.g. "142 71% 45%".
+        secondary:
+          type: string
+        accent:
+          type: string
+      required:
+      - accent
+      - primary
+      - secondary
     TokenRefresh:
       type: object
       properties:
