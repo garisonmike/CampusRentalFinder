@@ -57,6 +57,9 @@ NAMESPACE_HOST_CLASSES: dict[str, HostClass] = {
     # django.contrib.admin generates ~6 routes per registered ModelAdmin.
     # Internal by definition; never exposed on a public host.
     "admin": HostClass.API_INTERNAL,
+    # django-rq's queue dashboard. Library-generated, and it exposes job
+    # payloads, so it is internal and must never reach a public host.
+    "django-rq": HostClass.API_INTERNAL,
 }
 
 #: Every route we define, by fully-qualified URL name.

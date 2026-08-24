@@ -5,7 +5,7 @@ from __future__ import annotations
 from config.logging_config import configure_logging
 
 from .base import *
-from .base import BASE_DIR, SIMPLE_JWT
+from .base import BASE_DIR, REDIS_URL, SIMPLE_JWT
 
 DEBUG = False
 
@@ -29,11 +29,6 @@ CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
-}
-
 MEDIA_ROOT = BASE_DIR / "test-media"
 
 configure_logging(level="WARNING", json_output=False)
@@ -41,3 +36,19 @@ configure_logging(level="WARNING", json_output=False)
 # Local development and tests have no usable subdomain, so the header fallback
 # is available here. It is impossible in production; see prod.py.
 TENANT_HEADER_FALLBACK_ENABLED = True
+
+
+# In-memory storage for both aliases. Isolated by construction, so the
+# separation check has nothing to compare and correctly says nothing.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "documents": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
+# Jobs run inline in tests: an async job that never runs is a test that passes
+# for the wrong reason.
+RQ_QUEUES = {
+    "default": {"URL": REDIS_URL, "ASYNC": False},
+    "media": {"URL": REDIS_URL, "ASYNC": False},
+}

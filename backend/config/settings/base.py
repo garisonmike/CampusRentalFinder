@@ -52,6 +52,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "django_filters",
     "drf_spectacular",
+    "django_rq",
 ]
 
 LOCAL_APPS = [
@@ -252,8 +253,32 @@ STATICFILES_DIRS = [d for d in [BASE_DIR / "static"] if d.exists()]
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# ADR-007: two buckets, two backend classes, never local disk. The default
+# alias is the PUBLIC one, so a model field that forgets to name a storage
+# writes a listing photo to a public place rather than a document to it.
+S3_ENDPOINT_URL = config("S3_ENDPOINT_URL", default="")
+S3_REGION = config("S3_REGION", default="auto")
+S3_MEDIA_BUCKET = config("S3_MEDIA_BUCKET", default="campusrental-media")
+S3_DOCUMENTS_BUCKET = config("S3_DOCUMENTS_BUCKET", default="campusrental-documents")
+S3_ACCESS_KEY_ID = config("S3_ACCESS_KEY_ID", default="")
+S3_SECRET_ACCESS_KEY = config("S3_SECRET_ACCESS_KEY", default="")
+
+_S3_COMMON = {
+    "endpoint_url": S3_ENDPOINT_URL,
+    "region_name": S3_REGION,
+    "access_key": S3_ACCESS_KEY_ID,
+    "secret_key": S3_SECRET_ACCESS_KEY,
+}
+
 STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "default": {
+        "BACKEND": "config.storage.PublicMediaStorage",
+        "OPTIONS": {**_S3_COMMON, "bucket_name": S3_MEDIA_BUCKET},
+    },
+    "documents": {
+        "BACKEND": "config.storage.PrivateDocumentStorage",
+        "OPTIONS": {**_S3_COMMON, "bucket_name": S3_DOCUMENTS_BUCKET},
+    },
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
@@ -275,3 +300,18 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="noreply@campusrentalf
 
 LOG_LEVEL = config("LOG_LEVEL", default="INFO")
 LOG_JSON = config("LOG_JSON", default=False, cast=bool)
+
+# --------------------------------------------------------------------------
+# Job queue (ADR-007)
+# --------------------------------------------------------------------------
+
+# Four jobs are load-bearing, and each fails SILENTLY if the worker stops:
+# tenancy auto-confirmation, dispute auto-resolution, verification-document
+# retention, and image variants. docs/OPERATIONS.md states what each failure
+# looks like and what to alert on -- always the age of the oldest unresolved
+# item, never the queue depth.
+RQ_QUEUES = {
+    "default": {"URL": REDIS_URL, "DEFAULT_TIMEOUT": 360},
+    "media": {"URL": REDIS_URL, "DEFAULT_TIMEOUT": 900},
+}
+RQ_SHOW_ADMIN_LINK = True

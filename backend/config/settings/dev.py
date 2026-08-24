@@ -42,13 +42,6 @@ CSRF_TRUSTED_ORIGINS = config(
 
 INSTALLED_APPS = [*INSTALLED_APPS, "django_extensions"]
 
-# Uncompressed static storage: the manifest backend fails loudly on any file
-# collectstatic has not seen, which is a nuisance while iterating.
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
-}
-
 MEDIA_ROOT = BASE_DIR / "media"
 
 configure_logging(level=config("LOG_LEVEL", default="DEBUG"), json_output=LOG_JSON)
@@ -56,3 +49,36 @@ configure_logging(level=config("LOG_LEVEL", default="DEBUG"), json_output=LOG_JS
 # Local development and tests have no usable subdomain, so the header fallback
 # is available here. It is impossible in production; see prod.py.
 TENANT_HEADER_FALLBACK_ENABLED = True
+
+
+# Local object storage. MinIO speaks the S3 API, so the development path
+# exercises the same code as production (ADR-007).
+S3_ENDPOINT_URL = config("S3_ENDPOINT_URL", default="http://minio:9000")
+S3_ACCESS_KEY_ID = config("S3_ACCESS_KEY_ID", default="minioadmin")
+S3_SECRET_ACCESS_KEY = config("S3_SECRET_ACCESS_KEY", default="minioadmin")
+
+STORAGES = {
+    "default": {
+        "BACKEND": "config.storage.PublicMediaStorage",
+        "OPTIONS": {
+            "endpoint_url": S3_ENDPOINT_URL,
+            "region_name": "auto",
+            "access_key": S3_ACCESS_KEY_ID,
+            "secret_key": S3_SECRET_ACCESS_KEY,
+            "bucket_name": config("S3_MEDIA_BUCKET", default="campusrental-media"),
+            "url_protocol": "http:",
+        },
+    },
+    "documents": {
+        "BACKEND": "config.storage.PrivateDocumentStorage",
+        "OPTIONS": {
+            "endpoint_url": S3_ENDPOINT_URL,
+            "region_name": "auto",
+            "access_key": S3_ACCESS_KEY_ID,
+            "secret_key": S3_SECRET_ACCESS_KEY,
+            "bucket_name": config("S3_DOCUMENTS_BUCKET", default="campusrental-documents"),
+            "url_protocol": "http:",
+        },
+    },
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}

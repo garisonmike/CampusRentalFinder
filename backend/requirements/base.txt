@@ -30,6 +30,14 @@ python-decouple==3.8
 
 # --- Caching / queues ------------------------------------------------------
 redis==6.4.0
+# ADR-007. Four jobs need this: tenancy auto-confirmation, dispute
+# auto-resolution, verification-document retention, and image variants.
+django-rq==3.1
+rq-scheduler==0.14.0
+
+# --- Object storage (ADR-007) ----------------------------------------------
+# Cloudflare R2 in production, MinIO locally. Two buckets, two backends.
+django-storages[s3]==1.14.6
 
 # --- Observability ---------------------------------------------------------
 structlog==25.5.0
