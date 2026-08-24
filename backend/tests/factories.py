@@ -24,6 +24,8 @@ from accounts.models import (
     UniversityStaffProfile,
     User,
 )
+from properties.constants import FurnishingStatus, PropertyStatus, PropertyType
+from properties.models import Property, PropertyCampusDistance, Unit
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
 from universities.constants import VerificationMethod, VerificationStatus
@@ -182,6 +184,78 @@ class StaffFactory(UserFactory):
     email = factory.Sequence(lambda n: f"staff{n}@example.co.ke")
     is_staff = True
     is_superuser = True
+
+
+# ---------------------------------------------------------------------------
+# Properties (ADR-002). Every one of these is tenant-scoped, so they all use
+# TenantScopedFactory -- factory_boy reaches for Model.objects, which a scoped
+# model refuses.
+# ---------------------------------------------------------------------------
+
+
+class PropertyFactory(TenantScopedFactory):
+    class Meta:
+        model = Property
+
+    landlord = factory.SubFactory(LandlordProfileFactory)
+    name = factory.Sequence(lambda n: f"Wendani Hostel Block {n}")
+    slug = factory.Sequence(lambda n: f"wendani-hostel-block-{n}")
+    description = "Water tank, backup power, secure compound."
+    property_type = PropertyType.HOSTEL_BLOCK
+    county = "nairobi"
+    town = "Nairobi"
+    estate = "Kahawa Wendani"
+    landmark = "opposite Naivas"
+    # Nairobi. Close enough to the equator that a latitude-correction bug
+    # divides by zero -- see ADR-006.
+    latitude = -1.286389
+    longitude = 36.817223
+    has_water_tank = True
+    status = PropertyStatus.PUBLISHED
+    published_at = factory.LazyFunction(timezone.now)
+
+
+class DraftPropertyFactory(PropertyFactory):
+    """A property that is not yet listed. Has no published_at, by constraint."""
+
+    status = PropertyStatus.DRAFT
+    published_at = factory.LazyFunction(lambda: None)
+
+
+class PropertyCampusDistanceFactory(TenantScopedFactory):
+    """The join that makes a property visible to a university (ADR-002).
+
+    ``straight_line_km`` is computed by the model's save(), so it is not set
+    here — setting it would hide a bug in the computation.
+    """
+
+    class Meta:
+        model = PropertyCampusDistance
+
+    property = factory.SubFactory(PropertyFactory)
+    university = factory.SubFactory(UniversityFactory)
+    campus = factory.SubFactory(CampusFactory)
+    is_primary = False
+
+
+class UnitFactory(TenantScopedFactory):
+    class Meta:
+        model = Unit
+
+    property = factory.SubFactory(PropertyFactory)
+    label = factory.Sequence(lambda n: f"B{n}")
+    unit_type = PropertyType.BEDSITTER
+    rent_kes = Decimal("9500.00")
+    deposit_kes = Decimal("9500.00")
+    water_included = True
+    furnished = FurnishingStatus.UNFURNISHED
+    size_sqm = 20
+    bedrooms = 0
+    has_private_bathroom = True
+    total_count = 1
+    vacant_count = 1
+    min_stay_months = 4
+    is_active = True
 
 
 class RentalFactory(DjangoModelFactory):

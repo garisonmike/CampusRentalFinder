@@ -17,14 +17,18 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.models import User
 from tests.factories import (
     CampusFactory,
+    DraftPropertyFactory,
     LandlordFactory,
     LandlordProfileFactory,
     PlatformAdminFactory,
+    PropertyCampusDistanceFactory,
+    PropertyFactory,
     RentalFactory,
     ReviewFactory,
     StaffFactory,
     StudentProfileFactory,
     TenantFactory,
+    UnitFactory,
     UniversityFactory,
     UniversityStaffProfileFactory,
     VerifiedStudentProfileFactory,
@@ -174,6 +178,44 @@ def landlord_client(authenticate, landlord) -> APIClient:
 @pytest.fixture
 def staff_client(authenticate, staff_user) -> APIClient:
     return authenticate(staff_user)
+
+
+# ---------------------------------------------------------------------------
+# Properties
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def property_factory(db):
+    return PropertyFactory
+
+
+@pytest.fixture
+def draft_property_factory(db):
+    return DraftPropertyFactory
+
+
+@pytest.fixture
+def unit_factory(db):
+    return UnitFactory
+
+
+@pytest.fixture
+def campus_distance_factory(db):
+    return PropertyCampusDistanceFactory
+
+
+@pytest.fixture
+def campus_property(db, university, campus_factory, property_factory):
+    """A published property joined to the tenant under test.
+
+    The join is what makes it visible at all (ADR-002), so the fixture creates
+    it rather than leaving an orphan no tenant can see.
+    """
+    campus = campus_factory(university=university, is_main=True)
+    prop = property_factory()
+    PropertyCampusDistanceFactory(property=prop, university=university, campus=campus)
+    return prop
 
 
 # ---------------------------------------------------------------------------
