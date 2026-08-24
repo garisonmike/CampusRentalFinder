@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
+from accounts import capabilities
 from rentals.models import Rental
 
 from .models import Review, ReviewReport
@@ -46,7 +47,7 @@ class IsTenantOrReadOnly(permissions.BasePermission):
             return True
 
         # Write permissions only for authenticated tenants
-        return request.user.is_authenticated and request.user.user_type == "tenant"
+        return capabilities.is_student(request.user)
 
     def has_object_permission(self, request, view, obj):
         # Read permissions for any request
@@ -54,7 +55,7 @@ class IsTenantOrReadOnly(permissions.BasePermission):
             return True
 
         # Write permissions only for the review author or admin
-        return obj.tenant == request.user or request.user.user_type == "admin"
+        return obj.tenant == request.user or capabilities.is_platform_staff(request.user)
 
 
 class ReviewViewSet(ModelViewSet):
@@ -260,7 +261,7 @@ class ReviewViewSet(ModelViewSet):
     )
     def my_reviews(self, request):
         """Get current user's reviews."""
-        if request.user.user_type != "tenant":
+        if not capabilities.is_student(request.user):
             return Response(
                 {"error": _("Only tenants can access this endpoint")},
                 status=status.HTTP_403_FORBIDDEN,

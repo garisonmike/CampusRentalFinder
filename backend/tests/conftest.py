@@ -18,12 +18,16 @@ from accounts.models import User
 from tests.factories import (
     CampusFactory,
     LandlordFactory,
+    LandlordProfileFactory,
     PlatformAdminFactory,
     RentalFactory,
     ReviewFactory,
     StaffFactory,
+    StudentProfileFactory,
     TenantFactory,
     UniversityFactory,
+    UniversityStaffProfileFactory,
+    VerifiedStudentProfileFactory,
 )
 
 # ---------------------------------------------------------------------------
@@ -89,9 +93,43 @@ def university(db):
 
 
 @pytest.fixture
-def tenant(db) -> User:
-    """A student/tenant account."""
-    return cast(User, TenantFactory())
+def tenant(db, university) -> User:
+    """A student.
+
+    Carries a StudentProfile, because under ADR-003 that relationship — not a
+    string on User — is what makes someone a student.
+    """
+    user = cast(User, TenantFactory())
+    StudentProfileFactory(user=user, university=university)
+    return user
+
+
+@pytest.fixture
+def student_profile(db, university):
+    """An unverified student profile."""
+    return StudentProfileFactory(university=university)
+
+
+@pytest.fixture
+def verified_student_profile(db, university):
+    """A student carrying the verification badge."""
+    return VerifiedStudentProfileFactory(university=university)
+
+
+@pytest.fixture
+def verified_student_profile_factory(db):
+    return VerifiedStudentProfileFactory
+
+
+@pytest.fixture
+def landlord_profile_factory(db):
+    return LandlordProfileFactory
+
+
+@pytest.fixture
+def university_staff(db, university) -> User:
+    """A member of university staff, scoped to one institution."""
+    return cast(User, UniversityStaffProfileFactory(university=university).user)
 
 
 @pytest.fixture
@@ -102,10 +140,12 @@ def landlord(db) -> User:
 
 @pytest.fixture
 def platform_admin(db) -> User:
-    """A user with ``user_type='admin'`` but no Django staff flag.
+    """A plain user with no platform-staff flag.
 
-    Worth keeping distinct: DRF's ``IsAdminUser`` checks ``is_staff``, not
-    ``user_type``, so these two are not interchangeable. See docs/AUDIT.md.
+    Kept to prove the escalation path is closed. Under the draft this account
+    would have set ``user_type='admin'`` in its own registration payload and
+    gained edit rights over every listing and review (docs/AUDIT.md §4.4).
+    There is now no field it could have set.
     """
     return cast(User, PlatformAdminFactory())
 

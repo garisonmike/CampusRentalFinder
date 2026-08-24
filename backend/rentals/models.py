@@ -74,7 +74,10 @@ class Rental(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="rental_properties",
-        limit_choices_to={"user_type": "landlord"},
+        # Was limit_choices_to={"user_type": "landlord"}. That field is gone
+        # (ADR-003); ownership is a LandlordProfile relationship now, checked by
+        # accounts.permissions rather than by an admin dropdown filter.
+        limit_choices_to={"landlord_profile__isnull": False},
         help_text=_("Property owner/landlord"),
     )
 
@@ -415,7 +418,7 @@ class RentalInquiry(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="rental_inquiries",
-        limit_choices_to={"user_type": "tenant"},
+        limit_choices_to={"student_profile__isnull": False},
     )
 
     message = models.TextField(_("message"), help_text=_("Inquiry message from tenant"))

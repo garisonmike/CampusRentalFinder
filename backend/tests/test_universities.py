@@ -186,6 +186,26 @@ class TestSignupPolicyGuard:
 
         assert caught.value.code == "no_verified_students"
 
+    def test_requiring_verification_is_allowed_once_one_student_is_verified(
+        self, university, verified_student_profile
+    ):
+        """The guard tests an outcome, not a configuration flag."""
+        assert_signup_policy_is_safe(university, SignupPolicy.REQUIRED)
+
+    def test_an_unverified_student_does_not_satisfy_the_guard(self, university, student_profile):
+        """Existing is not the same as verified."""
+        with pytest.raises(UnsafeSignupPolicyError):
+            assert_signup_policy_is_safe(university, SignupPolicy.REQUIRED)
+
+    def test_a_verified_student_at_another_university_does_not_count(
+        self, university, university_factory, verified_student_profile_factory
+    ):
+        """Per-tenant, or one school unlocks the setting for every other."""
+        verified_student_profile_factory(university=university_factory())
+
+        with pytest.raises(UnsafeSignupPolicyError):
+            assert_signup_policy_is_safe(university, SignupPolicy.REQUIRED)
+
     @pytest.mark.parametrize("policy", [SignupPolicy.OPEN, SignupPolicy.ENCOURAGED])
     def test_the_softer_policies_are_always_allowed(self, university, policy):
         """Only the locking-out one is guarded."""
@@ -218,6 +238,26 @@ class TestSignupEnforcementDate:
         university.signup_policy = SignupPolicy.REQUIRED
 
         assert signup_verification_is_enforced(university) is True
+
+
+class TestPolicyChangeDoesNotInvalidateAccounts:
+    def test_existing_unverified_students_keep_their_access(
+        self, university, student_profile, verified_student_profile
+    ):
+        """ADR-003: enforcement applies at signup only.
+
+        A university switching a setting must never be able to sign out its own
+        student body. Existing unverified users are prompted, not blocked — the
+        difference between a policy change and an outage.
+        """
+        university.signup_policy = SignupPolicy.REQUIRED
+        university.save(update_fields=["signup_policy"])
+
+        student_profile.refresh_from_db()
+
+        assert student_profile.pk is not None
+        assert student_profile.user.is_active is True
+        assert not student_profile.is_verified
 
 
 # ---------------------------------------------------------------------------

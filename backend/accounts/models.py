@@ -1,237 +1,332 @@
 """
-User models for the rental platform.
+Identity and roles (ADR-003).
 
-This module contains the custom User model that extends Django's AbstractUser
-to support different user types (tenant, landlord, admin).
+``User`` holds identity and authentication **only**. Capability lives in
+separate models that describe relationships, because a role is not a global
+fact about a person — it is a fact about their relationship to a university or
+to particular properties.
+
+The field this replaces, ``user_type``, was one string doing the work of an
+authorization model. It was client-supplied at registration and never
+validated, and the object-permission checks in the draft apps trusted it, so
+anyone could register as an ``admin`` and edit or delete any listing or review
+on the platform (docs/AUDIT.md §4.4).
 """
 
-from django.contrib.auth.models import AbstractUser
+from __future__ import annotations
+
+from typing import Any
+
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.validators import RegexValidator
 from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from config.tenancy import TenantScopedModel
+from universities.constants import VerificationMethod, VerificationStatus
+from universities.models import University
 
-class User(AbstractUser):
+#: Kenyan mobile numbers in E.164. The draft's regex was `^\+?1?\d{9,15}$` —
+#: the optional 1 is a North American country code (docs/AUDIT.md §3).
+kenyan_phone_validator = RegexValidator(
+    regex=r"^\+254[17]\d{8}$",
+    message=_("Enter a Kenyan number in international format, e.g. +254712345678."),
+)
+
+kra_pin_validator = RegexValidator(
+    regex=r"^[AP]\d{9}[A-Z]$",
+    message=_("A KRA PIN looks like A123456789Z."),
+)
+
+
+class UserManager(BaseUserManager["User"]):
+    """Creates users keyed by email.
+
+    The draft inherited Django's ``UserManager``, which demands a username even
+    though ``USERNAME_FIELD`` was already ``email`` — so ``create_user()`` and
+    ``createsuperuser`` both revolved around a vestigial column.
     """
-    Custom User model with additional fields for rental platform.
 
-    Extends Django's AbstractUser to include:
-    - User types (tenant, landlord, admin)
-    - Phone number validation
-    - Email as primary identifier
+    use_in_migrations = True
+
+    def _create_user(self, email: str, password: str | None, **extra: Any) -> User:
+        if not email:
+            raise ValueError("Users must have an email address.")
+        user = self.model(email=self.normalize_email(email), **extra)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_user(self, email: str, password: str | None = None, **extra: Any) -> User:
+        extra.setdefault("is_staff", False)
+        extra.setdefault("is_superuser", False)
+        return self._create_user(email, password, **extra)
+
+    def create_superuser(self, email: str, password: str | None = None, **extra: Any) -> User:
+        extra.setdefault("is_staff", True)
+        extra.setdefault("is_superuser", True)
+        if extra.get("is_staff") is not True:
+            raise ValueError("A superuser must have is_staff=True.")
+        if extra.get("is_superuser") is not True:
+            raise ValueError("A superuser must have is_superuser=True.")
+        return self._create_user(email, password, **extra)
+
+
+class User(AbstractBaseUser, PermissionsMixin):
+    """Identity and authentication. No roles.
+
+    ``is_staff`` is the **only** flag meaning platform administrator, and it is
+    settable through the Django admin or a management command, never through
+    the API.
     """
 
-    USER_TYPE_CHOICES = (
-        ("tenant", _("Tenant")),
-        ("landlord", _("Landlord")),
-        ("admin", _("Admin")),
-    )
-
-    # Phone number validator - allows international formats
-    phone_regex = RegexValidator(
-        regex=r"^\+?1?\d{9,15}$",
-        message=_(
-            "Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed."
-        ),
-    )
-
-    # Override email field to make it unique and required
     email = models.EmailField(
         _("email address"),
         unique=True,
-        error_messages={
-            "unique": _("A user with that email already exists."),
-        },
+        error_messages={"unique": _("A user with that email already exists.")},
     )
-
-    # Additional fields
+    first_name = models.CharField(_("first name"), max_length=100)
+    last_name = models.CharField(_("last name"), max_length=100)
     phone_number = models.CharField(
         _("phone number"),
-        validators=[phone_regex],
-        max_length=17,
+        max_length=13,
         blank=True,
-        help_text=_("Phone number in international format"),
+        validators=[kenyan_phone_validator],
     )
+    phone_verified = models.BooleanField(_("phone verified"), default=False)
+    email_verified = models.BooleanField(_("email verified"), default=False)
+    avatar_url = models.URLField(_("avatar URL"), blank=True)
 
-    user_type = models.CharField(
-        _("user type"),
-        max_length=10,
-        choices=USER_TYPE_CHOICES,
-        default="tenant",
-        help_text=_("Type of user account"),
-    )
-
-    # Profile fields
-    date_of_birth = models.DateField(_("date of birth"), null=True, blank=True)
-
-    profile_picture = models.ImageField(
-        _("profile picture"), upload_to="profile_pictures/", null=True, blank=True
-    )
-
-    bio = models.TextField(
-        _("biography"), max_length=500, blank=True, help_text=_("Brief description about yourself")
-    )
-
-    # Address fields (optional for users)
-    address = models.CharField(_("address"), max_length=255, blank=True)
-
-    city = models.CharField(_("city"), max_length=100, blank=True)
-
-    state = models.CharField(_("state/province"), max_length=100, blank=True)
-
-    zip_code = models.CharField(_("zip code"), max_length=20, blank=True)
-
-    # Verification status
-    is_verified = models.BooleanField(
-        _("verified"),
+    is_active = models.BooleanField(_("active"), default=True)
+    is_staff = models.BooleanField(
+        _("platform staff"),
         default=False,
-        help_text=_("Designates whether this user has been verified by admin."),
+        help_text=_("The only meaning of 'platform administrator'. Not settable via the API."),
     )
 
-    verification_date = models.DateTimeField(_("verification date"), null=True, blank=True)
+    date_joined = models.DateTimeField(_("date joined"), default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
 
-    # Timestamps
-    created_at = models.DateTimeField(_("created at"), auto_now_add=True)
+    objects = UserManager()
 
-    updated_at = models.DateTimeField(_("updated at"), auto_now=True)
-
-    # Use email as the unique identifier for authentication
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["username", "first_name", "last_name"]
+    REQUIRED_FIELDS = ["first_name", "last_name"]
 
     class Meta:
         verbose_name = _("User")
         verbose_name_plural = _("Users")
-        ordering = ["-created_at"]
+        ordering = ["-date_joined"]
         indexes = [
-            models.Index(fields=["email"]),
-            models.Index(fields=["user_type"]),
-            models.Index(fields=["is_verified"]),
-            models.Index(fields=["created_at"]),
+            models.Index(fields=["email"], name="user_email_idx"),
+            models.Index(fields=["-date_joined"], name="user_joined_idx"),
+        ]
+        constraints = [
+            # Unique when set, but many users may leave it blank.
+            models.UniqueConstraint(
+                fields=["phone_number"],
+                condition=~Q(phone_number=""),
+                name="user_phone_unique_when_set",
+            ),
         ]
 
-    def __str__(self):
-        """String representation of the user."""
-        return f"{self.get_full_name()} ({self.get_user_type_display()})"
+    def __str__(self) -> str:
+        return self.get_full_name() or self.email
 
-    def get_full_name(self):
-        """Return the first_name plus the last_name, with a space in between."""
-        full_name = f"{self.first_name} {self.last_name}".strip()
-        return full_name if full_name else self.email
-
-    def get_short_name(self):
-        """Return the short name for the user."""
-        return self.first_name or self.email.split("@")[0]
-
-    @property
-    def is_tenant(self):
-        """Check if user is a tenant."""
-        return self.user_type == "tenant"
-
-    @property
-    def is_landlord(self):
-        """Check if user is a landlord."""
-        return self.user_type == "landlord"
-
-    @property
-    def is_platform_admin(self):
-        """Check if user is a platform admin."""
-        return self.user_type == "admin"
-
-    def get_display_name(self):
-        """Get appropriate display name for user."""
-        if self.first_name and self.last_name:
-            return f"{self.first_name} {self.last_name}"
-        elif self.first_name:
-            return self.first_name
-        else:
-            return self.email.split("@")[0].title()
-
-    def save(self, *args, **kwargs):
-        """Override save method to perform custom operations."""
-        # Ensure email is lowercase
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self.email:
             self.email = self.email.lower()
-
-        # Set username to email if not provided
-        if not self.username:
-            self.username = self.email
-
         super().save(*args, **kwargs)
 
+    def get_full_name(self) -> str:
+        return f"{self.first_name} {self.last_name}".strip()
 
-class UserProfile(models.Model):
+    def get_short_name(self) -> str:
+        return self.first_name or self.email.split("@")[0]
+
+
+class LandlordProfile(models.Model):
+    """A user who may own properties.
+
+    Not tenant-scoped: a landlord near two campuses serves both universities,
+    which is the whole reason ADR-002 exists.
     """
-    Extended profile information for users.
 
-    This model stores additional information that might be added later
-    without modifying the main User model.
-    """
-
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="extended_profile")
-
-    # Preferences
-    preferred_contact_method = models.CharField(
-        _("preferred contact method"),
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="landlord_profile")
+    business_name = models.CharField(_("business name"), max_length=200, blank=True)
+    kra_pin = models.CharField(
+        _("KRA PIN"), max_length=11, blank=True, validators=[kra_pin_validator]
+    )
+    national_id = models.CharField(
+        _("national ID"),
         max_length=20,
-        choices=[
-            ("email", _("Email")),
-            ("phone", _("Phone")),
-            ("both", _("Both")),
-        ],
-        default="email",
-    )
-
-    # Notification preferences
-    email_notifications = models.BooleanField(
-        _("email notifications"), default=True, help_text=_("Receive notifications via email")
-    )
-
-    sms_notifications = models.BooleanField(
-        _("SMS notifications"), default=False, help_text=_("Receive notifications via SMS")
-    )
-
-    # Social media links (optional)
-    website = models.URLField(_("website"), blank=True, help_text=_("Personal or business website"))
-
-    linkedin = models.URLField(_("LinkedIn profile"), blank=True)
-
-    # For landlords - business information
-    business_name = models.CharField(
-        _("business name"),
-        max_length=100,
         blank=True,
-        help_text=_("Business or company name (for landlords)"),
+        help_text=_("Write-only in the API. Never returned in a response."),
+    )
+    id_document_key = models.CharField(
+        _("ID document key"),
+        max_length=500,
+        blank=True,
+        help_text=_("Key in the PRIVATE documents bucket. Never the public CDN (ADR-007)."),
+    )
+    verification_status = models.CharField(
+        _("verification status"),
+        max_length=16,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.UNVERIFIED,
+    )
+    verified_at = models.DateTimeField(_("verified at"), null=True, blank=True)
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="landlord_verifications_performed",
+    )
+    payout_phone = models.CharField(
+        _("payout phone"),
+        max_length=13,
+        blank=True,
+        validators=[kenyan_phone_validator],
+        help_text=_("M-Pesa number. Reserved for when payments ship."),
     )
 
-    business_license = models.CharField(
-        _("business license"), max_length=50, blank=True, help_text=_("Business license number")
-    )
-
-    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = _("User Profile")
-        verbose_name_plural = _("User Profiles")
+        verbose_name = _("Landlord profile")
+        verbose_name_plural = _("Landlord profiles")
+        indexes = [
+            models.Index(fields=["verification_status"], name="landlord_verif_status_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(verification_status=VerificationStatus.VERIFIED)
+                | Q(verified_at__isnull=False),
+                name="landlord_verified_has_timestamp",
+            ),
+        ]
 
-    def __str__(self):
-        return f"Profile for {self.user.get_full_name()}"
+    def __str__(self) -> str:
+        return self.business_name or self.user.get_full_name()
 
 
-# Signals keeping UserProfile in step with User.
-@receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, **kwargs):
-    """Create UserProfile when User is created."""
-    if created:
-        UserProfile.objects.create(user=instance)
+class StudentProfile(TenantScopedModel):
+    """A user who belongs to an institution.
+
+    Verification is optional by default and earns a badge rather than gating
+    access (ADR-003). Its mechanism is per-university policy.
+    """
+
+    tenant_lookup = "university"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="student_profile")
+    university = models.ForeignKey(University, on_delete=models.PROTECT, related_name="students")
+    student_email = models.EmailField(
+        _("student email"),
+        blank=True,
+        help_text=_("Must match one of the university's student email domains."),
+    )
+    verification_status = models.CharField(
+        _("verification status"),
+        max_length=16,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.UNVERIFIED,
+    )
+    verification_method = models.CharField(
+        _("verification method"),
+        max_length=24,
+        choices=VerificationMethod.choices,
+        blank=True,
+        help_text=_("Blank until verification succeeds."),
+    )
+    verified_at = models.DateTimeField(_("verified at"), null=True, blank=True)
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="student_verifications_performed",
+        help_text=_("Null for the automated email-domain path."),
+    )
+    rejection_reason = models.CharField(_("rejection reason"), max_length=255, blank=True)
+    year_of_study = models.PositiveSmallIntegerField(_("year of study"), null=True, blank=True)
+    course = models.CharField(_("course"), max_length=200, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Student profile")
+        verbose_name_plural = _("Student profiles")
+        base_manager_name = "all_objects"
+        default_manager_name = "all_objects"
+        indexes = [
+            models.Index(fields=["university", "verification_status"], name="student_verif_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["student_email"],
+                condition=~Q(student_email=""),
+                name="student_email_unique_when_set",
+            ),
+            # A verified profile must say how, or the badge means nothing and
+            # a later audit cannot tell the two paths apart.
+            models.CheckConstraint(
+                condition=~Q(verification_status=VerificationStatus.VERIFIED)
+                | ~Q(verification_method=""),
+                name="student_verified_has_a_method",
+            ),
+            models.CheckConstraint(
+                condition=~Q(verification_status=VerificationStatus.REJECTED)
+                | ~Q(rejection_reason=""),
+                name="student_rejected_has_a_reason",
+            ),
+            models.CheckConstraint(
+                condition=Q(year_of_study__isnull=True)
+                | (Q(year_of_study__gte=1) & Q(year_of_study__lte=8)),
+                name="student_year_of_study_range",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.get_full_name()} ({self.university.display_name})"
+
+    @property
+    def is_verified(self) -> bool:
+        return self.verification_status == VerificationStatus.VERIFIED
 
 
-@receiver(post_save, sender=User)
-def save_user_profile(sender, instance, **kwargs):
-    """Save UserProfile when User is saved."""
-    if hasattr(instance, "extended_profile"):
-        instance.extended_profile.save()
+class UniversityStaffProfile(TenantScopedModel):
+    """A member of university staff, scoped to one institution.
+
+    Its only capability today is that tenant's student verification queue. It
+    can read student ID documents for its own university, which widens the
+    blast radius of a compromised account, so the scope is deliberately narrow
+    and every document read is logged.
+    """
+
+    tenant_lookup = "university"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="staff_profile")
+    university = models.ForeignKey(University, on_delete=models.PROTECT, related_name="staff")
+    job_title = models.CharField(_("job title"), max_length=120, blank=True)
+    can_review_verifications = models.BooleanField(_("can review verifications"), default=True)
+    is_active = models.BooleanField(_("active"), default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("University staff profile")
+        verbose_name_plural = _("University staff profiles")
+        base_manager_name = "all_objects"
+        default_manager_name = "all_objects"
+        indexes = [
+            models.Index(fields=["university", "is_active"], name="unistaff_active_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.get_full_name()} — {self.university.display_name}"

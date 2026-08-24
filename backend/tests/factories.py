@@ -1,10 +1,12 @@
 """
-factory_boy factories for the current (draft) domain model.
+factory_boy factories.
 
-These will need reworking once the schema rewrite lands -- in particular
-``user_type`` disappears in favour of the profile models described in ADR-003.
-They are written against what exists today so the test suite has something to
-build on immediately.
+Identity and capability are separate here, as ADR-003 requires: ``UserFactory``
+makes a person, and the profile factories grant what they may do. There is no
+role string to set, because there is no role string.
+
+The rental and review factories still target the draft models, which the schema
+rewrite replaces in a later phase.
 """
 
 from __future__ import annotations
@@ -13,14 +15,19 @@ import datetime as dt
 from decimal import Decimal
 
 import factory
-from django.contrib.auth import get_user_model
+from django.utils import timezone
 from factory.django import DjangoModelFactory
 
+from accounts.models import (
+    LandlordProfile,
+    StudentProfile,
+    UniversityStaffProfile,
+    User,
+)
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
+from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import Campus, University
-
-User = get_user_model()
 
 TEST_PASSWORD = "test-password-123"
 
@@ -82,17 +89,16 @@ class CampusFactory(TenantScopedFactory):
 
 
 class UserFactory(DjangoModelFactory):
+    """Identity only. Roles come from the profile factories below (ADR-003)."""
+
     class Meta:
         model = User
         django_get_or_create = ("email",)
         skip_postgeneration_save = True
 
     email = factory.Sequence(lambda n: f"user{n}@students.example.ac.ke")
-    username = factory.LazyAttribute(lambda o: o.email)
     first_name = factory.Faker("first_name")
     last_name = factory.Faker("last_name")
-    user_type = "tenant"
-    is_verified = True
     is_active = True
 
     @factory.post_generation
@@ -103,31 +109,77 @@ class UserFactory(DjangoModelFactory):
         obj.save(update_fields=["password"])
 
 
-class TenantFactory(UserFactory):
-    """A student/tenant account."""
+class LandlordProfileFactory(DjangoModelFactory):
+    class Meta:
+        model = LandlordProfile
 
-    user_type = "tenant"
+    user = factory.SubFactory(UserFactory)
+    business_name = factory.Sequence(lambda n: f"Landlord Holdings {n}")
+
+
+class StudentProfileFactory(TenantScopedFactory):
+    class Meta:
+        model = StudentProfile
+
+    user = factory.SubFactory(UserFactory)
+    university = factory.SubFactory(UniversityFactory)
+    verification_status = VerificationStatus.UNVERIFIED
+
+
+class VerifiedStudentProfileFactory(StudentProfileFactory):
+    """A student carrying the verification badge.
+
+    The method and timestamp are required by a database constraint: a verified
+    profile must say how it was verified, or a later audit cannot tell the
+    automated path from the manual one.
+    """
+
+    verification_status = VerificationStatus.VERIFIED
+    verification_method = VerificationMethod.EMAIL_DOMAIN
+    verified_at = factory.LazyFunction(timezone.now)
+    student_email = factory.Sequence(lambda n: f"verified{n}@s.example.ac.ke")
+
+
+class UniversityStaffProfileFactory(TenantScopedFactory):
+    class Meta:
+        model = UniversityStaffProfile
+
+    user = factory.SubFactory(UserFactory)
+    university = factory.SubFactory(UniversityFactory)
+    job_title = "Dean of Students"
+    is_active = True
+
+
+class TenantFactory(UserFactory):
+    """A student. Named for the housing sense of the word, not the SaaS one."""
 
 
 class LandlordFactory(UserFactory):
-    """A landlord account."""
+    """A user who owns properties. The profile is what grants the capability."""
 
     email = factory.Sequence(lambda n: f"landlord{n}@example.co.ke")
-    user_type = "landlord"
+
+    @factory.post_generation
+    def profile(obj, create, extracted, **kwargs):  # noqa: N805
+        if create:
+            LandlordProfile.objects.get_or_create(user=obj)
 
 
 class PlatformAdminFactory(UserFactory):
-    """A platform administrator (``user_type='admin'``, not Django staff)."""
+    """A user with no platform-staff flag.
 
-    email = factory.Sequence(lambda n: f"admin{n}@example.co.ke")
-    user_type = "admin"
+    Kept to prove the escalation path is closed: under the draft this user
+    would have declared ``user_type='admin'`` at registration and gained edit
+    rights over every listing.
+    """
+
+    email = factory.Sequence(lambda n: f"selfdeclared{n}@example.co.ke")
 
 
 class StaffFactory(UserFactory):
-    """A Django staff user -- what DRF's ``IsAdminUser`` actually checks."""
+    """Platform staff. `is_staff` is the only meaning of the word."""
 
     email = factory.Sequence(lambda n: f"staff{n}@example.co.ke")
-    user_type = "admin"
     is_staff = True
     is_superuser = True
 

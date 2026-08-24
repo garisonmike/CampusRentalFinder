@@ -347,7 +347,9 @@ NOT_TENANT_SCOPED: dict[str, str] = {
     # Identity is deliberately unscoped: a landlord may serve several
     # universities, so User cannot belong to one (docs/DOMAIN_MODEL.md).
     "accounts.User": "Identity, not tenant data. A landlord may serve several universities.",
-    "accounts.UserProfile": "Attached 1:1 to User; scoped only through it.",
+    # A landlord near two campuses serves both universities, which is the whole
+    # reason ADR-002 exists. Scoping the profile would contradict it.
+    "accounts.LandlordProfile": "A landlord may own property serving several universities.",
     # Pre-rewrite draft models. These predate the tenant boundary entirely and
     # are removed by the schema rewrite; see docs/AUDIT.md.
     "rentals.Rental": "Pre-rewrite draft model, removed by the schema rewrite.",

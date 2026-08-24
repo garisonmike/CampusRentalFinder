@@ -4,56 +4,39 @@ from __future__ import annotations
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib.auth.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 from django.http import HttpRequest
 from django.utils.translation import gettext_lazy as _
 
-from accounts.models import User, UserProfile
+from .models import LandlordProfile, StudentProfile, UniversityStaffProfile, User
 
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
-    """Admin for the custom user model (email is the USERNAME_FIELD)."""
+    """Identity only.
 
-    list_display = (
-        "email",
-        "get_full_name",
-        "user_type",
-        "is_verified",
-        "is_active",
-        "is_staff",
-        "created_at",
-    )
-    list_filter = (
-        "user_type",
-        "is_verified",
-        "is_active",
-        "is_staff",
-        "is_superuser",
-        "created_at",
-    )
-    search_fields = ("email", "username", "first_name", "last_name", "phone_number")
-    ordering = ("-created_at",)
-    readonly_fields = ("created_at", "updated_at", "last_login", "date_joined")
-    list_select_related = True
-    date_hierarchy = "created_at"
+    There is no role field to edit here: capability lives in the profile models
+    below, and `is_staff` is the only flag meaning platform administrator.
+    """
+
+    add_form = UserCreationForm
+    form = UserChangeForm
+    change_password_form = AdminPasswordChangeForm
+
+    list_display = ("email", "get_full_name", "is_active", "is_staff", "date_joined")
+    list_filter = ("is_active", "is_staff", "is_superuser", "email_verified", "date_joined")
+    search_fields = ("email", "first_name", "last_name", "phone_number")
+    ordering = ("-date_joined",)
+    readonly_fields = ("last_login", "date_joined", "updated_at")
+    date_hierarchy = "date_joined"
 
     fieldsets = (
-        (None, {"fields": ("email", "username", "password")}),
+        (None, {"fields": ("email", "password")}),
         (
             _("Personal info"),
-            {
-                "fields": (
-                    "first_name",
-                    "last_name",
-                    "phone_number",
-                    "date_of_birth",
-                    "profile_picture",
-                    "bio",
-                )
-            },
+            {"fields": ("first_name", "last_name", "phone_number", "avatar_url")},
         ),
-        (_("Address"), {"fields": ("address", "city", "state", "zip_code")}),
-        (_("Role and verification"), {"fields": ("user_type", "is_verified", "verification_date")}),
+        (_("Verification"), {"fields": ("email_verified", "phone_verified")}),
         (
             _("Permissions"),
             {
@@ -63,13 +46,15 @@ class UserAdmin(DjangoUserAdmin):
                     "is_superuser",
                     "groups",
                     "user_permissions",
-                )
+                ),
+                "description": _(
+                    "is_staff is the only meaning of 'platform administrator'. "
+                    "Landlord, student and university-staff capability come from "
+                    "the profile models, not from here."
+                ),
             },
         ),
-        (
-            _("Important dates"),
-            {"fields": ("last_login", "date_joined", "created_at", "updated_at")},
-        ),
+        (_("Important dates"), {"fields": ("last_login", "date_joined", "updated_at")}),
     )
 
     add_fieldsets = (
@@ -77,15 +62,7 @@ class UserAdmin(DjangoUserAdmin):
             None,
             {
                 "classes": ("wide",),
-                "fields": (
-                    "email",
-                    "username",
-                    "first_name",
-                    "last_name",
-                    "user_type",
-                    "password1",
-                    "password2",
-                ),
+                "fields": ("email", "first_name", "last_name", "password1", "password2"),
             },
         ),
     )
@@ -95,28 +72,49 @@ class UserAdmin(DjangoUserAdmin):
         return obj.get_full_name()
 
 
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    """Admin for the extended profile record."""
-
-    list_display = (
-        "user",
-        "preferred_contact_method",
-        "email_notifications",
-        "sms_notifications",
-        "business_name",
-        "created_at",
-    )
-    list_filter = (
-        "preferred_contact_method",
-        "email_notifications",
-        "sms_notifications",
-        "created_at",
-    )
+@admin.register(LandlordProfile)
+class LandlordProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "business_name", "verification_status", "verified_at")
+    list_filter = ("verification_status", "created_at")
     search_fields = ("user__email", "user__first_name", "user__last_name", "business_name")
-    readonly_fields = ("created_at", "updated_at")
-    autocomplete_fields = ("user",)
+    ordering = ("-created_at",)
+    autocomplete_fields = ("user", "verified_by")
     list_select_related = ("user",)
+    readonly_fields = ("created_at", "updated_at")
+    # Regulated personal data (ADR-003). The key is shown, never a URL: the
+    # document lives in the private bucket behind a short-lived signed URL.
+    exclude = ("id_document_key",)
 
     def get_queryset(self, request: HttpRequest):
         return super().get_queryset(request).select_related("user")
+
+
+@admin.register(StudentProfile)
+class StudentProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "university",
+        "verification_status",
+        "verification_method",
+        "verified_at",
+    )
+    list_filter = ("verification_status", "verification_method", "university")
+    search_fields = ("user__email", "user__first_name", "user__last_name", "student_email")
+    ordering = ("-created_at",)
+    autocomplete_fields = ("user", "university", "verified_by")
+    list_select_related = ("user", "university")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request: HttpRequest):
+        return super().get_queryset(request).select_related("user", "university")
+
+
+@admin.register(UniversityStaffProfile)
+class UniversityStaffProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "university", "job_title", "can_review_verifications", "is_active")
+    list_filter = ("is_active", "can_review_verifications", "university")
+    search_fields = ("user__email", "user__first_name", "user__last_name", "job_title")
+    ordering = ("university", "user")
+    autocomplete_fields = ("user", "university")
+    list_select_related = ("user", "university")
+    readonly_fields = ("created_at", "updated_at")

@@ -10,6 +10,8 @@ from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from accounts import capabilities
+
 from .models import Review, ReviewHelpfulness, ReviewReport
 
 User = get_user_model()
@@ -22,6 +24,7 @@ class ReviewerSerializer(serializers.ModelSerializer):
 
     full_name = serializers.SerializerMethodField()
     initials = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -33,6 +36,15 @@ class ReviewerSerializer(serializers.ModelSerializer):
             "initials",
             "is_verified",
         ]
+
+    def get_is_verified(self, obj) -> bool:
+        """The reviewer's student verification badge (ADR-003).
+
+        Absence is not a discredit: verification is off by default, and where a
+        university has not enabled it nobody carries the badge.
+        """
+        profile = getattr(obj, "student_profile", None)
+        return bool(profile and profile.is_verified)
 
     def get_full_name(self, obj):
         """Get reviewer's full name."""
@@ -157,7 +169,7 @@ class ReviewDetailSerializer(serializers.ModelSerializer):
         """Check if current user can edit this review."""
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            return obj.tenant == request.user or request.user.user_type == "admin"
+            return obj.tenant == request.user or capabilities.is_platform_staff(request.user)
         return False
 
 

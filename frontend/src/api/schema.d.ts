@@ -12,8 +12,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get user statistics
-         * @description Get user registration and activity statistics (Admin only)
+         * User statistics
+         * @description Counts by capability rather than by a self-declared string.
          */
         get: operations["auth_admin_statistics_retrieve"];
         put?: never;
@@ -31,17 +31,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List all users
-         * @description Get paginated list of all users (Admin only)
-         */
+        /** @description User administration for platform staff. */
         get: operations["auth_admin_users_list"];
         put?: never;
-        /**
-         * @description Admin viewset for managing users.
-         *
-         *     Provides full CRUD operations for user management by admins.
-         */
+        /** @description User administration for platform staff. */
         post: operations["auth_admin_users_create"];
         delete?: never;
         options?: never;
@@ -56,29 +49,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get user details
-         * @description Get detailed information about a specific user (Admin only)
-         */
+        /** @description User administration for platform staff. */
         get: operations["auth_admin_users_retrieve"];
-        /**
-         * Update user
-         * @description Update user information (Admin only)
-         */
+        /** @description User administration for platform staff. */
         put: operations["auth_admin_users_update"];
         post?: never;
-        /**
-         * Delete user
-         * @description Delete user account (Admin only)
-         */
+        /** @description User administration for platform staff. */
         delete: operations["auth_admin_users_destroy"];
         options?: never;
         head?: never;
-        /**
-         * @description Admin viewset for managing users.
-         *
-         *     Provides full CRUD operations for user management by admins.
-         */
+        /** @description User administration for platform staff. */
         patch: operations["auth_admin_users_partial_update"];
         trace?: never;
     };
@@ -91,25 +71,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Toggle user active status. */
+        /**
+         * Toggle active
+         * @description User administration for platform staff.
+         */
         post: operations["auth_admin_users_toggle_active_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/admin/users/{id}/toggle_verification/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description Toggle user verification status. */
-        post: operations["auth_admin_users_toggle_verification_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -126,8 +92,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Verify user account
-         * @description Admin endpoint to verify/unverify user accounts
+         * Verify a landlord
+         * @description Mark a landlord profile verified.
+         *
+         *     Landlord verification is a platform-staff action. Student verification is
+         *     a different flow entirely, run per-university (ADR-003).
          */
         post: operations["auth_admin_verify_create"];
         delete?: never;
@@ -145,10 +114,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * User login
-         * @description Authenticate user and return JWT tokens
-         */
+        /** Log in */
         post: operations["auth_login_create"];
         delete?: never;
         options?: never;
@@ -166,8 +132,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * User logout
-         * @description Logout user by blacklisting refresh token
+         * Log out
+         * @description Blacklist the refresh token.
          */
         post: operations["auth_logout_create"];
         delete?: never;
@@ -184,8 +150,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get current user info
-         * @description Get basic information about the current authenticated user
+         * Current user
+         * @description Identity and the caller's capability set (ADR-003).
          */
         get: operations["auth_me_retrieve"];
         put?: never;
@@ -205,10 +171,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Change password
-         * @description Change current user's password
-         */
+        /** Change password */
         post: operations["auth_password_change_create"];
         delete?: never;
         options?: never;
@@ -224,44 +187,28 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get user profile
-         * @description Retrieve current user's profile information
+         * Get profile
+         * @description The caller's own identity.
          */
         get: operations["auth_profile_retrieve"];
-        put?: never;
+        /**
+         * Replace profile
+         * @description PUT is supported as well as PATCH.
+         *
+         *     The previous frontend called PUT here and got a 405 on every profile
+         *     save, because the draft implemented only GET and PATCH
+         *     (docs/AUDIT.md §5).
+         */
+        put: operations["auth_profile_update"];
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         /**
-         * Update user profile
-         * @description Update current user's profile information
+         * Update profile
+         * @description The caller's own identity.
          */
         patch: operations["auth_profile_partial_update"];
-        trace?: never;
-    };
-    "/api/v1/auth/profile/preferences/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get profile preferences
-         * @description Retrieve user's profile preferences
-         */
-        get: operations["auth_profile_preferences_retrieve"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update profile preferences
-         * @description Update user's profile preferences
-         */
-        patch: operations["auth_profile_preferences_partial_update"];
         trace?: never;
     };
     "/api/v1/auth/register/": {
@@ -274,8 +221,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Register new user
-         * @description Create a new user account with email and password
+         * Register
+         * @description Create an account and return tokens.
          */
         post: operations["auth_register_create"];
         delete?: never;
@@ -1627,9 +1574,10 @@ export interface components {
             rental: number;
         };
         /**
-         * @description Admin serializer for managing users.
+         * @description User administration, for platform staff.
          *
-         *     Includes all fields and allows admin operations.
+         *     ``is_staff`` stays read-only here too: elevating a user to platform staff
+         *     is a Django admin or management-command action, never an API one.
          */
         AdminUser: {
             readonly id: number;
@@ -1637,96 +1585,48 @@ export interface components {
              * Email address
              * Format: email
              */
-            email: string;
-            /** @description Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only. */
-            username: string;
-            first_name?: string;
-            last_name?: string;
+            readonly email: string;
+            first_name: string;
+            last_name: string;
             readonly full_name: string;
-            /**
-             * @description Type of user account
-             *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
-             */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** @description Phone number in international format */
             phone_number?: string;
-            /**
-             * Active
-             * @description Designates whether this user should be treated as active. Unselect this instead of deleting accounts.
-             */
+            /** Active */
             is_active?: boolean;
             /**
-             * Staff status
-             * @description Designates whether the user can log into this admin site.
+             * Platform staff
+             * @description The only meaning of 'platform administrator'. Not settable via the API.
              */
-            is_staff?: boolean;
-            /**
-             * Superuser status
-             * @description Designates that this user has all permissions without explicitly assigning them.
-             */
-            is_superuser?: boolean;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            is_verified?: boolean;
-            /** Format: date-time */
-            verification_date?: string | null;
+            readonly is_staff: boolean;
             /** Format: date-time */
             readonly date_joined: string;
-            /** Format: date-time */
-            readonly last_login: string | null;
+            /**
+             * @description The shape ``/auth/me/`` returns.
+             *
+             *     Explicit rather than derived client-side, so the client never has to know
+             *     what a LandlordProfile is.
+             */
+            readonly capabilities: {
+                is_student: boolean;
+                is_landlord: boolean;
+                is_university_staff: boolean;
+                is_staff: boolean;
+                is_verified_student: boolean;
+                university: string | null;
+                manages_properties: number[];
+            };
         };
         /**
-         * @description Admin serializer for managing users.
+         * @description User administration, for platform staff.
          *
-         *     Includes all fields and allows admin operations.
+         *     ``is_staff`` stays read-only here too: elevating a user to platform staff
+         *     is a Django admin or management-command action, never an API one.
          */
         AdminUserRequest: {
-            /**
-             * Email address
-             * Format: email
-             */
-            email: string;
-            /** @description Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only. */
-            username: string;
-            first_name?: string;
-            last_name?: string;
-            /**
-             * @description Type of user account
-             *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
-             */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** @description Phone number in international format */
+            first_name: string;
+            last_name: string;
             phone_number?: string;
-            /**
-             * Active
-             * @description Designates whether this user should be treated as active. Unselect this instead of deleting accounts.
-             */
+            /** Active */
             is_active?: boolean;
-            /**
-             * Staff status
-             * @description Designates whether the user can log into this admin site.
-             */
-            is_staff?: boolean;
-            /**
-             * Superuser status
-             * @description Designates that this user has all permissions without explicitly assigning them.
-             */
-            is_superuser?: boolean;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            is_verified?: boolean;
-            /** Format: date-time */
-            verification_date?: string | null;
         };
         /**
          * @description * `furnished` - Fully Furnished
@@ -1738,16 +1638,17 @@ export interface components {
         /** @description Serializer for landlord information in rental listings. */
         Landlord: {
             readonly id: number;
-            first_name?: string;
-            last_name?: string;
+            first_name: string;
+            last_name: string;
             readonly full_name: string;
-            /** @description Phone number in international format */
             phone_number?: string;
             /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
+             * @description Verification moved off User onto LandlordProfile (ADR-003).
+             *
+             *     The draft had a single is_verified flag on User meaning nothing in
+             *     particular; it now means a platform-staff decision about a landlord.
              */
-            is_verified?: boolean;
+            readonly is_verified: boolean;
         };
         /**
          * @description * `1` - 1 - Poor
@@ -1760,15 +1661,9 @@ export interface components {
         LandlordRatingEnum: 1 | 2 | 3 | 4 | 5;
         /** @description Serializer for landlord information in rental listings. */
         LandlordRequest: {
-            first_name?: string;
-            last_name?: string;
-            /** @description Phone number in international format */
+            first_name: string;
+            last_name: string;
             phone_number?: string;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            is_verified?: boolean;
         };
         /** @description Serializer for landlord responses to reviews. */
         LandlordResponseRequest: {
@@ -1897,17 +1792,9 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["ReviewList"][];
         };
-        /**
-         * @description Serializer for changing user password.
-         *
-         *     Requires current password and validates new password.
-         */
         PasswordChangeRequest: {
-            /** @description Enter your current password */
             current_password: string;
-            /** @description Enter your new password */
             new_password: string;
-            /** @description Confirm your new password */
             new_password_confirm: string;
         };
         /**
@@ -2138,52 +2025,17 @@ export interface components {
             rental?: number;
         };
         /**
-         * @description Admin serializer for managing users.
+         * @description User administration, for platform staff.
          *
-         *     Includes all fields and allows admin operations.
+         *     ``is_staff`` stays read-only here too: elevating a user to platform staff
+         *     is a Django admin or management-command action, never an API one.
          */
         PatchedAdminUserRequest: {
-            /**
-             * Email address
-             * Format: email
-             */
-            email?: string;
-            /** @description Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only. */
-            username?: string;
             first_name?: string;
             last_name?: string;
-            /**
-             * @description Type of user account
-             *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
-             */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** @description Phone number in international format */
             phone_number?: string;
-            /**
-             * Active
-             * @description Designates whether this user should be treated as active. Unselect this instead of deleting accounts.
-             */
+            /** Active */
             is_active?: boolean;
-            /**
-             * Staff status
-             * @description Designates whether the user can log into this admin site.
-             */
-            is_staff?: boolean;
-            /**
-             * Superuser status
-             * @description Designates that this user has all permissions without explicitly assigning them.
-             */
-            is_superuser?: boolean;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            is_verified?: boolean;
-            /** Format: date-time */
-            verification_date?: string | null;
         };
         /** @description Serializer for rental images. */
         PatchedRentalImageRequest: {
@@ -2382,60 +2234,20 @@ export interface components {
             /** @description Whether the tenant would recommend this property */
             would_recommend?: boolean | null;
         };
-        /** @description Serializer for updating user profile preferences. */
-        PatchedUserProfileUpdateRequest: {
-            preferred_contact_method?: components["schemas"]["PreferredContactMethodEnum"];
-            /** @description Receive notifications via email */
-            email_notifications?: boolean;
-            /** @description Receive notifications via SMS */
-            sms_notifications?: boolean;
-            /**
-             * Format: uri
-             * @description Personal or business website
-             */
-            website?: string;
-            /**
-             * LinkedIn profile
-             * Format: uri
-             */
-            linkedin?: string;
-            /** @description Business or company name (for landlords) */
-            business_name?: string;
-            /** @description Business license number */
-            business_license?: string;
-        };
         /**
-         * @description Serializer for updating user information.
+         * @description The fields a user may change about themselves.
          *
-         *     Allows users to update their profile information.
+         *     Deliberately short. Nothing here grants any capability: that is the point
+         *     of ADR-003, and a registration or profile payload must never be able to
+         *     escalate.
          */
         PatchedUserUpdateRequest: {
             first_name?: string;
             last_name?: string;
-            /** @description Phone number in international format */
             phone_number?: string;
-            /** Format: binary */
-            profile_picture?: string | null;
-            /**
-             * Biography
-             * @description Brief description about yourself
-             */
-            bio?: string;
-            /** Format: date */
-            date_of_birth?: string | null;
-            address?: string;
-            city?: string;
-            /** State/province */
-            state?: string;
-            zip_code?: string;
+            /** Format: uri */
+            avatar_url?: string;
         };
-        /**
-         * @description * `email` - Email
-         *     * `phone` - Phone
-         *     * `both` - Both
-         * @enum {string}
-         */
-        PreferredContactMethodEnum: "email" | "phone" | "both";
         /**
          * @description * `apartment` - Apartment
          *     * `house` - House
@@ -3795,25 +3607,22 @@ export interface components {
         /** @description Serializer for reviewer information in review displays. */
         Reviewer: {
             readonly id: number;
-            first_name?: string;
-            last_name?: string;
+            first_name: string;
+            last_name: string;
             readonly full_name: string;
             readonly initials: string;
             /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
+             * @description The reviewer's student verification badge (ADR-003).
+             *
+             *     Absence is not a discredit: verification is off by default, and where a
+             *     university has not enabled it nobody carries the badge.
              */
-            is_verified?: boolean;
+            readonly is_verified: boolean;
         };
         /** @description Serializer for reviewer information in review displays. */
         ReviewerRequest: {
-            first_name?: string;
-            last_name?: string;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            is_verified?: boolean;
+            first_name: string;
+            last_name: string;
         };
         /**
          * @description * `available` - Available
@@ -3865,172 +3674,59 @@ export interface components {
         TokenVerifyRequest: {
             token: string;
         };
-        /**
-         * @description Serializer for User model.
-         *
-         *     Used for displaying user information and basic updates.
-         */
+        /** @description A user's own identity, with their capability set. */
         User: {
             readonly id: number;
             /**
              * Email address
              * Format: email
              */
-            email: string;
-            first_name?: string;
-            last_name?: string;
+            readonly email: string;
+            first_name: string;
+            last_name: string;
             readonly full_name: string;
-            readonly display_name: string;
-            /**
-             * @description Type of user account
-             *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
-             */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** @description Phone number in international format */
             phone_number?: string;
+            readonly phone_verified: boolean;
+            readonly email_verified: boolean;
             /** Format: uri */
-            profile_picture?: string | null;
-            /**
-             * Biography
-             * @description Brief description about yourself
-             */
-            bio?: string;
-            address?: string;
-            city?: string;
-            /** State/province */
-            state?: string;
-            zip_code?: string;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            readonly is_verified: boolean;
+            avatar_url?: string;
+            /** Active */
+            readonly is_active: boolean;
             /** Format: date-time */
             readonly date_joined: string;
-        };
-        /**
-         * @description Detailed serializer for User model including profile information.
-         *
-         *     Used for user profile pages and detailed user information.
-         */
-        UserDetail: {
-            readonly id: number;
             /**
-             * Email address
-             * Format: email
-             */
-            email: string;
-            first_name?: string;
-            last_name?: string;
-            readonly full_name: string;
-            readonly display_name: string;
-            /**
-             * @description Type of user account
+             * @description The shape ``/auth/me/`` returns.
              *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
+             *     Explicit rather than derived client-side, so the client never has to know
+             *     what a LandlordProfile is.
              */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** @description Phone number in international format */
-            phone_number?: string;
-            /** Format: uri */
-            profile_picture?: string | null;
-            /**
-             * Biography
-             * @description Brief description about yourself
-             */
-            bio?: string;
-            /** Format: date */
-            date_of_birth?: string | null;
-            address?: string;
-            city?: string;
-            /** State/province */
-            state?: string;
-            zip_code?: string;
-            /**
-             * Verified
-             * @description Designates whether this user has been verified by admin.
-             */
-            readonly is_verified: boolean;
-            /** Format: date-time */
-            readonly verification_date: string | null;
-            /** Format: date-time */
-            readonly date_joined: string;
-            /** Format: date-time */
-            readonly last_login: string | null;
-            readonly extended_profile: components["schemas"]["UserProfile"];
+            readonly capabilities: {
+                is_student: boolean;
+                is_landlord: boolean;
+                is_university_staff: boolean;
+                is_staff: boolean;
+                is_verified_student: boolean;
+                university: string | null;
+                manages_properties: number[];
+            };
         };
-        /**
-         * @description Serializer for user login.
-         *
-         *     Validates user credentials and returns user object if valid.
-         */
+        /** @description Exchange credentials for a user. */
         UserLoginRequest: {
-            /**
-             * Format: email
-             * @description Enter your email address
-             */
+            /** Format: email */
             email: string;
-            /** @description Enter your password */
             password: string;
         };
         /**
-         * @description Serializer for UserProfile model.
+         * @description Create an account.
          *
-         *     Handles extended profile information.
-         */
-        UserProfile: {
-            preferred_contact_method?: components["schemas"]["PreferredContactMethodEnum"];
-            /** @description Receive notifications via email */
-            email_notifications?: boolean;
-            /** @description Receive notifications via SMS */
-            sms_notifications?: boolean;
-            /**
-             * Format: uri
-             * @description Personal or business website
-             */
-            website?: string;
-            /**
-             * LinkedIn profile
-             * Format: uri
-             */
-            linkedin?: string;
-            /** @description Business or company name (for landlords) */
-            business_name?: string;
-            /** @description Business license number */
-            business_license?: string;
-        };
-        /** @description Serializer for updating user profile preferences. */
-        UserProfileUpdate: {
-            preferred_contact_method?: components["schemas"]["PreferredContactMethodEnum"];
-            /** @description Receive notifications via email */
-            email_notifications?: boolean;
-            /** @description Receive notifications via SMS */
-            sms_notifications?: boolean;
-            /**
-             * Format: uri
-             * @description Personal or business website
-             */
-            website?: string;
-            /**
-             * LinkedIn profile
-             * Format: uri
-             */
-            linkedin?: string;
-            /** @description Business or company name (for landlords) */
-            business_name?: string;
-            /** @description Business license number */
-            business_license?: string;
-        };
-        /**
-         * @description Serializer for user registration.
+         *     No role field. The draft accepted ``user_type`` straight from the request
+         *     body and never validated it, so anyone could register as an administrator
+         *     and the object-permission checks trusted it (docs/AUDIT.md §4.4).
          *
-         *     Handles validation and creation of new user accounts with
-         *     different user types (tenant, landlord, admin).
+         *     When the request resolves a tenant, the new user gets a StudentProfile for
+         *     that university — signing up on a university's own subdomain is the
+         *     statement that you are its student. Landlord and staff profiles are granted,
+         *     never self-declared.
          */
         UserRegistrationRequest: {
             /**
@@ -4038,37 +3734,26 @@ export interface components {
              * Format: email
              */
             email: string;
-            /** @description Password must be at least 8 characters long */
             password: string;
-            /** @description Confirm your password */
             password_confirm: string;
             first_name: string;
             last_name: string;
-            /** @description Phone number in international format */
             phone_number?: string;
-            /**
-             * @description Type of user account
-             *
-             *     * `tenant` - Tenant
-             *     * `landlord` - Landlord
-             *     * `admin` - Admin
-             */
-            user_type?: components["schemas"]["UserTypeEnum"];
-            /** Format: date */
-            date_of_birth?: string | null;
-            address?: string;
-            city?: string;
-            /** State/province */
-            state?: string;
-            zip_code?: string;
         };
         /**
-         * @description * `tenant` - Tenant
-         *     * `landlord` - Landlord
-         *     * `admin` - Admin
-         * @enum {string}
+         * @description The fields a user may change about themselves.
+         *
+         *     Deliberately short. Nothing here grants any capability: that is the point
+         *     of ADR-003, and a registration or profile payload must never be able to
+         *     escalate.
          */
-        UserTypeEnum: "tenant" | "landlord" | "admin";
+        UserUpdateRequest: {
+            first_name: string;
+            last_name: string;
+            phone_number?: string;
+            /** Format: uri */
+            avatar_url?: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -4087,20 +3772,12 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        total_users?: number;
-                        active_users?: number;
-                        verified_users?: number;
-                        tenants?: number;
-                        landlords?: number;
-                        admins?: number;
-                    };
-                };
+                content?: never;
             };
         };
     };
@@ -4264,49 +3941,14 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminUserRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["AdminUserRequest"];
-                "multipart/form-data": components["schemas"]["AdminUserRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
+            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["AdminUser"];
-                };
-            };
-        };
-    };
-    auth_admin_users_toggle_verification_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description A unique integer value identifying this User. */
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AdminUserRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["AdminUserRequest"];
-                "multipart/form-data": components["schemas"]["AdminUserRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AdminUser"];
-                };
+                content?: never;
             };
         };
     };
@@ -4315,42 +3957,25 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description User ID to verify */
                 user_id: number;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
+                content?: never;
             };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
+            /** @description No response body */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
+                content?: never;
             };
         };
     };
@@ -4377,16 +4002,6 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
         };
     };
     auth_logout_create: {
@@ -4396,37 +4011,14 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                type: {
-                    [key: string]: unknown;
-                };
-                properties: unknown;
-                required: {
-                    [key: string]: unknown;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
+            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
+                content?: never;
             };
         };
     };
@@ -4464,25 +4056,12 @@ export interface operations {
             };
         };
         responses: {
+            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
+                content?: never;
             };
         };
     };
@@ -4500,7 +4079,32 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserDetail"];
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+        };
+    };
+    auth_profile_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["UserUpdateRequest"];
+                "multipart/form-data": components["schemas"]["UserUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
                 };
             };
         };
@@ -4525,71 +4129,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserDetail"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    auth_profile_preferences_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserProfileUpdate"];
-                };
-            };
-        };
-    };
-    auth_profile_preferences_partial_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PatchedUserProfileUpdateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedUserProfileUpdateRequest"];
-                "multipart/form-data": components["schemas"]["PatchedUserProfileUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserProfileUpdate"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["User"];
                 };
             };
         };
@@ -4615,16 +4155,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
         };

@@ -1,12 +1,19 @@
 """
-Contract tests for the API as it exists today.
+Contract tests for the API.
 
-The purpose of these is documentary as much as protective. The domain model is
-about to be rewritten (see docs/adr/), and this file records what the current
-endpoints actually do so that the rewrite is a deliberate change rather than an
-accidental one. Where current behaviour is a *bug*, the test asserts the buggy
-behaviour and says so in its docstring -- flipping those assertions is part of
-the rewrite's definition of done.
+Written before the schema rewrite to record what the endpoints actually did, so
+that every change to the contract would be a deliberate one. Several of them
+pinned genuine defects, asserting the broken behaviour on purpose.
+
+**Those assertions are being inverted as the rewrite fixes them.** Each such
+test keeps its name and its history, and its docstring now records what the
+defect was and which change closed it — deleting them would lose the evidence
+that the bug existed and that it is gone.
+
+Still pinned as broken, awaiting their phase of the rewrite:
+  - the rental detail endpoint raises on an unresolved F() expression
+  - review reporting is unreachable by anybody
+  - the rentals list URL the old frontend called is the router root
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from decimal import Decimal
 import pytest
 from rest_framework import status
 
-from accounts.models import UserProfile
+from accounts.models import StudentProfile, User
 from rentals.models import Rental, RentalFavorite, RentalInquiry
 from reviews.models import Review, ReviewHelpfulness, ReviewReport
 from tests.factories import (
@@ -49,7 +56,6 @@ class TestRegistration:
                 "password_confirm": "a-strong-password-42",
                 "first_name": "Wanjiku",
                 "last_name": "Kamau",
-                "user_type": "tenant",
             },
             format="json",
         )
@@ -90,11 +96,17 @@ class TestRegistration:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_user_type_is_client_supplied_and_unvalidated(self, api_client):
-        """Anyone may self-register as a landlord.
+    def test_a_role_cannot_be_self_assigned_at_registration(self, api_client):
+        """FIXED. Was: anyone could register as a landlord, or as an admin.
 
-        There is no verification step whatsoever. ADR-003 replaces this with
-        object-level roles; recorded here so the change is visible.
+        The draft took ``user_type`` straight from the request body and never
+        validated it, while the object-permission checks in rentals and reviews
+        trusted that same field — so a self-declared admin could edit or delete
+        any listing or review on the platform (docs/AUDIT.md §4.4).
+
+        ADR-003 removed the field. Capability now comes from a profile another
+        party creates, so there is nothing in a registration payload that can
+        grant anything. A stray role field is ignored rather than honoured.
         """
         response = api_client.post(
             self.url,
@@ -104,15 +116,31 @@ class TestRegistration:
                 "password_confirm": "a-strong-password-42",
                 "first_name": "Self",
                 "last_name": "Declared",
-                "user_type": "landlord",
+                "user_type": "admin",
+                "is_staff": True,
             },
             format="json",
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.json()["user"]["user_type"] == "landlord"
+        body = response.json()["user"]
 
-    def test_registration_creates_the_extended_profile_via_signal(self, api_client):
+        assert "user_type" not in body
+        assert body["capabilities"]["is_staff"] is False
+        assert body["capabilities"]["is_landlord"] is False
+
+        created = User.objects.get(email="self.declared@example.co.ke")
+        assert created.is_staff is False
+        assert not hasattr(created, "landlord_profile")
+
+    def test_registering_on_a_tenant_host_creates_a_student_profile(self, api_client, university):
+        """Signing up on a university's own subdomain says you are its student.
+
+        Replaces the draft's UserProfile signal. That model was a grab-bag of
+        notification preferences, social links and landlord business fields,
+        created on every user whether or not any of it applied
+        (docs/AUDIT.md §7).
+        """
         api_client.post(
             self.url,
             {
@@ -123,9 +151,31 @@ class TestRegistration:
                 "last_name": "Nal",
             },
             format="json",
+            HTTP_HOST=f"{university.subdomain}.example.co.ke",
         )
 
-        assert UserProfile.objects.filter(user__email="signal@students.ku.ac.ke").exists()
+        profile = StudentProfile.all_objects.get(user__email="signal@students.ku.ac.ke")
+
+        assert profile.university == university
+        # Verification is off by default; the profile exists unverified.
+        assert not profile.is_verified
+
+    def test_registering_without_a_tenant_creates_no_student_profile(self, api_client):
+        """The neutral host has no university to attach a student to."""
+        api_client.post(
+            self.url,
+            {
+                "email": "neutral@example.co.ke",
+                "password": "a-strong-password-42",
+                "password_confirm": "a-strong-password-42",
+                "first_name": "Neu",
+                "last_name": "Tral",
+            },
+            format="json",
+            HTTP_HOST="www.example.co.ke",
+        )
+
+        assert not StudentProfile.all_objects.filter(user__email="neutral@example.co.ke").exists()
 
 
 class TestLogin:
@@ -248,10 +298,19 @@ class TestProfile:
         tenant.refresh_from_db()
         assert tenant.first_name == "Renamed"
 
-    def test_put_is_not_supported(self, tenant_client):
-        """The frontend's profileApi.update() uses PUT, which this view lacks."""
-        response = tenant_client.put(self.url, {"first_name": "X"}, format="json")
-        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    def test_put_is_supported(self, tenant_client, tenant):
+        """FIXED. Was: 405, because the view implemented only GET and PATCH.
+
+        The previous frontend called PUT here, so every profile save failed
+        silently (docs/AUDIT.md §5).
+        """
+        response = tenant_client.put(
+            self.url, {"first_name": "Replaced", "last_name": "Wholly"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        tenant.refresh_from_db()
+        assert tenant.first_name == "Replaced"
 
     def test_rejects_an_invalid_phone_number(self, tenant_client):
         response = tenant_client.patch(
@@ -260,38 +319,19 @@ class TestProfile:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-class TestProfilePreferences:
-    url = "/api/v1/auth/profile/preferences/"
+class TestProfilePreferencesIsGone:
+    """The /auth/profile/preferences/ endpoint went with UserProfile.
 
-    def test_returns_preferences(self, tenant_client):
-        response = tenant_client.get(self.url)
-        assert response.status_code == status.HTTP_200_OK
+    That model held notification preferences, social links and landlord
+    business fields on every user row regardless of whether any of it applied
+    (docs/AUDIT.md §7). ADR-003 splits capability into the profile models;
+    preferences get their own small model if they are still wanted.
+    """
 
-    def test_creates_preferences_when_the_row_is_missing(self, tenant_client, tenant):
-        UserProfile.objects.filter(user=tenant).delete()
+    def test_the_endpoint_no_longer_exists(self, tenant_client):
+        response = tenant_client.get("/api/v1/auth/profile/preferences/")
 
-        response = tenant_client.get(self.url)
-
-        assert response.status_code == status.HTTP_200_OK
-        assert UserProfile.objects.filter(user=tenant).exists()
-
-    def test_patches_preferences(self, tenant_client, tenant):
-        response = tenant_client.patch(self.url, {"sms_notifications": True}, format="json")
-
-        assert response.status_code == status.HTTP_200_OK
-        tenant.extended_profile.refresh_from_db()
-        assert tenant.extended_profile.sms_notifications is True
-
-    def test_patch_creates_the_row_when_missing(self, tenant_client, tenant):
-        UserProfile.objects.filter(user=tenant).delete()
-
-        response = tenant_client.patch(self.url, {"email_notifications": False}, format="json")
-
-        assert response.status_code == status.HTTP_200_OK
-
-    def test_rejects_an_invalid_website(self, tenant_client):
-        response = tenant_client.patch(self.url, {"website": "not-a-url"}, format="json")
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 class TestPasswordChange:
@@ -371,16 +411,6 @@ class TestAdminAccess:
         response = staff_client.get(f"/api/v1/auth/admin/users/{tenant.pk}/")
         assert response.status_code == status.HTTP_200_OK
 
-    def test_staff_user_toggles_verification(self, staff_client, tenant):
-        tenant.is_verified = False
-        tenant.save(update_fields=["is_verified"])
-
-        response = staff_client.post(f"/api/v1/auth/admin/users/{tenant.pk}/toggle_verification/")
-
-        assert response.status_code == status.HTTP_200_OK
-        tenant.refresh_from_db()
-        assert tenant.is_verified is True
-
     def test_staff_user_toggles_active(self, staff_client, tenant):
         response = staff_client.post(f"/api/v1/auth/admin/users/{tenant.pk}/toggle_active/")
 
@@ -388,15 +418,24 @@ class TestAdminAccess:
         tenant.refresh_from_db()
         assert tenant.is_active is False
 
-    def test_staff_user_verifies_a_user_by_id(self, staff_client, tenant):
-        tenant.is_verified = False
-        tenant.save(update_fields=["is_verified"])
+    def test_staff_user_verifies_a_landlord(self, staff_client, landlord):
+        """Landlord verification is a platform-staff action.
 
-        response = staff_client.post(f"/api/v1/auth/admin/verify/{tenant.pk}/")
+        Student verification is a different flow entirely, run per-university
+        (ADR-003), which is why this endpoint refuses a user with no landlord
+        profile rather than setting a flag on User.
+        """
+        response = staff_client.post(f"/api/v1/auth/admin/verify/{landlord.pk}/")
 
         assert response.status_code == status.HTTP_200_OK
-        tenant.refresh_from_db()
-        assert tenant.is_verified is True
+        landlord.landlord_profile.refresh_from_db()
+        assert landlord.landlord_profile.verification_status == "verified"
+        assert landlord.landlord_profile.verified_at is not None
+
+    def test_verifying_a_user_with_no_landlord_profile_is_refused(self, staff_client, tenant):
+        response = staff_client.post(f"/api/v1/auth/admin/verify/{tenant.pk}/")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_verifying_an_unknown_user_is_404(self, staff_client):
         response = staff_client.post("/api/v1/auth/admin/verify/999999/")
@@ -1060,30 +1099,32 @@ class TestAdminReviews:
 
 
 class TestModelBehaviour:
-    def test_email_is_lowercased_and_username_defaults_to_it(self, db):
-        """User.save() lowercases the email and backfills username from it."""
-        from django.contrib.auth import get_user_model
-
-        model = get_user_model()
-        user = model(email="MiXeD@Example.co.ke")
+    def test_email_is_lowercased_on_save(self, db):
+        user = User(email="MiXeD@Example.co.ke", first_name="A", last_name="B")
         user.set_password(TEST_PASSWORD)
         user.save()
 
         assert user.email == "mixed@example.co.ke"
-        assert user.username == "mixed@example.co.ke"
 
-    def test_create_user_still_demands_a_username(self, db):
-        """USERNAME_FIELD is email, but the inherited manager wants a username.
+    def test_create_user_needs_only_an_email(self, db):
+        """FIXED. Was: create_user() demanded a vestigial username.
 
-        ``createsuperuser`` and any ``objects.create_user()`` call therefore
-        still revolve around the vestigial username column.
+        USERNAME_FIELD was already email, but the model inherited
+        AbstractUser's manager, so createsuperuser and every
+        objects.create_user() call still revolved around a column nobody read
+        (docs/AUDIT.md §7 item 11). User is on AbstractBaseUser now and the
+        column is gone.
         """
-        from django.contrib.auth import get_user_model
+        user = User.objects.create_user(
+            email="x@example.co.ke", password=TEST_PASSWORD, first_name="X", last_name="Y"
+        )
 
-        with pytest.raises(ValueError, match="username must be set"):
-            get_user_model().objects.create_user(
-                email="x@example.co.ke", username="", password=TEST_PASSWORD
-            )
+        assert user.pk is not None
+        assert not hasattr(user, "username")
+
+    def test_create_user_rejects_a_missing_email(self, db):
+        with pytest.raises(ValueError, match="email"):
+            User.objects.create_user(email="", password=TEST_PASSWORD)
 
     def test_rental_str_renders_a_dollar_sign(self, rental):
         """Currency is hard-coded to USD in __str__; KES is the launch market."""

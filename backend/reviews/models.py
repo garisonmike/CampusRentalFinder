@@ -40,7 +40,7 @@ class Review(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="reviews",
-        limit_choices_to={"user_type": "tenant"},
+        limit_choices_to={"student_profile__isnull": False},
         help_text=_("The tenant who wrote this review"),
     )
 
@@ -322,7 +322,7 @@ class ReviewReport(models.Model):
         null=True,
         blank=True,
         related_name="resolved_reports",
-        limit_choices_to={"user_type": "admin"},
+        limit_choices_to={"is_staff": True},
     )
 
     resolved_at = models.DateTimeField(_("resolved at"), null=True, blank=True)

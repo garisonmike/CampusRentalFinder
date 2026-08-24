@@ -17,6 +17,8 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from accounts import capabilities
+
 from .models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from .serializers import (
     AdminRentalSerializer,
@@ -43,7 +45,7 @@ class IsLandlordOrReadOnly(permissions.BasePermission):
             return True
 
         # Write permissions only for authenticated landlords
-        return request.user.is_authenticated and request.user.user_type == "landlord"
+        return capabilities.is_landlord(request.user)
 
     def has_object_permission(self, request, view, obj):
         # Read permissions for any request
@@ -51,7 +53,7 @@ class IsLandlordOrReadOnly(permissions.BasePermission):
             return True
 
         # Write permissions only for the owner landlord or admin
-        return obj.landlord == request.user or request.user.user_type == "admin"
+        return obj.landlord == request.user or capabilities.is_platform_staff(request.user)
 
 
 class RentalViewSet(ModelViewSet):
@@ -281,7 +283,7 @@ class RentalViewSet(ModelViewSet):
     )
     def my_properties(self, request):
         """Get current landlord's properties."""
-        if request.user.user_type != "landlord":
+        if not capabilities.is_landlord(request.user):
             return Response(
                 {"error": _("Only landlords can access this endpoint")},
                 status=status.HTTP_403_FORBIDDEN,
@@ -374,13 +376,13 @@ class RentalInquiryViewSet(ModelViewSet):
         """Filter inquiries based on user type."""
         user = self.request.user
 
-        if user.user_type == "tenant":
+        if capabilities.is_student(user):
             # Tenants see their own inquiries
             return self.queryset.filter(tenant=user)
-        elif user.user_type == "landlord":
+        elif capabilities.is_landlord(user):
             # Landlords see inquiries for their properties
             return self.queryset.filter(rental__landlord=user)
-        elif user.user_type == "admin":
+        elif capabilities.is_platform_staff(user):
             # Admins see all inquiries
             return self.queryset
         else:
@@ -393,7 +395,7 @@ class RentalInquiryViewSet(ModelViewSet):
     )
     def create(self, request, *args, **kwargs):
         """Create inquiry (tenant only)."""
-        if request.user.user_type != "tenant":
+        if not capabilities.is_student(request.user):
             return Response(
                 {"error": _("Only tenants can submit inquiries")}, status=status.HTTP_403_FORBIDDEN
             )

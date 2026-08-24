@@ -1,451 +1,278 @@
-"""
-Views for the accounts app.
+"""Views for the accounts app (ADR-003)."""
 
-This module contains views for user authentication, registration,
-profile management, and admin operations.
-"""
+from __future__ import annotations
 
-from django.contrib.auth import update_session_auth_hash
+from django.db.models import Count, Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from drf_spectacular.openapi import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, UserProfile
+from accounts.permissions import IsPlatformStaff
+from universities.constants import VerificationStatus
+
+from .models import User
 from .serializers import (
     AdminUserSerializer,
     PasswordChangeSerializer,
-    UserDetailSerializer,
     UserLoginSerializer,
-    UserProfileUpdateSerializer,
     UserRegistrationSerializer,
     UserSerializer,
     UserUpdateSerializer,
 )
 
 
+def issue_tokens(user: User) -> dict[str, str]:
+    refresh = RefreshToken.for_user(user)
+    return {"access": str(refresh.access_token), "refresh": str(refresh)}
+
+
 class UserRegistrationView(APIView):
-    """
-    User registration endpoint.
-    Returns JWT tokens immediately after successful signup.
-    """
+    """Create an account and return tokens."""
 
     permission_classes = [AllowAny]
+    serializer_class = UserRegistrationSerializer
 
     @extend_schema(
-        summary="Register new user",
-        description="Create a new user account with email and password",
+        summary="Register",
         request=UserRegistrationSerializer,
-        responses={201: UserSerializer, 400: "Bad Request - Validation errors"},
+        responses={201: UserSerializer},
         tags=["Authentication"],
     )
-    def post(self, request):
-        serializer = UserRegistrationSerializer(data=request.data)
+    def post(self, request: Request) -> Response:
+        serializer = UserRegistrationSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
 
-        if serializer.is_valid():
-            user = serializer.save()
-
-            # Generate JWT tokens immediately
-            refresh = RefreshToken.for_user(user)
-
-            return Response(
-                {
-                    "message": _("User registered successfully"),
-                    "user": UserSerializer(user).data,
-                    "tokens": {
-                        "access": str(refresh.access_token),
-                        "refresh": str(refresh),
-                    },
-                },
-                status=status.HTTP_201_CREATED,
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "message": _("User registered successfully"),
+                "user": UserSerializer(user).data,
+                "tokens": issue_tokens(user),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class UserLoginView(APIView):
-    """
-    User login endpoint.
-    Authenticates user and returns JWT tokens.
-    """
-
     permission_classes = [AllowAny]
+    serializer_class = UserLoginSerializer
 
     @extend_schema(
-        summary="User login",
-        description="Authenticate user and return JWT tokens",
+        summary="Log in",
         request=UserLoginSerializer,
-        responses={200: UserSerializer, 400: "Bad Request - Invalid credentials"},
+        responses={200: UserSerializer},
         tags=["Authentication"],
     )
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         serializer = UserLoginSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
 
-        if serializer.is_valid():
-            user = serializer.validated_data["user"]
-
-            refresh = RefreshToken.for_user(user)
-
-            return Response(
-                {
-                    "message": _("Login successful"),
-                    "user": UserSerializer(user).data,
-                    "tokens": {
-                        "access": str(refresh.access_token),
-                        "refresh": str(refresh),
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "message": _("Login successful"),
+                "user": UserSerializer(user).data,
+                "tokens": issue_tokens(user),
+            }
+        )
 
 
 class UserLogoutView(APIView):
-    """
-    User logout endpoint.
-    Blacklists the refresh token to log out user.
-    """
+    """Blacklist the refresh token."""
 
     permission_classes = [IsAuthenticated]
 
-    @extend_schema(
-        summary="User logout",
-        description="Logout user by blacklisting refresh token",
-        request={
-            "type": "object",
-            "properties": {"refresh": {"type": "string", "description": "Refresh token"}},
-            "required": ["refresh"],
-        },
-        responses={200: "Logout successful", 400: "Bad Request - Invalid token"},
-        tags=["Authentication"],
-    )
-    def post(self, request):
+    @extend_schema(summary="Log out", request=None, responses={200: None}, tags=["Authentication"])
+    def post(self, request: Request) -> Response:
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            return Response(
+                {"error": _("Refresh token is required")}, status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
-            refresh_token = request.data.get("refresh")
-            if not refresh_token:
-                return Response(
-                    {"error": _("Refresh token is required")}, status=status.HTTP_400_BAD_REQUEST
-                )
-
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-
-            return Response({"message": _("Logout successful")}, status=status.HTTP_200_OK)
-
+            RefreshToken(refresh_token).blacklist()
         except Exception:
+            # Narrow enough: the only work above is parsing and blacklisting a
+            # token. The draft used a bare except around a much larger block,
+            # which hid a broken logout for months (docs/AUDIT.md §4.5).
             return Response({"error": _("Invalid token")}, status=status.HTTP_400_BAD_REQUEST)
 
-
-# NOTE: profile, password and admin views below are unchanged from the first draft.
+        return Response({"message": _("Logout successful")})
 
 
 class UserProfileView(APIView):
-    """
-    User profile management endpoint.
-
-    Allows users to view and update their profile information.
-    """
+    """The caller's own identity."""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = UserSerializer
+
+    @extend_schema(summary="Get profile", responses={200: UserSerializer}, tags=["User Profile"])
+    def get(self, request: Request) -> Response:
+        return Response(UserSerializer(request.user).data)
 
     @extend_schema(
-        summary="Get user profile",
-        description="Retrieve current user's profile information",
-        responses={200: UserDetailSerializer},
-        tags=["User Profile"],
-    )
-    def get(self, request):
-        """Get current user's profile."""
-        serializer = UserDetailSerializer(request.user)
-        return Response(serializer.data)
-
-    @extend_schema(
-        summary="Update user profile",
-        description="Update current user's profile information",
+        summary="Update profile",
         request=UserUpdateSerializer,
-        responses={200: UserDetailSerializer, 400: "Bad Request - Validation errors"},
+        responses={200: UserSerializer},
         tags=["User Profile"],
     )
-    def patch(self, request):
-        """Update current user's profile."""
+    def patch(self, request: Request) -> Response:
         serializer = UserUpdateSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
-        if serializer.is_valid():
-            serializer.save()
+        return Response(
+            {
+                "message": _("Profile updated successfully"),
+                "user": UserSerializer(request.user).data,
+            }
+        )
 
-            # Return updated user data
-            updated_user = UserDetailSerializer(request.user)
+    @extend_schema(
+        summary="Replace profile",
+        request=UserUpdateSerializer,
+        responses={200: UserSerializer},
+        tags=["User Profile"],
+    )
+    def put(self, request: Request) -> Response:
+        """PUT is supported as well as PATCH.
 
-            return Response(
-                {"message": _("Profile updated successfully"), "user": updated_user.data}
-            )
+        The previous frontend called PUT here and got a 405 on every profile
+        save, because the draft implemented only GET and PATCH
+        (docs/AUDIT.md §5).
+        """
+        serializer = UserUpdateSerializer(request.user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "message": _("Profile updated successfully"),
+                "user": UserSerializer(request.user).data,
+            }
+        )
 
 
 class PasswordChangeView(APIView):
-    """
-    Password change endpoint.
-
-    Allows authenticated users to change their password.
-    """
-
     permission_classes = [IsAuthenticated]
+    serializer_class = PasswordChangeSerializer
 
     @extend_schema(
         summary="Change password",
-        description="Change current user's password",
         request=PasswordChangeSerializer,
-        responses={200: "Password changed successfully", 400: "Bad Request - Validation errors"},
+        responses={200: None},
         tags=["User Profile"],
     )
-    def post(self, request):
-        """Change user password."""
+    def post(self, request: Request) -> Response:
         serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
-
-        if serializer.is_valid():
-            user = serializer.save()
-
-            # Update session hash to prevent logout
-            update_session_auth_hash(request, user)
-
-            return Response({"message": _("Password changed successfully")})
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"message": _("Password changed successfully")})
 
 
-class UserProfilePreferencesView(APIView):
-    """
-    User profile preferences endpoint.
-
-    Manages extended profile preferences and settings.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(
-        summary="Get profile preferences",
-        description="Retrieve user's profile preferences",
-        responses={200: UserProfileUpdateSerializer},
-        tags=["User Profile"],
-    )
-    def get(self, request):
-        """Get user's profile preferences."""
-        try:
-            profile = request.user.extended_profile
-            serializer = UserProfileUpdateSerializer(profile)
-            return Response(serializer.data)
-        except UserProfile.DoesNotExist:
-            # Create profile if it doesn't exist
-            profile = UserProfile.objects.create(user=request.user)
-            serializer = UserProfileUpdateSerializer(profile)
-            return Response(serializer.data)
-
-    @extend_schema(
-        summary="Update profile preferences",
-        description="Update user's profile preferences",
-        request=UserProfileUpdateSerializer,
-        responses={200: UserProfileUpdateSerializer, 400: "Bad Request - Validation errors"},
-        tags=["User Profile"],
-    )
-    def patch(self, request):
-        """Update user's profile preferences."""
-        try:
-            profile = request.user.extended_profile
-        except UserProfile.DoesNotExist:
-            profile = UserProfile.objects.create(user=request.user)
-
-        serializer = UserProfileUpdateSerializer(profile, data=request.data, partial=True)
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {"message": _("Preferences updated successfully"), "preferences": serializer.data}
-            )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# Function-based views for simple operations
 @extend_schema(
-    summary="Get current user info",
-    description="Get basic information about the current authenticated user",
+    summary="Current user",
+    description="Identity and the caller's capability set (ADR-003).",
     responses={200: UserSerializer},
     tags=["Authentication"],
 )
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-def current_user(request):
-    """Get current user information."""
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+def current_user(request: Request) -> Response:
+    """The caller, with capabilities.
+
+    The client reads authorization from ``capabilities`` and never derives it
+    from model shapes.
+    """
+    user = User.objects.select_related(
+        "landlord_profile", "student_profile__university", "staff_profile__university"
+    ).get(pk=request.user.pk)  # type: ignore[misc]
+
+    return Response(UserSerializer(user).data)
+
+
+# ---------------------------------------------------------------------------
+# Platform staff
+# ---------------------------------------------------------------------------
 
 
 @extend_schema(
-    summary="Verify user account",
-    description="Admin endpoint to verify/unverify user accounts",
-    parameters=[
-        OpenApiParameter(
-            name="user_id",
-            type=OpenApiTypes.INT,
-            location=OpenApiParameter.PATH,
-            description="User ID to verify",
-        )
-    ],
-    responses={200: "User verification updated", 404: "User not found", 403: "Permission denied"},
+    summary="Verify a landlord",
+    request=None,
+    responses={200: None, 404: None},
     tags=["Admin"],
 )
 @api_view(["POST"])
-@permission_classes([IsAdminUser])
-def verify_user(request, user_id):
-    """Admin endpoint to verify user accounts."""
-    try:
-        user = User.objects.get(id=user_id)
-        user.is_verified = not user.is_verified
-        if user.is_verified:
-            from django.utils import timezone
+@permission_classes([IsPlatformStaff])
+def verify_user(request: Request, user_id: int) -> Response:
+    """Mark a landlord profile verified.
 
-            user.verification_date = timezone.now()
-        else:
-            user.verification_date = None
-        user.save()
+    Landlord verification is a platform-staff action. Student verification is
+    a different flow entirely, run per-university (ADR-003).
+    """
+    user = get_object_or_404(User, id=user_id)
+    profile = getattr(user, "landlord_profile", None)
 
+    if profile is None:
         return Response(
-            {
-                "message": _("User verification updated successfully"),
-                "user_id": user_id,
-                "is_verified": user.is_verified,
-            }
+            {"error": _("This user has no landlord profile to verify.")},
+            status=status.HTTP_400_BAD_REQUEST,
         )
-    except User.DoesNotExist:
-        return Response({"error": _("User not found")}, status=status.HTTP_404_NOT_FOUND)
+
+    profile.verification_status = VerificationStatus.VERIFIED
+    profile.verified_at = timezone.now()
+    profile.verified_by = request.user
+    profile.save(update_fields=["verification_status", "verified_at", "verified_by"])
+
+    return Response({"message": _("Landlord verified"), "user": UserSerializer(user).data})
 
 
-# Admin ViewSet for user management
 class AdminUserViewSet(ModelViewSet):
-    """
-    Admin viewset for managing users.
-
-    Provides full CRUD operations for user management by admins.
-    """
+    """User administration for platform staff."""
 
     queryset = User.objects.all().order_by("-date_joined")
     serializer_class = AdminUserSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsPlatformStaff]
+    search_fields = ["email", "first_name", "last_name", "phone_number"]
+    ordering_fields = ["date_joined", "email"]
 
-    @extend_schema(
-        summary="List all users",
-        description="Get paginated list of all users (Admin only)",
-        tags=["Admin"],
-    )
-    def list(self, request, *args, **kwargs):
-        """List all users with pagination."""
-        return super().list(request, *args, **kwargs)
-
-    @extend_schema(
-        summary="Get user details",
-        description="Get detailed information about a specific user (Admin only)",
-        tags=["Admin"],
-    )
-    def retrieve(self, request, *args, **kwargs):
-        """Get specific user details."""
-        return super().retrieve(request, *args, **kwargs)
-
-    @extend_schema(
-        summary="Update user", description="Update user information (Admin only)", tags=["Admin"]
-    )
-    def update(self, request, *args, **kwargs):
-        """Update user information."""
-        return super().update(request, *args, **kwargs)
-
-    @extend_schema(
-        summary="Delete user", description="Delete user account (Admin only)", tags=["Admin"]
-    )
-    def destroy(self, request, *args, **kwargs):
-        """Delete user account."""
-        return super().destroy(request, *args, **kwargs)
-
+    @extend_schema(summary="Toggle active", request=None, responses={200: None}, tags=["Admin"])
     @action(detail=True, methods=["post"])
-    @extend_schema(
-        summary="Toggle user verification",
-        description="Toggle user verification status (Admin only)",
-        tags=["Admin"],
-    )
-    def toggle_verification(self, request, pk=None):
-        """Toggle user verification status."""
-        user = self.get_object()
-        user.is_verified = not user.is_verified
-        if user.is_verified:
-            from django.utils import timezone
-
-            user.verification_date = timezone.now()
-        else:
-            user.verification_date = None
-        user.save()
-
-        return Response(
-            {
-                "message": _("User verification toggled successfully"),
-                "is_verified": user.is_verified,
-            }
-        )
-
-    @action(detail=True, methods=["post"])
-    @extend_schema(
-        summary="Toggle user active status",
-        description="Activate/deactivate user account (Admin only)",
-        tags=["Admin"],
-    )
-    def toggle_active(self, request, pk=None):
-        """Toggle user active status."""
+    def toggle_active(self, request: Request, pk: str | None = None) -> Response:
         user = self.get_object()
         user.is_active = not user.is_active
-        user.save()
-
-        return Response(
-            {"message": _("User active status toggled successfully"), "is_active": user.is_active}
-        )
+        user.save(update_fields=["is_active"])
+        return Response({"message": _("Status updated"), "is_active": user.is_active})
 
 
-# Statistics and dashboard views
 @extend_schema(
-    summary="Get user statistics",
-    description="Get user registration and activity statistics (Admin only)",
-    responses={
-        200: {
-            "type": "object",
-            "properties": {
-                "total_users": {"type": "integer"},
-                "active_users": {"type": "integer"},
-                "verified_users": {"type": "integer"},
-                "tenants": {"type": "integer"},
-                "landlords": {"type": "integer"},
-                "admins": {"type": "integer"},
-            },
-        }
-    },
+    summary="User statistics",
+    responses={200: None},
     tags=["Admin"],
 )
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
-def user_statistics(request):
-    """Get user statistics for admin dashboard."""
-    from django.db.models import Count, Q
-
+@permission_classes([IsPlatformStaff])
+def user_statistics(request: Request) -> Response:
+    """Counts by capability rather than by a self-declared string."""
     stats = User.objects.aggregate(
         total_users=Count("id"),
         active_users=Count("id", filter=Q(is_active=True)),
-        verified_users=Count("id", filter=Q(is_verified=True)),
-        tenants=Count("id", filter=Q(user_type="tenant")),
-        landlords=Count("id", filter=Q(user_type="landlord")),
-        admins=Count("id", filter=Q(user_type="admin")),
+        students=Count("id", filter=Q(student_profile__isnull=False)),
+        landlords=Count("id", filter=Q(landlord_profile__isnull=False)),
+        university_staff=Count("id", filter=Q(staff_profile__isnull=False)),
+        platform_staff=Count("id", filter=Q(is_staff=True)),
+        verified_students=Count(
+            "id", filter=Q(student_profile__verification_status=VerificationStatus.VERIFIED)
+        ),
     )
-
     return Response(stats)

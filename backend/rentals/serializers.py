@@ -10,6 +10,8 @@ from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from universities.constants import VerificationStatus
+
 from .models import Rental, RentalFavorite, RentalImage, RentalInquiry
 
 User = get_user_model()
@@ -57,6 +59,7 @@ class LandlordSerializer(serializers.ModelSerializer):
     """
 
     full_name = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -72,6 +75,15 @@ class LandlordSerializer(serializers.ModelSerializer):
     def get_full_name(self, obj):
         """Get landlord's full name."""
         return obj.get_full_name()
+
+    def get_is_verified(self, obj) -> bool:
+        """Verification moved off User onto LandlordProfile (ADR-003).
+
+        The draft had a single is_verified flag on User meaning nothing in
+        particular; it now means a platform-staff decision about a landlord.
+        """
+        profile = getattr(obj, "landlord_profile", None)
+        return bool(profile and profile.verification_status == VerificationStatus.VERIFIED)
 
 
 class RentalListSerializer(serializers.ModelSerializer):

@@ -7,37 +7,19 @@ paths:
   /api/v1/auth/admin/statistics/:
     get:
       operationId: auth_admin_statistics_retrieve
-      description: Get user registration and activity statistics (Admin only)
-      summary: Get user statistics
+      description: Counts by capability rather than by a self-declared string.
+      summary: User statistics
       tags:
       - Admin
       security:
       - jwtAuth: []
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  total_users:
-                    type: integer
-                  active_users:
-                    type: integer
-                  verified_users:
-                    type: integer
-                  tenants:
-                    type: integer
-                  landlords:
-                    type: integer
-                  admins:
-                    type: integer
-          description: ''
+          description: No response body
   /api/v1/auth/admin/users/:
     get:
       operationId: auth_admin_users_list
-      description: Get paginated list of all users (Admin only)
-      summary: List all users
+      description: User administration for platform staff.
       parameters:
       - name: ordering
         required: false
@@ -58,7 +40,7 @@ paths:
         schema:
           type: string
       tags:
-      - Admin
+      - auth
       security:
       - jwtAuth: []
       responses:
@@ -70,10 +52,7 @@ paths:
           description: ''
     post:
       operationId: auth_admin_users_create
-      description: |-
-        Admin viewset for managing users.
-
-        Provides full CRUD operations for user management by admins.
+      description: User administration for platform staff.
       tags:
       - auth
       requestBody:
@@ -100,8 +79,7 @@ paths:
   /api/v1/auth/admin/users/{id}/:
     get:
       operationId: auth_admin_users_retrieve
-      description: Get detailed information about a specific user (Admin only)
-      summary: Get user details
+      description: User administration for platform staff.
       parameters:
       - in: path
         name: id
@@ -110,7 +88,7 @@ paths:
         description: A unique integer value identifying this User.
         required: true
       tags:
-      - Admin
+      - auth
       security:
       - jwtAuth: []
       responses:
@@ -122,8 +100,7 @@ paths:
           description: ''
     put:
       operationId: auth_admin_users_update
-      description: Update user information (Admin only)
-      summary: Update user
+      description: User administration for platform staff.
       parameters:
       - in: path
         name: id
@@ -132,7 +109,7 @@ paths:
         description: A unique integer value identifying this User.
         required: true
       tags:
-      - Admin
+      - auth
       requestBody:
         content:
           application/json:
@@ -156,10 +133,7 @@ paths:
           description: ''
     patch:
       operationId: auth_admin_users_partial_update
-      description: |-
-        Admin viewset for managing users.
-
-        Provides full CRUD operations for user management by admins.
+      description: User administration for platform staff.
       parameters:
       - in: path
         name: id
@@ -191,8 +165,7 @@ paths:
           description: ''
     delete:
       operationId: auth_admin_users_destroy
-      description: Delete user account (Admin only)
-      summary: Delete user
+      description: User administration for platform staff.
       parameters:
       - in: path
         name: id
@@ -201,7 +174,7 @@ paths:
         description: A unique integer value identifying this User.
         required: true
       tags:
-      - Admin
+      - auth
       security:
       - jwtAuth: []
       responses:
@@ -210,82 +183,14 @@ paths:
   /api/v1/auth/admin/users/{id}/toggle_active/:
     post:
       operationId: auth_admin_users_toggle_active_create
-      description: Toggle user active status.
+      description: User administration for platform staff.
+      summary: Toggle active
       parameters:
       - in: path
         name: id
         schema:
           type: integer
         description: A unique integer value identifying this User.
-        required: true
-      tags:
-      - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-        required: true
-      security:
-      - jwtAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminUser'
-          description: ''
-  /api/v1/auth/admin/users/{id}/toggle_verification/:
-    post:
-      operationId: auth_admin_users_toggle_verification_create
-      description: Toggle user verification status.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: A unique integer value identifying this User.
-        required: true
-      tags:
-      - auth
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/AdminUserRequest'
-        required: true
-      security:
-      - jwtAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AdminUser'
-          description: ''
-  /api/v1/auth/admin/verify/{user_id}/:
-    post:
-      operationId: auth_admin_verify_create
-      description: Admin endpoint to verify/unverify user accounts
-      summary: Verify user account
-      parameters:
-      - in: path
-        name: user_id
-        schema:
-          type: integer
-        description: User ID to verify
         required: true
       tags:
       - Admin
@@ -293,34 +198,35 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
+          description: No response body
+  /api/v1/auth/admin/verify/{user_id}/:
+    post:
+      operationId: auth_admin_verify_create
+      description: |-
+        Mark a landlord profile verified.
+
+        Landlord verification is a platform-staff action. Student verification is
+        a different flow entirely, run per-university (ADR-003).
+      summary: Verify a landlord
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
         '404':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
+          description: No response body
   /api/v1/auth/login/:
     post:
       operationId: auth_login_create
-      description: Authenticate user and return JWT tokens
-      summary: User login
+      summary: Log in
       tags:
       - Authentication
       requestBody:
@@ -345,62 +251,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
   /api/v1/auth/logout/:
     post:
       operationId: auth_logout_create
-      description: Logout user by blacklisting refresh token
-      summary: User logout
+      description: Blacklist the refresh token.
+      summary: Log out
       tags:
       - Authentication
-      requestBody:
-        content:
-          type:
-            schema:
-              type: object
-              additionalProperties: {}
-              description: Unspecified request body
-          properties:
-            schema:
-              refresh:
-                type: string
-                description: Refresh token
-          required:
-            schema:
-              type: object
-              additionalProperties: {}
-              description: Unspecified request body
       security:
       - jwtAuth: []
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
+          description: No response body
   /api/v1/auth/me/:
     get:
       operationId: auth_me_retrieve
-      description: Get basic information about the current authenticated user
-      summary: Get current user info
+      description: Identity and the caller's capability set (ADR-003).
+      summary: Current user
       tags:
       - Authentication
       security:
@@ -415,7 +282,6 @@ paths:
   /api/v1/auth/password/change/:
     post:
       operationId: auth_password_change_create
-      description: Change current user's password
       summary: Change password
       tags:
       - User Profile
@@ -435,26 +301,12 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
+          description: No response body
   /api/v1/auth/profile/:
     get:
       operationId: auth_profile_retrieve
-      description: Retrieve current user's profile information
-      summary: Get user profile
+      description: The caller's own identity.
+      summary: Get profile
       tags:
       - User Profile
       security:
@@ -464,12 +316,44 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDetail'
+                $ref: '#/components/schemas/User'
+          description: ''
+    put:
+      operationId: auth_profile_update
+      description: |-
+        PUT is supported as well as PATCH.
+
+        The previous frontend called PUT here and got a 405 on every profile
+        save, because the draft implemented only GET and PATCH
+        (docs/AUDIT.md §5).
+      summary: Replace profile
+      tags:
+      - User Profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
           description: ''
     patch:
       operationId: auth_profile_partial_update
-      description: Update current user's profile information
-      summary: Update user profile
+      description: The caller's own identity.
+      summary: Update profile
       tags:
       - User Profile
       requestBody:
@@ -490,71 +374,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserDetail'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
-          description: ''
-  /api/v1/auth/profile/preferences/:
-    get:
-      operationId: auth_profile_preferences_retrieve
-      description: Retrieve user's profile preferences
-      summary: Get profile preferences
-      tags:
-      - User Profile
-      security:
-      - jwtAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserProfileUpdate'
-          description: ''
-    patch:
-      operationId: auth_profile_preferences_partial_update
-      description: Update user's profile preferences
-      summary: Update profile preferences
-      tags:
-      - User Profile
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedUserProfileUpdateRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedUserProfileUpdateRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedUserProfileUpdateRequest'
-      security:
-      - jwtAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserProfileUpdate'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
+                $ref: '#/components/schemas/User'
           description: ''
   /api/v1/auth/register/:
     post:
       operationId: auth_register_create
-      description: Create a new user account with email and password
-      summary: Register new user
+      description: Create an account and return tokens.
+      summary: Register
       tags:
       - Authentication
       requestBody:
@@ -578,14 +404,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/auth/token/refresh/:
     post:
@@ -3363,9 +3181,10 @@ components:
     AdminUser:
       type: object
       description: |-
-        Admin serializer for managing users.
+        User administration, for platform staff.
 
-        Includes all fields and allows admin operations.
+        ``is_staff`` stays read-only here too: elevating a user to platform staff
+        is a Django admin or management-command action, never an API one.
       properties:
         id:
           type: integer
@@ -3373,140 +3192,103 @@ components:
         email:
           type: string
           format: email
+          readOnly: true
           title: Email address
-          maxLength: 254
-        username:
-          type: string
-          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
-            only.
-          pattern: ^[\w.@+-]+$
-          maxLength: 150
         first_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         full_name:
           type: string
           readOnly: true
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
-          description: |-
-            Type of user account
-
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
         is_active:
           type: boolean
           title: Active
-          description: Designates whether this user should be treated as active. Unselect
-            this instead of deleting accounts.
         is_staff:
           type: boolean
-          title: Staff status
-          description: Designates whether the user can log into this admin site.
-        is_superuser:
-          type: boolean
-          title: Superuser status
-          description: Designates that this user has all permissions without explicitly
-            assigning them.
-        is_verified:
-          type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
-        verification_date:
-          type: string
-          format: date-time
-          nullable: true
+          readOnly: true
+          title: Platform staff
+          description: The only meaning of 'platform administrator'. Not settable
+            via the API.
         date_joined:
           type: string
           format: date-time
           readOnly: true
-        last_login:
-          type: string
-          format: date-time
+        capabilities:
+          type: object
+          description: |-
+            The shape ``/auth/me/`` returns.
+
+            Explicit rather than derived client-side, so the client never has to know
+            what a LandlordProfile is.
+          properties:
+            is_student:
+              type: boolean
+            is_landlord:
+              type: boolean
+            is_university_staff:
+              type: boolean
+            is_staff:
+              type: boolean
+            is_verified_student:
+              type: boolean
+            university:
+              type: string
+              nullable: true
+            manages_properties:
+              type: array
+              items:
+                type: integer
+          required:
+          - is_landlord
+          - is_staff
+          - is_student
+          - is_university_staff
+          - is_verified_student
+          - manages_properties
+          - university
           readOnly: true
-          nullable: true
       required:
+      - capabilities
       - date_joined
       - email
+      - first_name
       - full_name
       - id
-      - last_login
-      - username
+      - is_staff
+      - last_name
     AdminUserRequest:
       type: object
       description: |-
-        Admin serializer for managing users.
+        User administration, for platform staff.
 
-        Includes all fields and allows admin operations.
+        ``is_staff`` stays read-only here too: elevating a user to platform staff
+        is a Django admin or management-command action, never an API one.
       properties:
-        email:
-          type: string
-          format: email
-          minLength: 1
-          title: Email address
-          maxLength: 254
-        username:
-          type: string
-          minLength: 1
-          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
-            only.
-          pattern: ^[\w.@+-]+$
-          maxLength: 150
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
-          description: |-
-            Type of user account
-
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
+          minLength: 1
+          maxLength: 100
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
         is_active:
           type: boolean
           title: Active
-          description: Designates whether this user should be treated as active. Unselect
-            this instead of deleting accounts.
-        is_staff:
-          type: boolean
-          title: Staff status
-          description: Designates whether the user can log into this admin site.
-        is_superuser:
-          type: boolean
-          title: Superuser status
-          description: Designates that this user has all permissions without explicitly
-            assigning them.
-        is_verified:
-          type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
-        verification_date:
-          type: string
-          format: date-time
-          nullable: true
       required:
-      - email
-      - username
+      - first_name
+      - last_name
     FurnishingStatusEnum:
       enum:
       - furnished
@@ -3526,25 +3308,31 @@ components:
           readOnly: true
         first_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         full_name:
           type: string
           readOnly: true
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
         is_verified:
           type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
+          description: |-
+            Verification moved off User onto LandlordProfile (ADR-003).
+
+            The draft had a single is_verified flag on User meaning nothing in
+            particular; it now means a platform-staff decision about a landlord.
+          readOnly: true
       required:
+      - first_name
       - full_name
       - id
+      - is_verified
+      - last_name
     LandlordRatingEnum:
       enum:
       - 1
@@ -3565,19 +3353,19 @@ components:
       properties:
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
-        is_verified:
-          type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
+      required:
+      - first_name
+      - last_name
     LandlordResponseRequest:
       type: object
       description: Serializer for landlord responses to reviews.
@@ -3775,26 +3563,19 @@ components:
             $ref: '#/components/schemas/ReviewList'
     PasswordChangeRequest:
       type: object
-      description: |-
-        Serializer for changing user password.
-
-        Requires current password and validates new password.
       properties:
         current_password:
           type: string
           writeOnly: true
           minLength: 1
-          description: Enter your current password
         new_password:
           type: string
           writeOnly: true
           minLength: 8
-          description: Enter your new password
         new_password_confirm:
           type: string
           writeOnly: true
           minLength: 1
-          description: Confirm your new password
       required:
       - current_password
       - new_password
@@ -4139,65 +3920,26 @@ components:
     PatchedAdminUserRequest:
       type: object
       description: |-
-        Admin serializer for managing users.
+        User administration, for platform staff.
 
-        Includes all fields and allows admin operations.
+        ``is_staff`` stays read-only here too: elevating a user to platform staff
+        is a Django admin or management-command action, never an API one.
       properties:
-        email:
-          type: string
-          format: email
-          minLength: 1
-          title: Email address
-          maxLength: 254
-        username:
-          type: string
-          minLength: 1
-          description: Required. 150 characters or fewer. Letters, digits and @/./+/-/_
-            only.
-          pattern: ^[\w.@+-]+$
-          maxLength: 150
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
-          description: |-
-            Type of user account
-
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
+          minLength: 1
+          maxLength: 100
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
         is_active:
           type: boolean
           title: Active
-          description: Designates whether this user should be treated as active. Unselect
-            this instead of deleting accounts.
-        is_staff:
-          type: boolean
-          title: Staff status
-          description: Designates whether the user can log into this admin site.
-        is_superuser:
-          type: boolean
-          title: Superuser status
-          description: Designates that this user has all permissions without explicitly
-            assigning them.
-        is_verified:
-          type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
-        verification_date:
-          type: string
-          format: date-time
-          nullable: true
     PatchedRentalImageRequest:
       type: object
       description: Serializer for rental images.
@@ -4493,90 +4235,31 @@ components:
           type: boolean
           nullable: true
           description: Whether the tenant would recommend this property
-    PatchedUserProfileUpdateRequest:
-      type: object
-      description: Serializer for updating user profile preferences.
-      properties:
-        preferred_contact_method:
-          $ref: '#/components/schemas/PreferredContactMethodEnum'
-        email_notifications:
-          type: boolean
-          description: Receive notifications via email
-        sms_notifications:
-          type: boolean
-          description: Receive notifications via SMS
-        website:
-          type: string
-          format: uri
-          description: Personal or business website
-          maxLength: 200
-        linkedin:
-          type: string
-          format: uri
-          title: LinkedIn profile
-          maxLength: 200
-        business_name:
-          type: string
-          description: Business or company name (for landlords)
-          maxLength: 100
-        business_license:
-          type: string
-          description: Business license number
-          maxLength: 50
     PatchedUserUpdateRequest:
       type: object
       description: |-
-        Serializer for updating user information.
+        The fields a user may change about themselves.
 
-        Allows users to update their profile information.
+        Deliberately short. Nothing here grants any capability: that is the point
+        of ADR-003, and a registration or profile payload must never be able to
+        escalate.
       properties:
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
-        profile_picture:
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
+        avatar_url:
           type: string
-          format: binary
-          nullable: true
-        bio:
-          type: string
-          title: Biography
-          description: Brief description about yourself
-          maxLength: 500
-        date_of_birth:
-          type: string
-          format: date
-          nullable: true
-        address:
-          type: string
-          maxLength: 255
-        city:
-          type: string
-          maxLength: 100
-        state:
-          type: string
-          title: State/province
-          maxLength: 100
-        zip_code:
-          type: string
-          maxLength: 20
-    PreferredContactMethodEnum:
-      enum:
-      - email
-      - phone
-      - both
-      type: string
-      description: |-
-        * `email` - Email
-        * `phone` - Phone
-        * `both` - Both
+          format: uri
+          maxLength: 200
     PropertyTypeEnum:
       enum:
       - apartment
@@ -6843,10 +6526,10 @@ components:
           readOnly: true
         first_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         full_name:
           type: string
           readOnly: true
@@ -6855,26 +6538,34 @@ components:
           readOnly: true
         is_verified:
           type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
+          description: |-
+            The reviewer's student verification badge (ADR-003).
+
+            Absence is not a discredit: verification is off by default, and where a
+            university has not enabled it nobody carries the badge.
+          readOnly: true
       required:
+      - first_name
       - full_name
       - id
       - initials
+      - is_verified
+      - last_name
     ReviewerRequest:
       type: object
       description: Serializer for reviewer information in review displays.
       properties:
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
-        is_verified:
-          type: boolean
-          title: Verified
-          description: Designates whether this user has been verified by admin.
+          minLength: 1
+          maxLength: 100
+      required:
+      - first_name
+      - last_name
     Status124Enum:
       enum:
       - available
@@ -6977,10 +6668,7 @@ components:
       - token
     User:
       type: object
-      description: |-
-        Serializer for User model.
-
-        Used for displaying user information and basic updates.
+      description: A user's own identity, with their capability set.
       properties:
         id:
           type: integer
@@ -6988,262 +6676,112 @@ components:
         email:
           type: string
           format: email
+          readOnly: true
           title: Email address
-          maxLength: 254
         first_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          maxLength: 100
         full_name:
           type: string
           readOnly: true
-        display_name:
-          type: string
-          readOnly: true
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
-          description: |-
-            Type of user account
-
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
-        profile_picture:
-          type: string
-          format: uri
-          nullable: true
-        bio:
-          type: string
-          title: Biography
-          description: Brief description about yourself
-          maxLength: 500
-        address:
-          type: string
-          maxLength: 255
-        city:
-          type: string
-          maxLength: 100
-        state:
-          type: string
-          title: State/province
-          maxLength: 100
-        zip_code:
-          type: string
-          maxLength: 20
-        is_verified:
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
+        phone_verified:
           type: boolean
           readOnly: true
-          title: Verified
-          description: Designates whether this user has been verified by admin.
+        email_verified:
+          type: boolean
+          readOnly: true
+        avatar_url:
+          type: string
+          format: uri
+          maxLength: 200
+        is_active:
+          type: boolean
+          readOnly: true
+          title: Active
         date_joined:
           type: string
           format: date-time
           readOnly: true
-      required:
-      - date_joined
-      - display_name
-      - email
-      - full_name
-      - id
-      - is_verified
-    UserDetail:
-      type: object
-      description: |-
-        Detailed serializer for User model including profile information.
-
-        Used for user profile pages and detailed user information.
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        email:
-          type: string
-          format: email
-          title: Email address
-          maxLength: 254
-        first_name:
-          type: string
-          maxLength: 150
-        last_name:
-          type: string
-          maxLength: 150
-        full_name:
-          type: string
-          readOnly: true
-        display_name:
-          type: string
-          readOnly: true
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
+        capabilities:
+          type: object
           description: |-
-            Type of user account
+            The shape ``/auth/me/`` returns.
 
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
-        phone_number:
-          type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
-        profile_picture:
-          type: string
-          format: uri
-          nullable: true
-        bio:
-          type: string
-          title: Biography
-          description: Brief description about yourself
-          maxLength: 500
-        date_of_birth:
-          type: string
-          format: date
-          nullable: true
-        address:
-          type: string
-          maxLength: 255
-        city:
-          type: string
-          maxLength: 100
-        state:
-          type: string
-          title: State/province
-          maxLength: 100
-        zip_code:
-          type: string
-          maxLength: 20
-        is_verified:
-          type: boolean
-          readOnly: true
-          title: Verified
-          description: Designates whether this user has been verified by admin.
-        verification_date:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        date_joined:
-          type: string
-          format: date-time
-          readOnly: true
-        last_login:
-          type: string
-          format: date-time
-          readOnly: true
-          nullable: true
-        extended_profile:
-          allOf:
-          - $ref: '#/components/schemas/UserProfile'
+            Explicit rather than derived client-side, so the client never has to know
+            what a LandlordProfile is.
+          properties:
+            is_student:
+              type: boolean
+            is_landlord:
+              type: boolean
+            is_university_staff:
+              type: boolean
+            is_staff:
+              type: boolean
+            is_verified_student:
+              type: boolean
+            university:
+              type: string
+              nullable: true
+            manages_properties:
+              type: array
+              items:
+                type: integer
+          required:
+          - is_landlord
+          - is_staff
+          - is_student
+          - is_university_staff
+          - is_verified_student
+          - manages_properties
+          - university
           readOnly: true
       required:
+      - capabilities
       - date_joined
-      - display_name
       - email
-      - extended_profile
+      - email_verified
+      - first_name
       - full_name
       - id
-      - is_verified
-      - last_login
-      - verification_date
+      - is_active
+      - last_name
+      - phone_verified
     UserLoginRequest:
       type: object
-      description: |-
-        Serializer for user login.
-
-        Validates user credentials and returns user object if valid.
+      description: Exchange credentials for a user.
       properties:
         email:
           type: string
           format: email
           minLength: 1
-          description: Enter your email address
         password:
           type: string
           writeOnly: true
           minLength: 1
-          description: Enter your password
       required:
       - email
       - password
-    UserProfile:
-      type: object
-      description: |-
-        Serializer for UserProfile model.
-
-        Handles extended profile information.
-      properties:
-        preferred_contact_method:
-          $ref: '#/components/schemas/PreferredContactMethodEnum'
-        email_notifications:
-          type: boolean
-          description: Receive notifications via email
-        sms_notifications:
-          type: boolean
-          description: Receive notifications via SMS
-        website:
-          type: string
-          format: uri
-          description: Personal or business website
-          maxLength: 200
-        linkedin:
-          type: string
-          format: uri
-          title: LinkedIn profile
-          maxLength: 200
-        business_name:
-          type: string
-          description: Business or company name (for landlords)
-          maxLength: 100
-        business_license:
-          type: string
-          description: Business license number
-          maxLength: 50
-    UserProfileUpdate:
-      type: object
-      description: Serializer for updating user profile preferences.
-      properties:
-        preferred_contact_method:
-          $ref: '#/components/schemas/PreferredContactMethodEnum'
-        email_notifications:
-          type: boolean
-          description: Receive notifications via email
-        sms_notifications:
-          type: boolean
-          description: Receive notifications via SMS
-        website:
-          type: string
-          format: uri
-          description: Personal or business website
-          maxLength: 200
-        linkedin:
-          type: string
-          format: uri
-          title: LinkedIn profile
-          maxLength: 200
-        business_name:
-          type: string
-          description: Business or company name (for landlords)
-          maxLength: 100
-        business_license:
-          type: string
-          description: Business license number
-          maxLength: 50
     UserRegistrationRequest:
       type: object
       description: |-
-        Serializer for user registration.
+        Create an account.
 
-        Handles validation and creation of new user accounts with
-        different user types (tenant, landlord, admin).
+        No role field. The draft accepted ``user_type`` straight from the request
+        body and never validated it, so anyone could register as an administrator
+        and the object-permission checks trusted it (docs/AUDIT.md §4.4).
+
+        When the request resolves a tenant, the new user gets a StudentProfile for
+        that university — signing up on a university's own subdomain is the
+        statement that you are its student. Landlord and staff profiles are granted,
+        never self-declared.
       properties:
         email:
           type: string
@@ -7255,65 +6793,56 @@ components:
           type: string
           writeOnly: true
           minLength: 8
-          description: Password must be at least 8 characters long
         password_confirm:
           type: string
           writeOnly: true
           minLength: 1
-          description: Confirm your password
         first_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         last_name:
           type: string
-          maxLength: 150
+          minLength: 1
+          maxLength: 100
         phone_number:
           type: string
-          description: Phone number in international format
-          pattern: ^\+?1?\d{9,15}$
-          maxLength: 17
-        user_type:
-          allOf:
-          - $ref: '#/components/schemas/UserTypeEnum'
-          description: |-
-            Type of user account
-
-            * `tenant` - Tenant
-            * `landlord` - Landlord
-            * `admin` - Admin
-        date_of_birth:
-          type: string
-          format: date
-          nullable: true
-        address:
-          type: string
-          maxLength: 255
-        city:
-          type: string
-          maxLength: 100
-        state:
-          type: string
-          title: State/province
-          maxLength: 100
-        zip_code:
-          type: string
-          maxLength: 20
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
       required:
       - email
       - first_name
       - last_name
       - password
       - password_confirm
-    UserTypeEnum:
-      enum:
-      - tenant
-      - landlord
-      - admin
-      type: string
+    UserUpdateRequest:
+      type: object
       description: |-
-        * `tenant` - Tenant
-        * `landlord` - Landlord
-        * `admin` - Admin
+        The fields a user may change about themselves.
+
+        Deliberately short. Nothing here grants any capability: that is the point
+        of ADR-003, and a registration or profile payload must never be able to
+        escalate.
+      properties:
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        last_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        phone_number:
+          type: string
+          pattern: ^\+254[17]\d{8}$
+          maxLength: 13
+        avatar_url:
+          type: string
+          format: uri
+          maxLength: 200
+      required:
+      - first_name
+      - last_name
   securitySchemes:
     jwtAuth:
       type: http
