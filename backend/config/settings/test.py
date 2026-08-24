@@ -14,6 +14,10 @@ SIMPLE_JWT["SIGNING_KEY"] = SECRET_KEY
 
 ALLOWED_HOSTS = ["*", "testserver"]
 
+# Tenant subdomains are derived by stripping this, so tests need a realistic
+# two-part TLD: the .co.ke shape is where label-counting goes wrong.
+SITE_DOMAIN = "example.co.ke"
+
 CORS_ALLOWED_ORIGINS = ["http://testserver"]
 
 # Fast, deterministic hashing. Real hashers make the suite several times slower
