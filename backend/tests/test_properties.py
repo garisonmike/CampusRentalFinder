@@ -15,6 +15,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -549,3 +550,38 @@ class TestUnitPhoto:
 
         assert photo in UnitPhoto.objects.for_tenant(university)
         assert photo not in UnitPhoto.objects.for_tenant(university_factory())
+
+
+class TestDistanceNeedsCoordinates:
+    def test_a_property_without_coordinates_cannot_join_a_campus(
+        self, property_factory, campus_factory, campus_distance_factory, university
+    ):
+        """straight_line_km is NOT NULL and ADR-002 says it is always present.
+
+        There is no honest value for an unpinned property, so the join is
+        refused with a message naming the cause — rather than the database
+        reporting a null column nobody knew was being written.
+        """
+        unpinned = property_factory(latitude=None, longitude=None)
+
+        with pytest.raises(ValidationError) as caught:
+            campus_distance_factory(
+                property=unpinned,
+                university=university,
+                campus=campus_factory(university=university),
+            )
+
+        assert "property" in caught.value.message_dict
+        assert "coordinates" in str(caught.value)
+
+    def test_which_makes_an_unpinned_property_invisible_to_every_tenant(
+        self, property_factory, university
+    ):
+        """A consequence worth naming: no join means no tenant sees it.
+
+        The listing exists and its landlord can see it; nobody else can. The
+        serializer has to require coordinates before publication.
+        """
+        unpinned = property_factory(latitude=None, longitude=None)
+
+        assert unpinned not in Property.objects.for_tenant(university)

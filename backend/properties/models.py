@@ -12,6 +12,7 @@ that makes a property visible to a university at all.
 
 from __future__ import annotations
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
@@ -384,13 +385,27 @@ class PropertyCampusDistance(TenantScopedModel):
         campus moving still needs the management command, because this row does
         not know it happened.
         """
-        if self.property.latitude is not None and self.property.longitude is not None:
-            self.straight_line_km = straight_line_km(
-                self.property.latitude,
-                self.property.longitude,
-                self.campus.latitude,
-                self.campus.longitude,
+        if self.property.latitude is None or self.property.longitude is None:
+            # straight_line_km is NOT NULL, and ADR-002 says it is always
+            # present, so there is no honest value to store for an unpinned
+            # property. Refuse clearly rather than letting the database report
+            # a null column nobody knew was being written.
+            raise ValidationError(
+                {
+                    "property": _(
+                        "%(name)s has no coordinates, so its distance to a campus "
+                        "cannot be computed. Set latitude and longitude first."
+                    )
+                    % {"name": self.property.name}
+                }
             )
+
+        self.straight_line_km = straight_line_km(
+            self.property.latitude,
+            self.property.longitude,
+            self.campus.latitude,
+            self.campus.longitude,
+        )
         super().save(*args, **kwargs)
 
 
