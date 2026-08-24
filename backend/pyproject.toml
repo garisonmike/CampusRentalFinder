@@ -102,6 +102,7 @@ addopts = [
 ]
 markers = [
     "smoke: minimal checks that the project boots and its plumbing works",
+    "architecture: structural rules that must not erode (host classes, tenant scoping)",
 ]
 filterwarnings = [
     "error::DeprecationWarning:accounts.*",

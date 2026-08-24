@@ -200,6 +200,14 @@ def _load_prod_settings(env: dict[str, str]) -> subprocess.CompletedProcess[str]
     )
 
 
+FULLY_CONFIGURED_PROD_ENV = {
+    "SECRET_KEY": "a-real-looking-production-secret-key-value",
+    "ALLOWED_HOSTS": "api.example.co.ke",
+    "CORS_ALLOWED_ORIGINS": "https://kyu.example.co.ke",
+    "SITE_DOMAIN": "example.co.ke",
+}
+
+
 @pytest.mark.parametrize(
     ("secret_key", "expected"),
     [
@@ -209,7 +217,7 @@ def _load_prod_settings(env: dict[str, str]) -> subprocess.CompletedProcess[str]
 )
 def test_production_settings_refuse_an_unsafe_secret_key(secret_key: str, expected: str) -> None:
     """prod.py fails loudly rather than falling back to an insecure key."""
-    result = _load_prod_settings({"SECRET_KEY": secret_key})
+    result = _load_prod_settings({**FULLY_CONFIGURED_PROD_ENV, "SECRET_KEY": secret_key})
 
     assert result.returncode != 0, "prod settings loaded with an unsafe SECRET_KEY"
     assert "ImproperlyConfigured" in result.stderr
@@ -217,35 +225,45 @@ def test_production_settings_refuse_an_unsafe_secret_key(secret_key: str, expect
 
 
 def test_production_settings_require_allowed_hosts() -> None:
-    result = _load_prod_settings(
-        {"SECRET_KEY": "a-real-looking-production-secret-key-value", "ALLOWED_HOSTS": ""}
-    )
+    result = _load_prod_settings({**FULLY_CONFIGURED_PROD_ENV, "ALLOWED_HOSTS": ""})
 
     assert result.returncode != 0
     assert "ALLOWED_HOSTS" in result.stderr
 
 
 def test_production_settings_require_explicit_cors_origins() -> None:
-    result = _load_prod_settings(
-        {
-            "SECRET_KEY": "a-real-looking-production-secret-key-value",
-            "ALLOWED_HOSTS": "api.example.co.ke",
-            "CORS_ALLOWED_ORIGINS": "",
-        }
-    )
+    result = _load_prod_settings({**FULLY_CONFIGURED_PROD_ENV, "CORS_ALLOWED_ORIGINS": ""})
 
     assert result.returncode != 0
     assert "CORS_ALLOWED_ORIGINS" in result.stderr
 
 
+def test_production_settings_require_a_site_domain() -> None:
+    """Absolute URLs are built from SITE_DOMAIN, so it cannot be absent."""
+    result = _load_prod_settings({**FULLY_CONFIGURED_PROD_ENV, "SITE_DOMAIN": ""})
+
+    assert result.returncode != 0
+    assert "SITE_DOMAIN" in result.stderr
+
+
+def test_production_settings_reject_the_tenant_header_fallback() -> None:
+    """ADR-001: the X-University fallback must be impossible in production.
+
+    Absence is not enough. If it were honoured on a deployed host, any client
+    could read another tenant's scoped data by setting a header, so a container
+    configured this way must fail to boot.
+    """
+    result = _load_prod_settings(
+        {**FULLY_CONFIGURED_PROD_ENV, "TENANT_HEADER_FALLBACK_ENABLED": "True"}
+    )
+
+    assert result.returncode != 0
+    assert "ImproperlyConfigured" in result.stderr
+    assert "TENANT_HEADER_FALLBACK_ENABLED" in result.stderr
+
+
 def test_production_settings_load_when_fully_configured() -> None:
     """The positive case, so the tests above cannot pass for the wrong reason."""
-    result = _load_prod_settings(
-        {
-            "SECRET_KEY": "a-real-looking-production-secret-key-value",
-            "ALLOWED_HOSTS": "api.example.co.ke",
-            "CORS_ALLOWED_ORIGINS": "https://kyu.example.co.ke",
-        }
-    )
+    result = _load_prod_settings(dict(FULLY_CONFIGURED_PROD_ENV))
 
     assert result.returncode == 0, result.stderr

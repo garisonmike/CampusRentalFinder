@@ -73,6 +73,28 @@ CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = False  # the SPA must read this to send X-CSRFToken
 CSRF_COOKIE_SAMESITE = "Lax"
 
+# --------------------------------------------------------------------------
+# Tenant isolation (ADR-001)
+# --------------------------------------------------------------------------
+
+# Absence is not sufficient. If this is ever true on a deployed host, any
+# client can read another tenant's scoped data by setting a header, so a
+# container misconfigured this way must fail to boot rather than serve traffic
+# with the bypass available.
+TENANT_HEADER_FALLBACK_ENABLED = config("TENANT_HEADER_FALLBACK_ENABLED", default=False, cast=bool)
+if TENANT_HEADER_FALLBACK_ENABLED:
+    raise ImproperlyConfigured(
+        "TENANT_HEADER_FALLBACK_ENABLED must never be true in production: it "
+        "lets any client select a tenant with the X-University header, which "
+        "defeats the isolation boundary in ADR-001."
+    )
+
+SITE_DOMAIN = config("SITE_DOMAIN", default="")
+if not SITE_DOMAIN:
+    raise ImproperlyConfigured("SITE_DOMAIN must be set in production.")
+
+USE_HTTPS_URLS = True
+
 configure_logging(
     level=config("LOG_LEVEL", default="INFO"),
     json_output=config("LOG_JSON", default=True, cast=bool),

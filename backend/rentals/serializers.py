@@ -40,6 +40,12 @@ class RentalImageSerializer(serializers.ModelSerializer):
         if obj.image:
             request = self.context.get("request")
             if request:
+                # absolute-url-ok: pre-rewrite draft code. This echoes the Host
+                # header, so a media URL requested on a tenant subdomain comes
+                # back pointing at that subdomain instead of the CDN — exactly
+                # the failure ADR-001 names. It disappears with ADR-007, where
+                # the storage backend returns an absolute bucket URL and the
+                # request is not consulted at all.
                 return request.build_absolute_uri(obj.image.url)
             return obj.image.url
         return None

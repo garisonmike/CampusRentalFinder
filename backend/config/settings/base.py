@@ -193,6 +193,27 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --------------------------------------------------------------------------
+# Hosts (ADR-001)
+# --------------------------------------------------------------------------
+
+# Root domain. Tenant subdomains and the canonical host are built from it.
+SITE_DOMAIN = config("SITE_DOMAIN", default="localhost:8000")
+
+# Public listing content is canonical here, tenant-neutral.
+CANONICAL_HOST_PREFIX = config("CANONICAL_HOST_PREFIX", default="www")
+
+# Admin, schema and probes.
+INTERNAL_HOST_PREFIX = config("INTERNAL_HOST_PREFIX", default="internal")
+
+USE_HTTPS_URLS = config("USE_HTTPS_URLS", default=False, cast=bool)
+
+# Resolve the tenant from an X-University header when there is no usable
+# subdomain. Local development and the test suite only: on a deployed host it
+# would let any client read another tenant's data by setting a header.
+# prod.py raises at import time if this is ever true there.
+TENANT_HEADER_FALLBACK_ENABLED = False
+
+# --------------------------------------------------------------------------
 # CORS
 # --------------------------------------------------------------------------
 

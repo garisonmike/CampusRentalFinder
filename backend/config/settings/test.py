@@ -33,3 +33,7 @@ STORAGES = {
 MEDIA_ROOT = BASE_DIR / "test-media"
 
 configure_logging(level="WARNING", json_output=False)
+
+# Local development and tests have no usable subdomain, so the header fallback
+# is available here. It is impossible in production; see prod.py.
+TENANT_HEADER_FALLBACK_ENABLED = True

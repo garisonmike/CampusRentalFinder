@@ -359,6 +359,8 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
     def validate_website(self, value):
         """Validate website URL."""
         if value and not (value.startswith("http://") or value.startswith("https://")):
+            # absolute-url-ok: normalises a user-supplied third-party URL; this
+            # never addresses one of our own hosts, so ADR-001 does not apply.
             value = "https://" + value
         return value
 
