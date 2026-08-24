@@ -22,12 +22,16 @@ code uses ``objects`` and gets the guard rail.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from django.db import models
 
-if TYPE_CHECKING:  # pragma: no cover
-    from universities.models import University
+#: A tenant, however the caller has it to hand.
+#:
+#: Deliberately not typed as ``University``: this module is generic
+#: infrastructure and importing the concrete tenant model would couple config
+#: to an app, and create an import cycle the moment that app imports from here.
+type Tenant = models.Model | int
 
 
 class TenantScopeError(RuntimeError):
@@ -45,7 +49,7 @@ class TenantScopedQuerySet(models.QuerySet):
     #: a view that sidesteps the scoped manager is detectable.
     _is_tenant_scoped = True
 
-    def for_tenant(self, university: University | int | None) -> TenantScopedQuerySet:
+    def for_tenant(self, university: Tenant | None) -> TenantScopedQuerySet:
         """Narrow to a single university."""
         if university is None:
             raise TenantScopeError(
@@ -91,7 +95,7 @@ class TenantScopedManager(models.Manager.from_queryset(TenantScopedQuerySet)):  
         return TenantScopedQuerySet(self.model, using=self._db, hints=self._hints)
 
     # The two explicit entry points bypass the guard by construction.
-    def for_tenant(self, university: University | int | None) -> TenantScopedQuerySet:
+    def for_tenant(self, university: Tenant | None) -> TenantScopedQuerySet:
         return self._unscoped().for_tenant(university)
 
     def across_tenants(self) -> TenantScopedQuerySet:

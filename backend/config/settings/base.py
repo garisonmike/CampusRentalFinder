@@ -39,6 +39,8 @@ DJANGO_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # ArrayField, ExclusionConstraint and the extension operations.
+    "django.contrib.postgres",
 ]
 
 THIRD_PARTY_APPS = [
@@ -53,6 +55,7 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
+    "universities",
     "accounts",
     "rentals",
     "reviews",
