@@ -22,7 +22,13 @@ from config.tenancy import TenantScopedModel
 from universities.constants import KENYAN_COUNTIES
 from universities.models import Campus, University
 
-from .constants import FurnishingStatus, PropertyStatus, PropertyType
+from .constants import (
+    MAX_PHOTOS_PER_UNIT,
+    FurnishingStatus,
+    PhotoProcessingStatus,
+    PropertyStatus,
+    PropertyType,
+)
 from .distances import straight_line_km
 
 
@@ -386,3 +392,94 @@ class PropertyCampusDistance(TenantScopedModel):
                 self.campus.longitude,
             )
         super().save(*args, **kwargs)
+
+
+class UnitPhoto(TenantScopedModel):
+    """A photo of a unit, on object storage (ADR-007).
+
+    Never local disk, in any environment. Keys refer to the **public** media
+    bucket; verification documents live in a separate private bucket with its
+    own backend class and never share this one.
+
+    The original is retained so variants can be regenerated when the sizes
+    change, and the API serves it until they are ready.
+    """
+
+    tenant_lookup = "unit__property__campus_distances__university"
+
+    unit = models.ForeignKey("properties.Unit", on_delete=models.CASCADE, related_name="photos")
+
+    original_key = models.CharField(
+        _("original key"),
+        max_length=500,
+        help_text=_("Object key in the public media bucket."),
+    )
+    thumb_key = models.CharField(_("thumbnail key"), max_length=500, blank=True)
+    medium_key = models.CharField(_("medium key"), max_length=500, blank=True)
+    large_key = models.CharField(_("large key"), max_length=500, blank=True)
+
+    processing_status = models.CharField(
+        _("processing status"),
+        max_length=20,
+        choices=PhotoProcessingStatus.choices,
+        default=PhotoProcessingStatus.PENDING,
+    )
+    processing_error = models.CharField(_("processing error"), max_length=255, blank=True)
+
+    caption = models.CharField(_("caption"), max_length=200, blank=True)
+    is_primary = models.BooleanField(_("primary photo"), default=False)
+    sort_order = models.PositiveSmallIntegerField(_("sort order"), default=0)
+
+    width = models.PositiveSmallIntegerField(_("width"), null=True, blank=True)
+    height = models.PositiveSmallIntegerField(_("height"), null=True, blank=True)
+    byte_size = models.PositiveIntegerField(_("size in bytes"), null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Unit photo")
+        verbose_name_plural = _("Unit photos")
+        ordering = ["unit", "sort_order", "created_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "all_objects"
+        indexes = [
+            models.Index(fields=["unit", "sort_order"], name="unitphoto_order_idx"),
+            # What the "variants stalled" alert reads (docs/OPERATIONS.md).
+            models.Index(fields=["processing_status", "created_at"], name="unitphoto_pending_idx"),
+        ]
+        constraints = [
+            # The draft enforced this in save(), which a bulk update bypasses.
+            models.UniqueConstraint(
+                fields=["unit"],
+                condition=Q(is_primary=True),
+                name="unitphoto_one_primary_per_unit",
+            ),
+            models.CheckConstraint(
+                condition=~Q(processing_status=PhotoProcessingStatus.READY)
+                | (~Q(thumb_key="") & ~Q(medium_key="") & ~Q(large_key="")),
+                name="unitphoto_ready_has_all_variants",
+            ),
+            models.CheckConstraint(
+                condition=~Q(processing_status=PhotoProcessingStatus.FAILED)
+                | ~Q(processing_error=""),
+                name="unitphoto_failed_has_a_reason",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.unit} — {self.caption or self.original_key}"
+
+    def display_key(self, variant: str = "medium") -> str:
+        """The best key available for a variant, falling back to the original.
+
+        A photo whose variants have not been generated still renders — larger
+        than it should be, which is the intended degradation (ADR-007).
+        """
+        key = getattr(self, f"{variant}_key", "") if variant != "original" else ""
+        return key or self.original_key
+
+    @classmethod
+    def unit_is_full(cls, unit_id: int) -> bool:
+        """Whether this unit has reached the per-unit photo cap."""
+        return cls.all_objects.filter(unit_id=unit_id).count() >= MAX_PHOTOS_PER_UNIT

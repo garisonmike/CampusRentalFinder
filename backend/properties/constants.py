@@ -36,3 +36,34 @@ class FurnishingStatus(models.TextChoices):
     UNFURNISHED = "unfurnished", _("Unfurnished")
     SEMI_FURNISHED = "semi_furnished", _("Semi Furnished")
     FURNISHED = "furnished", _("Furnished")
+
+
+class PhotoProcessingStatus(models.TextChoices):
+    """Where variant generation has got to (ADR-007).
+
+    The API serves the original until variants are ready, so a slow or failed
+    job degrades quality rather than breaking the page.
+    """
+
+    PENDING = "pending", _("Pending")
+    READY = "ready", _("Ready")
+    FAILED = "failed", _("Failed")
+
+
+#: Longest edge, in pixels, for each derived variant.
+PHOTO_VARIANTS: dict[str, int] = {
+    "thumb": 400,
+    "medium": 1024,
+    "large": 1920,
+}
+
+#: Per-file upload cap. R2 storage is cheap and egress is free, but neither is
+#: zero, and an unbounded upload size is an unbounded bill (ADR-007).
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+#: Per-unit photo count.
+MAX_PHOTOS_PER_UNIT = 12
+
+#: Content types accepted on upload. Validated against the actual bytes, never
+#: the client-supplied header.
+ALLOWED_PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})

@@ -24,12 +24,14 @@ from tests.factories import (
     PlatformAdminFactory,
     PropertyCampusDistanceFactory,
     PropertyFactory,
+    ReadyUnitPhotoFactory,
     RentalFactory,
     ReviewFactory,
     StaffFactory,
     StudentProfileFactory,
     TenantFactory,
     UnitFactory,
+    UnitPhotoFactory,
     UniversityFactory,
     UniversityStaffProfileFactory,
     VerifiedStudentProfileFactory,
@@ -209,6 +211,16 @@ def campus_distance_factory(db):
 @pytest.fixture
 def caretaker_assignment_factory(db):
     return CaretakerAssignmentFactory
+
+
+@pytest.fixture
+def unit_photo_factory(db):
+    return UnitPhotoFactory
+
+
+@pytest.fixture
+def ready_unit_photo_factory(db):
+    return ReadyUnitPhotoFactory
 
 
 @pytest.fixture

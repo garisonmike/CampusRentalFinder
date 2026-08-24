@@ -26,8 +26,13 @@ from accounts.models import (
     UniversityStaffProfile,
     User,
 )
-from properties.constants import FurnishingStatus, PropertyStatus, PropertyType
-from properties.models import Property, PropertyCampusDistance, Unit
+from properties.constants import (
+    FurnishingStatus,
+    PhotoProcessingStatus,
+    PropertyStatus,
+    PropertyType,
+)
+from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
 from universities.constants import VerificationMethod, VerificationStatus
@@ -258,6 +263,31 @@ class UnitFactory(TenantScopedFactory):
     vacant_count = 1
     min_stay_months = 4
     is_active = True
+
+
+class UnitPhotoFactory(TenantScopedFactory):
+    """A photo on object storage. Keys only -- never a local file."""
+
+    class Meta:
+        model = UnitPhoto
+
+    unit = factory.SubFactory(UnitFactory)
+    original_key = factory.Sequence(lambda n: f"properties/units/photo-{n}/original.jpg")
+    processing_status = PhotoProcessingStatus.PENDING
+    caption = "Front view"
+    sort_order = 0
+    width = 3024
+    height = 4032
+    byte_size = 2_400_000
+
+
+class ReadyUnitPhotoFactory(UnitPhotoFactory):
+    """A photo whose variants have been generated."""
+
+    processing_status = PhotoProcessingStatus.READY
+    thumb_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "thumb"))
+    medium_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "medium"))
+    large_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "large"))
 
 
 class CaretakerAssignmentFactory(TenantScopedFactory):

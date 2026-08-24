@@ -6,7 +6,7 @@ from django.contrib import admin
 from django.http import HttpRequest
 from django.utils.translation import gettext_lazy as _
 
-from .models import Property, Unit
+from .models import Property, Unit, UnitPhoto
 
 
 class UnitInline(admin.TabularInline):
@@ -90,3 +90,14 @@ class UnitAdmin(admin.ModelAdmin):
     autocomplete_fields = ("property",)
     list_select_related = ("property",)
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(UnitPhoto)
+class UnitPhotoAdmin(admin.ModelAdmin):
+    list_display = ("unit", "caption", "is_primary", "processing_status", "sort_order")
+    list_filter = ("processing_status", "is_primary")
+    search_fields = ("caption", "unit__label", "unit__property__name")
+    ordering = ("unit", "sort_order")
+    autocomplete_fields = ("unit",)
+    list_select_related = ("unit",)
+    readonly_fields = ("created_at", "updated_at", "width", "height", "byte_size")

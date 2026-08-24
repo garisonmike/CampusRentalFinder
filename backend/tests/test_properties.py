@@ -19,9 +19,16 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from config.tenancy import TenantScopeError
-from properties.constants import PropertyStatus, PropertyType
+from properties.constants import (
+    ALLOWED_PHOTO_CONTENT_TYPES,
+    MAX_PHOTO_BYTES,
+    MAX_PHOTOS_PER_UNIT,
+    PhotoProcessingStatus,
+    PropertyStatus,
+    PropertyType,
+)
 from properties.distances import bounding_box, haversine_km, straight_line_km
-from properties.models import Property, PropertyCampusDistance, Unit
+from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
 
 pytestmark = pytest.mark.django_db
 
@@ -438,3 +445,107 @@ class TestPropertyScoping:
 
         assert join in PropertyCampusDistance.objects.for_tenant(university)
         assert join not in PropertyCampusDistance.objects.for_tenant(university_factory())
+
+
+# ---------------------------------------------------------------------------
+# UnitPhoto (ADR-007)
+# ---------------------------------------------------------------------------
+
+
+class TestUnitPhoto:
+    def test_a_photo_stores_keys_not_files(self, unit_photo_factory):
+        """Object storage, never local disk, in any environment (ADR-007)."""
+        photo = unit_photo_factory()
+
+        assert photo.original_key.startswith("properties/")
+        assert not hasattr(photo, "image")
+
+    def test_only_one_primary_photo_per_unit(self, unit_photo_factory, unit_factory):
+        """A constraint, not a save() override.
+
+        The draft enforced this in save(), which a bulk update walks straight
+        past (docs/AUDIT.md §7).
+        """
+        unit = unit_factory()
+        unit_photo_factory(unit=unit, is_primary=True)
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            unit_photo_factory(unit=unit, is_primary=True)
+
+    def test_two_units_may_each_have_a_primary(self, unit_photo_factory, unit_factory):
+        unit_photo_factory(unit=unit_factory(), is_primary=True)
+        unit_photo_factory(unit=unit_factory(), is_primary=True)
+
+        assert UnitPhoto.all_objects.filter(is_primary=True).count() == 2
+
+    def test_a_new_photo_starts_pending(self, unit_photo_factory):
+        assert unit_photo_factory().processing_status == PhotoProcessingStatus.PENDING
+
+    def test_ready_requires_every_variant(self, unit_photo_factory):
+        """Ready with a missing key would serve a broken image."""
+        photo = unit_photo_factory()
+        photo.processing_status = PhotoProcessingStatus.READY
+        photo.thumb_key = "properties/units/x/thumb.webp"
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            photo.save()
+
+    def test_a_complete_variant_set_is_accepted(self, ready_unit_photo_factory):
+        photo = ready_unit_photo_factory()
+
+        assert photo.processing_status == PhotoProcessingStatus.READY
+        assert photo.thumb_key and photo.medium_key and photo.large_key
+
+    def test_failure_requires_a_reason(self, unit_photo_factory):
+        photo = unit_photo_factory()
+        photo.processing_status = PhotoProcessingStatus.FAILED
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            photo.save()
+
+    def test_a_pending_photo_still_renders_the_original(self, unit_photo_factory):
+        """A slow job degrades quality; it does not break the page (ADR-007)."""
+        photo = unit_photo_factory()
+
+        assert photo.display_key("thumb") == photo.original_key
+        assert photo.display_key("medium") == photo.original_key
+
+    def test_a_ready_photo_renders_its_variant(self, ready_unit_photo_factory):
+        photo = ready_unit_photo_factory()
+
+        assert photo.display_key("thumb") == photo.thumb_key
+        assert photo.display_key("large") == photo.large_key
+
+    def test_the_per_unit_cap_is_enforceable(self, unit_photo_factory, unit_factory):
+        """R2 egress is free but storage is not zero (ADR-007)."""
+        unit = unit_factory()
+        assert not UnitPhoto.unit_is_full(unit.pk)
+
+        for index in range(MAX_PHOTOS_PER_UNIT):
+            unit_photo_factory(unit=unit, sort_order=index)
+
+        assert UnitPhoto.unit_is_full(unit.pk)
+
+    def test_the_upload_limits_are_defined(self):
+        assert MAX_PHOTO_BYTES == 5 * 1024 * 1024
+        assert MAX_PHOTOS_PER_UNIT == 12
+        assert {"image/jpeg", "image/png", "image/webp"} == ALLOWED_PHOTO_CONTENT_TYPES
+
+    def test_photos_scope_through_the_unit(
+        self,
+        unit_photo_factory,
+        unit_factory,
+        property_factory,
+        campus_factory,
+        campus_distance_factory,
+        university,
+        university_factory,
+    ):
+        prop = property_factory()
+        campus_distance_factory(
+            property=prop, university=university, campus=campus_factory(university=university)
+        )
+        photo = unit_photo_factory(unit=unit_factory(property=prop))
+
+        assert photo in UnitPhoto.objects.for_tenant(university)
+        assert photo not in UnitPhoto.objects.for_tenant(university_factory())
