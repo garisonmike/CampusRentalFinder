@@ -342,6 +342,35 @@ images, so removing the image subsystem no longer removes the queue.
 **Two buckets** — public media and a private documents bucket with its own
 storage backend class. Never merge them.
 
+## Schema rewrite progress
+
+| Phase | State |
+|---|---|
+| 1 — tenancy foundation | **Done.** btree_gist, `University`, `Campus`, the resolution middleware, the scoped manager, the public tenant config endpoint |
+| 2 — identity | **Done.** `User` on `AbstractBaseUser`, the three profile models, relationship-based permissions, capabilities on `/auth/me/` |
+| 3 — properties | Next. `Property`, `Unit`, `PropertyCampusDistance`, then storage, then `UnitPhoto` |
+| 4 — storage and queue | django-rq, MinIO, the two buckets |
+| 5 — the trust property | `Application`, `TenancyClaim`, `Tenancy`, `Review` |
+| 6 — verification | The two student paths and document retention |
+| 7 — cleanup | Remove the draft apps, rebuild the frontend pages |
+
+`CaretakerAssignment` is defined by its foreign key to `Property`, so it lands
+in phase 3 rather than with the other role models.
+
+### Architecture tests
+
+`backend/tests/test_architecture.py` enforces the structural rules that would
+otherwise erode. Each fails on **addition**, so a new route or model forces the
+decision:
+
+- every route carries an explicit host class in `config/hosts.py`
+- no `PUBLIC_CANONICAL` route serves an unsafe method
+- absolute URLs come only from `config.hosts.build_absolute_url`
+- every local model is tenant-scoped or exempt **with a reason**
+
+When one of these fails on your branch, the fix is to make the decision it is
+asking for, not to widen the exemption list.
+
 ## Where things stand
 
 The backend plumbing (Docker, DRF, JWT, the settings split, CI) is sound and is
@@ -352,7 +381,10 @@ schema rewrite.
 The **domain model is still the original draft** — a US apartment-listing schema
 with "campus" bolted on — and is being replaced per `docs/DOMAIN_MODEL.md`.
 
-**Read `docs/AUDIT.md` before touching the existing apps.** Several endpoints
-are broken in ways that look like your bug and are not: the rental detail
-endpoint 500s for every non-owner, review reporting is unreachable by anyone,
-and `user_type` is client-settable at registration.
+**Read `docs/AUDIT.md` before touching the draft apps.** Two of its findings
+are still live and look like your bug: the rental detail endpoint raises on an
+unresolved `F()` expression for every non-owner, and review reporting is
+unreachable by anybody. Both are pinned by tests in
+`tests/test_api_contract.py` and are fixed by their phase of the rewrite.
+
+The `user_type` escalation path is closed as of phase 2.

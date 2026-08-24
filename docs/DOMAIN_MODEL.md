@@ -1,6 +1,9 @@
 # Target Domain Model
 
-**Status:** Proposed — the schema rewrite implements this.
+**Status:** Partly implemented. Phases 1 and 2 have landed: `University`,
+`Campus`, `User`, `LandlordProfile`, `StudentProfile` and
+`UniversityStaffProfile` exist in code. Everything below them is still
+proposed.
 **Date:** 2026-08-23
 **Updated:** 2026-08-25 — signup policy enum, typed disputes, application-sourced
 tenancies
@@ -114,7 +117,9 @@ Identity and authentication **only**. No `user_type`.
 | `last_login`, `date_joined` | | inherited |
 
 Built on `AbstractBaseUser` + `PermissionsMixin`, **not** `AbstractUser` — the
-`username` column is gone (`docs/AUDIT.md` §7 item 11).
+`username` column is gone (`docs/AUDIT.md` §7 item 11). Capability is derived in
+`accounts.capabilities` and returned to the client as an explicit set on
+`/auth/me/`; the client never re-derives it from model shapes.
 
 **Constraints / indexes**
 
@@ -130,7 +135,7 @@ Built on `AbstractBaseUser` + `PermissionsMixin`, **not** `AbstractUser` — the
 | `business_name` | `CharField(200)` | blank |
 | `kra_pin` | `CharField(11)` | blank; validated `^[AP]\d{9}[A-Z]$` |
 | `national_id` | `CharField(20)` | blank, write-only in the API |
-| `id_document_url` | `URLField` | blank; **private bucket** (ADR-007) |
+| `id_document_key` | `CharField(500)` | blank; key in the **private** documents bucket (ADR-007), never a URL |
 | `verification_status` | `CharField` | `unverified \| pending \| verified \| rejected` |
 | `verified_at` | `DateTimeField` | null |
 | `verified_by` | FK → `User` | `SET_NULL`, staff only |
@@ -149,6 +154,11 @@ configured by `settings.MAX_DISPUTES_PER_LANDLORD_PER_MONTH`.
 
 ### `CaretakerAssignment`
 
+**Not yet implemented.** It is defined by its foreign key to `Property`, which
+lands in phase 3, so it ships with that model. The permission set below and the
+`manages_properties` shape in the `/auth/me/` capability block are already
+fixed, so neither the model nor the frontend contract changes when it arrives.
+
 A user authorised to manage **one** property, granted by that property's
 landlord.
 
@@ -162,7 +172,8 @@ landlord.
 | `revoked_at` | `DateTimeField` | null |
 | `revoked_by` | FK → `User` | `SET_NULL` |
 
-`permissions` values, fixed by ADR-003 and validated against an enum on write:
+`permissions` values, fixed by ADR-003 and validated against
+`accounts.capabilities.CaretakerPermission` on write:
 
 `manage_units`, `manage_vacancy`, `manage_photos`, `set_availability`,
 `resolve_tenancy_claims`, `respond_inquiries`.
@@ -211,7 +222,7 @@ blast radius of a compromised account. Every document read is logged (see
 | `university` | FK → `University` | `PROTECT` |
 | `student_email` | `EmailField` | blank; must match a `University.student_email_domains` entry |
 | `verification_status` | `CharField(16)` | `unverified \| pending \| verified \| rejected` |
-| `verification_method` | `CharField(16)` | `email_domain \| manual_id`, null when unverified |
+| `verification_method` | `CharField(24)` | `email_domain \| student_id_upload`, blank when unverified |
 | `verified_at` | `DateTimeField` | null |
 | `verified_by` | FK → `User` | `SET_NULL`, null — null for the automated email path |
 | `rejection_reason` | `CharField(255)` | blank |
