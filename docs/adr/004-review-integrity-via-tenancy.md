@@ -4,6 +4,7 @@
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — claim-with-timeout adopted; minimum-stay enforcement settled
 **Amended:** 2026-08-25 — dispute queue bounded: application path, typed disputes, symmetric timeout
+**Amended:** 2026-08-26 — escalation reasons separated; correction-defeats-review closed; annotation derived
 **Deciders:** Tech lead
 
 ## Context
@@ -36,12 +37,20 @@ TenancyClaim            ONLY for stays the platform did not witness
 │                           | withdrawn | expired
 ├── confirmation_deadline   claimed_at + TENANCY_CONFIRMATION_WINDOW_DAYS
 ├── dispute_reason          dates_incorrect | never_tenanted | duplicate
+│                           AS RAISED. Never rewritten.
 ├── dispute_note            free text, ADDITIONAL to the reason, never instead
+├── disputed_by             FK → User
+├── disputed_at
+├── dispute_withdrawn_at    the disputer took it back; clears the annotation
 ├── proposed_start_date     set by the disputer for dates_incorrect
 ├── proposed_end_date
 ├── counter_start_date      set once by the tenant, if they disagree
 ├── counter_end_date
+├── tenant_accepted_correction_at
+│                           evidence, NOT necessarily a resolution — see below
 ├── escalated_at            when it entered the admin queue
+├── escalation_reason       counter_unresolved | correction_defeats_review
+│                           | identity_disputed | duplicate_unmatched
 ├── escalation_deadline     escalated_at + DISPUTE_RESOLUTION_WINDOW_DAYS
 ├── resolved_by             FK → User, nullable
 ├── resolved_at
@@ -51,7 +60,9 @@ Tenancy
 ├── unit                 FK → Unit (PROTECT)
 ├── tenant               FK → User (PROTECT)
 ├── application          FK → Application (SET_NULL) — the witnessed path
-├── claim                FK → TenancyClaim (SET_NULL) — the claimed path
+├── claim                FK → TenancyClaim (PROTECT) — the claimed path.
+│                        PROTECT, not SET_NULL: the review annotation is
+│                        derived from this record, so it must survive.
 ├── confirmation_source  application | landlord | caretaker | auto
 │                        | admin | dispute_timeout
 ├── confirmed_by         FK → User, NULL for 'auto' and 'dispute_timeout'
@@ -67,10 +78,11 @@ Review
 ├── tenancy               OneToOneField → Tenancy (PROTECT)   ← REQUIRED
 ├── rating 1..5 + category ratings
 ├── comment
-├── disputed_by_landlord  BooleanField — surfaced as a NEUTRAL annotation
 ├── editable_until        DateTimeField — set on creation
 ├── is_published
 └── created_at, updated_at
+   NOTE: no disputed_by_landlord column. The annotation is DERIVED at read
+   time by review_dispute_annotation(review); see below.
 ```
 
 The five rules, and where each is enforced:
@@ -227,9 +239,8 @@ dispute cannot be routed, so it can only go to a human.
 `proposed_start_date` / `proposed_end_date`. The tenant either accepts, in which
 case the claim confirms with the corrected dates and **no admin is involved**,
 or counters **once** with `counter_start_date` / `counter_end_date`. A counter
-that the disputer does not accept escalates, and it escalates *as
-`never_tenanted`*: two parties who cannot agree on when someone lived somewhere
-are, in substance, disagreeing about whether they lived there.
+that the disputer does not accept escalates with
+`escalation_reason = 'counter_unresolved'`.
 
 **`duplicate`** — auto-resolves if a confirmed tenancy already exists that
 overlaps the claimed range for the same unit and the same user. That is a
@@ -238,22 +249,95 @@ database query, not a judgement call, and it is the same predicate the
 not in fact a duplicate and the dispute escalates.
 
 **Only three things reach the admin queue:** a `never_tenanted` dispute, an
-unresolved counter, and a `duplicate` that matched nothing.
+unresolved counter, and a `duplicate` that matched nothing — plus the
+correction case in 2b below.
+
+#### 2a. `escalation_reason` is separate from `dispute_reason`
+
+The first version of this amendment had `dates_incorrect` escalate *as*
+`never_tenanted`, on the reasoning that two parties who cannot agree when
+someone lived somewhere are in substance disagreeing about whether they did.
+
+Design review rejected that: it changes the dispute's meaning on the way to the
+queue. The admin receives "this person never lived here" for a case where both
+parties agree the stay happened and disagree by a fortnight. **An identity
+question and a date question need completely different evidence**, and
+collapsing them makes the queue harder to work — the opposite of what this
+amendment is for.
+
+**Resolved: two fields.**
+
+- **`dispute_reason` keeps the value as originally raised, and is never
+  rewritten.** It records what the disputer actually claimed.
+- **`escalation_reason` is set when the dispute reaches the admin queue**, and
+  says what the admin has to decide:
+
+| `escalation_reason` | Arrived from | What the admin decides |
+|---|---|---|
+| `counter_unresolved` | `dates_incorrect`, tenant countered, disputer did not accept | Which set of dates is right |
+| `correction_defeats_review` | `dates_incorrect` where the correction drops the stay under the review minimum | Whether the correction is honest — see 2b |
+| `identity_disputed` | `never_tenanted`, raised as such | Whether this person lived here at all |
+| `duplicate_unmatched` | `duplicate` with no confirmed overlapping tenancy | Whether an existing tenancy really covers this |
+
+The admin queue is **sortable and filterable by `escalation_reason`**. Working a
+mixed queue oldest-first is right; working it without knowing which kind of
+question each item is means gathering the wrong evidence first.
+
+#### 2b. A correction that defeats the review cannot settle between the parties
+
+Design review identified the cheapest attack on this whole mechanism. It costs a
+motivated landlord exactly one extra step:
+
+> Dispute with `dates_incorrect`, and propose corrected dates that put the stay
+> under `REVIEW_MINIMUM_STAY_DAYS`. If the tenant accepts — and a tenant who
+> misremembers by a week, or who simply wants the argument over, may well
+> accept — the claim confirms with the corrected dates and the review is
+> silently impossible. No admin ever sees it. It does not read as suppression;
+> it reads as a settled disagreement.
+
+That is not an honest date disagreement, and the outcome is exactly the veto
+this ADR exists to remove.
+
+**Resolved: if a proposed correction would make the stay shorter than
+`settings.REVIEW_MINIMUM_STAY_DAYS`, it cannot auto-resolve between the parties
+— not even with the tenant's acceptance.** It escalates immediately with
+`escalation_reason = 'correction_defeats_review'`, and an admin decides.
+
+**Tenant acceptance is recorded as evidence, not as a resolution.**
+`tenant_accepted_correction_at` is set and shown to the admin, who will usually
+find the correction honest and confirm it. The landlord is not presumed to be
+lying; the point is that this particular correction has a side effect the
+parties cannot settle privately, because one of them may not realise it has one.
+
+This is a **computable predicate**, so it is a guard inside the correction
+service function, not an instruction in a reviewer runbook:
+
+```python
+def apply_date_correction(claim, *, start_date, end_date, accepted_by_tenant):
+    if stay_days(start_date, end_date) < settings.REVIEW_MINIMUM_STAY_DAYS:
+        return escalate(claim, reason=EscalationReason.CORRECTION_DEFEATS_REVIEW)
+    ...
+```
+
+**The cheapest attack on the trust property should also be the most conspicuous
+one.** Before this rule, suppressing a review cost one dispute and one
+plausible-looking correction, and left no trace anywhere a human would look.
+After it, the same move puts the claim in front of an administrator under a
+label naming precisely what is being attempted.
 
 #### 3. The timeout is symmetric
 
 **An escalated dispute that is unresolved after
 `settings.DISPUTE_RESOLUTION_WINDOW_DAYS` (14) auto-resolves in the tenant's
-favour.** The claim confirms, `confirmation_source` is `dispute_timeout`, the
-review becomes possible, and the resulting `Review` carries
-`disputed_by_landlord = True`.
+favour.** The claim confirms, `confirmation_source` is `dispute_timeout`, and
+the review becomes possible.
 
-That flag is surfaced in the UI as a **neutral annotation** — "the landlord
-disputed this stay" — shown alongside the review. **Never as a discredit**: not
-greyed out, not collapsed, not excluded from the average, not labelled
-"unverified". The reader is told a fact and left to weigh it. A landlord who
-disputes honestly and a landlord who disputes tactically produce the same
-annotation, which is precisely why it must not read as a verdict.
+The review is shown with a **neutral annotation** — "the landlord disputed this
+stay". **Never as a discredit**: not greyed out, not collapsed, not excluded
+from the average, not labelled "unverified". The reader is told a fact and left
+to weigh it. A landlord who disputes honestly and a landlord who disputes
+tactically produce the same annotation, which is precisely why it must not read
+as a verdict.
 
 The rationale belongs in the record, because this is the clause most likely to
 be softened by someone trying to be fair to landlords:
@@ -267,6 +351,62 @@ be softened by someone trying to be fair to landlords:
 
 The deadline binds us, not the tenant. Missing it is our failure, and the
 default on our failure must favour the party with less power.
+
+#### 3a. The annotation is derived, not stored
+
+The first version of this amendment put a `disputed_by_landlord` boolean on
+`Review`. Design review objected that it is permanent, with no path to removal
+even when the dispute is later shown to be spurious.
+
+The fix is **not** to tune the permanence. It is to stop freezing a display
+policy in a column at all.
+
+**Resolved: delete the field.** The annotation is derived at read time by one
+named function:
+
+```python
+def review_dispute_annotation(review) -> DisputeAnnotation | None:
+    """The neutral annotation to show beside a review, or None."""
+```
+
+It returns `None` when:
+
+- there was no dispute;
+- **the disputer withdrew it** (`dispute_withdrawn_at` is set) — a withdrawn
+  dispute is not a fact about the stay, it is a retracted assertion; or
+- **as a policy hook, off by default and settings-gated:** the landlord's
+  `dispute_upheld_rate` is below `settings.DISPUTE_ANNOTATION_MIN_UPHELD_RATE`
+  over at least `settings.DISPUTE_ANNOTATION_MIN_SAMPLE` disputes. A landlord
+  who disputes constantly and is upheld almost never is producing noise, not
+  signal, and the annotation should stop repeating it.
+
+Both thresholds default to values that disable the hook, because the sample
+sizes needed to make the ratio meaningful do not exist yet.
+
+**Store facts, derive presentation.** Changing this policy later is a function
+edit and a settings change, not a data migration rewriting a boolean on every
+live review — and not a decision that silently persists on reviews written under
+the old policy.
+
+**Everything the annotation needs is reconstructable from the dispute record**,
+which is why two things changed alongside:
+
+| Needed | Source |
+|---|---|
+| Was there a dispute? | `claim.dispute_reason`, `claim.disputed_at` |
+| Was it withdrawn? | `claim.dispute_withdrawn_at` — **added for this** |
+| Who raised it? | `claim.disputed_by` |
+| How did it end? | `claim.escalation_reason`, `claim.resolved_at`, `Tenancy.confirmation_source` |
+| Is this landlord credible? | `LandlordProfile.disputes_raised_count` / `disputes_upheld_count` |
+
+`Tenancy.claim` therefore becomes **`PROTECT`, not `SET_NULL`**. A deleted claim
+would take the annotation's evidence with it and leave the review silently
+un-annotated — the same "quietly clears the flag" outcome the derived approach
+exists to avoid.
+
+`Tenancy.was_disputed` stays. It is a fact about the tenancy, not a display
+decision, and it lets the common "did anything happen here at all?" query skip
+the join.
 
 #### 4. Disputing is visible and costly
 
@@ -406,12 +546,19 @@ the review is immutable — including to its author.
   repeatedly has a denial-of-service against the landlord's attention. The
   single counter is a nullable field pair that is written once; a second attempt
   is refused.
-- **`disputed_by_landlord` is a durable mark on a review that the landlord may
-  have raised in bad faith**, and there is no path to remove it if the dispute
-  is later shown to be spurious. That is a deliberate asymmetry — the annotation
-  is neutral by design — but if `dispute_upheld_rate` shows a landlord disputing
-  tactically at scale, the right response is acting on that landlord, not
-  quietly clearing flags.
+- **The annotation is now a read-time computation on a hot path.** Every review
+  render needs the claim and, if the policy hook is enabled, the landlord's
+  counters. `select_related("tenancy__claim__disputed_by__landlord_profile")` on
+  every review queryset, and a query-count assertion on the review list, or this
+  becomes an N+1 on the busiest read in the product.
+- **A derived annotation can change retroactively**, which is the point and also
+  a surprise: enabling the policy hook silently removes annotations from
+  existing reviews. That is the intended behaviour — the alternative is a data
+  migration over live reviews — but it should be announced rather than shipped
+  quietly.
+- **`escalation_reason` is a second enum that can drift from the first.** A new
+  `dispute_reason` value with no corresponding escalation path is a dispute that
+  can be raised and never routed. Assert the mapping in a test.
 - **The 14-day platform deadline is a commitment we can fail.** It has to be
   monitored on the *oldest unresolved item*, not on queue volume: a queue of
   three items where the oldest is 13 days old is an emergency, and a queue of

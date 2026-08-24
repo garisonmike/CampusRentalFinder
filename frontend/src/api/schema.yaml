@@ -3238,6 +3238,12 @@ components:
               type: boolean
             is_verified_student:
               type: boolean
+            verification_status:
+              type: string
+              nullable: true
+            grace_period_ends_at:
+              type: string
+              nullable: true
             university:
               type: string
               nullable: true
@@ -3246,6 +3252,7 @@ components:
               items:
                 type: integer
           required:
+          - grace_period_ends_at
           - is_landlord
           - is_staff
           - is_student
@@ -3253,6 +3260,7 @@ components:
           - is_verified_student
           - manages_properties
           - university
+          - verification_status
           readOnly: true
       required:
       - capabilities
@@ -6727,6 +6735,12 @@ components:
               type: boolean
             is_verified_student:
               type: boolean
+            verification_status:
+              type: string
+              nullable: true
+            grace_period_ends_at:
+              type: string
+              nullable: true
             university:
               type: string
               nullable: true
@@ -6735,6 +6749,7 @@ components:
               items:
                 type: integer
           required:
+          - grace_period_ends_at
           - is_landlord
           - is_staff
           - is_student
@@ -6742,6 +6757,7 @@ components:
           - is_verified_student
           - manages_properties
           - university
+          - verification_status
           readOnly: true
       required:
       - capabilities

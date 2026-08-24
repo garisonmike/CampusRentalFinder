@@ -4,6 +4,7 @@
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — caretaker capabilities and student verification resolved
 **Amended:** 2026-08-25 — signup gating replaced by a policy enum with a lockout guard
+**Amended:** 2026-08-26 — enforcement point resolved: register-then-verify with a grace period
 **Deciders:** Tech lead
 
 ## Context
@@ -187,7 +188,8 @@ outcomes rather than configuration.**
 ```
 signup_policy ∈ {open, verification_encouraged, verification_required}
                  default: open
-verification_enforced_from — nullable date; the policy is inert before it
+verification_enforced_from     — nullable date; the policy is inert before it
+verification_grace_period_days — int, default 14
 ```
 
 - **`open`** — verification is not mentioned at signup. The default.
@@ -221,6 +223,34 @@ therefore:
    students, attempt to require — because a rule that lives outside the database
    and outside a test is a comment, and comments do not fail builds.
 
+### The enforcement point: register first, then verify
+
+`verification_required` says "signup completes only for a verified student",
+which read literally is impossible. Verify-then-register is chicken-and-egg for
+the email-domain path — there is no account to attach a confirmed address to —
+and flatly impossible for manual ID review, because there is nowhere to upload a
+document and nobody to attach the decision to.
+
+**Resolved: accounts always create successfully, and gating happens after.**
+
+1. **Registration never fails on verification status.** A new `StudentProfile`
+   at a university with `signup_policy = verification_required` is created with
+   `verification_status = 'pending'` and `grace_period_ends_at` set from
+   `University.verification_grace_period_days` (default 14).
+2. **During the grace period the account is fully usable for reading**: search,
+   browsing listings, saved properties, inquiries. Only the actions the school
+   has explicitly gated are blocked.
+3. **After the grace period expires unverified, read access is retained.** The
+   gated actions stay blocked and the prompt becomes persistent. **Never delete
+   the account, never lock it, never log the user out.**
+4. **`verification_encouraged` is identical to `open`, plus prompts.** No gating
+   at any point. It is the setting almost every school should be on.
+
+The grace period is what makes the policy honest. Verification takes time that
+is not the student's to control — a university mail account is issued when the
+registry gets to it, and a manual ID review waits on a human. Blocking a student
+from the platform while they wait would punish them for the school's queue.
+
 ### Changing policy never invalidates an existing account
 
 **Enforcement applies at signup only.** A school that moves from `open` to
@@ -238,6 +268,12 @@ not depend on the answer.
 Its failure mode is recoverable and immediate — a student is told they must
 verify before reviewing, verifies, and proceeds — so it does not need the same
 machinery.
+
+**A university raising `signup_policy` applies it to new signups only.**
+Existing unverified users keep everything they had: no retroactive grace period,
+no retroactive gating, no change to what they can already do. This is the rule
+most likely to be broken by a later "cleanup" that decides consistency is
+tidier, so it is asserted directly in a test rather than only described here.
 
 ### ID document handling
 

@@ -12,6 +12,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from accounts.capabilities import Capabilities, capabilities_for
+from accounts.gating import grace_period_end_for, initial_verification_status
 
 from .models import LandlordProfile, StudentProfile, UniversityStaffProfile, User
 
@@ -29,6 +30,8 @@ class CapabilitiesSerializer(serializers.Serializer):
     is_university_staff = serializers.BooleanField(read_only=True)
     is_staff = serializers.BooleanField(read_only=True)
     is_verified_student = serializers.BooleanField(read_only=True)
+    verification_status = serializers.CharField(read_only=True, allow_null=True)
+    grace_period_ends_at = serializers.CharField(read_only=True, allow_null=True)
     university = serializers.CharField(read_only=True, allow_null=True)
     manages_properties = serializers.ListField(child=serializers.IntegerField(), read_only=True)
 
@@ -144,7 +147,15 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
         university = getattr(self.context.get("request"), "university", None)
         if university is not None:
-            StudentProfile.all_objects.create(user=user, university=university)
+            # Registration never fails on verification status (ADR-003). A
+            # school that gates actions gets a pending profile with a grace
+            # period; everyone else gets a plain unverified one.
+            StudentProfile.all_objects.create(
+                user=user,
+                university=university,
+                verification_status=initial_verification_status(university),
+                grace_period_ends_at=grace_period_end_for(university),
+            )
 
         return user
 

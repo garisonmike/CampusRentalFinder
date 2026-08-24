@@ -1611,6 +1611,8 @@ export interface components {
                 is_university_staff: boolean;
                 is_staff: boolean;
                 is_verified_student: boolean;
+                verification_status: string | null;
+                grace_period_ends_at: string | null;
                 university: string | null;
                 manages_properties: number[];
             };
@@ -3706,6 +3708,8 @@ export interface components {
                 is_university_staff: boolean;
                 is_staff: boolean;
                 is_verified_student: boolean;
+                verification_status: string | null;
+                grace_period_ends_at: string | null;
                 university: string | null;
                 manages_properties: number[];
             };

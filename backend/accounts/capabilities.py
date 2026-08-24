@@ -69,6 +69,8 @@ class Capabilities(TypedDict):
     is_university_staff: bool
     is_staff: bool
     is_verified_student: bool
+    verification_status: str | None
+    grace_period_ends_at: str | None
     university: str | None
     manages_properties: list[int]
 
@@ -149,12 +151,17 @@ def capabilities_for(user) -> Capabilities:
     elif is_university_staff(user):
         university = user.staff_profile.university.subdomain
 
+    profile = getattr(user, "student_profile", None) if student else None
+    grace_ends = getattr(profile, "grace_period_ends_at", None)
+
     return Capabilities(
         is_student=student,
         is_landlord=is_landlord(user),
         is_university_staff=is_university_staff(user),
         is_staff=is_platform_staff(user),
         is_verified_student=is_verified_student(user),
+        verification_status=getattr(profile, "verification_status", None),
+        grace_period_ends_at=grace_ends.isoformat() if grace_ends else None,
         university=university,
         manages_properties=managed_property_ids(user),
     )
@@ -168,6 +175,8 @@ def anonymous_capabilities() -> Capabilities:
         is_university_staff=False,
         is_staff=False,
         is_verified_student=False,
+        verification_status=None,
+        grace_period_ends_at=None,
         university=None,
         manages_properties=[],
     )

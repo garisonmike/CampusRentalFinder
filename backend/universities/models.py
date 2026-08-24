@@ -119,6 +119,16 @@ class University(models.Model):
         blank=True,
         help_text=_("The signup policy is inert before this date. Blank means immediately."),
     )
+    verification_grace_period_days = models.PositiveSmallIntegerField(
+        _("verification grace period (days)"),
+        default=14,
+        validators=[MinValueValidator(1), MaxValueValidator(180)],
+        help_text=_(
+            "How long a new student may use gated actions while their "
+            "verification is pending. Verification waits on the registry or on "
+            "a human reviewer, neither of which the student controls."
+        ),
+    )
     verification_required_to_review = models.BooleanField(
         _("verification required to review"),
         default=False,
@@ -162,6 +172,11 @@ class University(models.Model):
             models.CheckConstraint(
                 condition=Q(id_review_retention_days__gte=1) & Q(id_review_retention_days__lte=90),
                 name="university_retention_window_sane",
+            ),
+            models.CheckConstraint(
+                condition=Q(verification_grace_period_days__gte=1)
+                & Q(verification_grace_period_days__lte=180),
+                name="university_grace_period_sane",
             ),
         ]
 

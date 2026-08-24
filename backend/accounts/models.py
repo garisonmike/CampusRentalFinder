@@ -252,6 +252,15 @@ class StudentProfile(TenantScopedModel):
         help_text=_("Null for the automated email-domain path."),
     )
     rejection_reason = models.CharField(_("rejection reason"), max_length=255, blank=True)
+    grace_period_ends_at = models.DateTimeField(
+        _("grace period ends"),
+        null=True,
+        blank=True,
+        help_text=_(
+            "Set at signup when the university gates actions on verification. "
+            "Read access never depends on it (ADR-003)."
+        ),
+    )
     year_of_study = models.PositiveSmallIntegerField(_("year of study"), null=True, blank=True)
     course = models.CharField(_("course"), max_length=200, blank=True)
 
