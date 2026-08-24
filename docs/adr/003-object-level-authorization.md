@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — caretaker capabilities and student verification resolved
+**Amended:** 2026-08-25 — signup gating replaced by a policy enum with a lockout guard
 **Deciders:** Tech lead
 
 ## Context
@@ -134,8 +135,10 @@ University
 ├── verification_methods_enabled   array ⊆ {email_domain, student_id_upload},
 │                                  may be empty
 ├── student_email_domains          array, e.g. ['s.kyu.ac.ke']
+├── signup_policy                  open | verification_encouraged
+│                                  | verification_required   (default: open)
+├── verification_enforced_from      nullable date; enforcement is INERT before it
 ├── verification_required_to_review  bool, default False
-├── verification_required_to_signup  bool, default False
 └── id_review_retention_days       int, default 7
 
 StudentProfile
@@ -167,6 +170,74 @@ review.
 Reviews display a verified badge when the author's profile is verified. When
 `verification_required_to_review` is `False`, unverified students may still
 post; the badge is simply absent.
+
+### Signup gating cannot lock out an intake
+
+The first version of this amendment used a boolean,
+`verification_required_to_signup`, guarded by a constraint forbidding it while
+`verification_methods_enabled` was empty. Design review found that the guard
+misses the realistic failure: a school enables **email-domain verification**,
+sets the flag, and *then* discovers it has not yet issued addresses to its
+first-years. Methods are enabled, so the constraint passes, and an entire intake
+is locked out of the platform in the week they most need it.
+
+**Resolved: replace the boolean with a policy enum and a guard that checks
+outcomes rather than configuration.**
+
+```
+signup_policy ∈ {open, verification_encouraged, verification_required}
+                 default: open
+verification_enforced_from — nullable date; the policy is inert before it
+```
+
+- **`open`** — verification is not mentioned at signup. The default.
+- **`verification_encouraged`** — the student is prompted and can skip. This is
+  the setting almost every school should be on.
+- **`verification_required`** — signup completes only for a verified student.
+
+`verification_enforced_from` lets a school announce a change before it bites:
+set the policy and a future date, and nothing changes until that date arrives.
+Absent a date, an enabled policy applies immediately.
+
+**The guard, and this is the load-bearing part:**
+
+> `signup_policy` may not be set to `verification_required` unless the
+> university already has at least one `StudentProfile` with
+> `verification_status = 'verified'`.
+
+A school that enabled email-domain verification but has not yet issued a single
+address has **zero** verified students, so it cannot switch on a policy that
+would lock out its own intake. The guard tests the thing that actually matters —
+has verification ever worked here for anybody — rather than whether a
+configuration field is non-empty.
+
+A `CheckConstraint` cannot express this: it spans two tables. Enforcement is
+therefore:
+
+1. a single named service function, `assert_signup_policy_is_safe(university,
+   policy)`, which every write path calls;
+2. a serializer check that delegates to it;
+3. **a named test for the exact failure case** — methods enabled, zero verified
+   students, attempt to require — because a rule that lives outside the database
+   and outside a test is a comment, and comments do not fail builds.
+
+### Changing policy never invalidates an existing account
+
+**Enforcement applies at signup only.** A school that moves from `open` to
+`verification_required` does not thereby suspend, downgrade or log out its
+existing unverified users. They keep exactly the access they had; they are
+**prompted**, not blocked.
+
+This is not a courtesy, it is the difference between a policy change and an
+outage. A university switching a setting must never be able to sign out its
+student body, and an administrator changing a dropdown must not have to reason
+about the blast radius. The prompt is dismissible and reappears; access does
+not depend on the answer.
+
+`verification_required_to_review` keeps its boolean and its default of `False`.
+Its failure mode is recoverable and immediate — a student is told they must
+verify before reviewing, verifies, and proceeds — so it does not need the same
+machinery.
 
 ### ID document handling
 
@@ -249,10 +320,22 @@ below are the minimum that satisfies that:
   stops running turns a 7-day promise into indefinite storage. Alert on the
   count of documents older than the retention window rather than on the job's
   own success.
-- **`verification_required_to_signup` is a foot-gun** for a school that enables
-  it without issuing addresses to first-years in time. Warn in the admin when it
-  is set while `verification_methods_enabled` is empty; that combination locks
-  everyone out.
+- **The lockout guard depends on a service function, not a constraint**, because
+  it spans tables. That makes it the single most bypassable rule in this ADR:
+  a future admin action, data migration or management command that sets
+  `signup_policy` directly will not be checked. Route every write through
+  `assert_signup_policy_is_safe`, and keep the named failure-case test.
+- **`verification_enforced_from` adds a time dimension to an authorization
+  rule**, which means "is signup gated?" now has a different answer depending on
+  when it is asked. Compute it in one place and never inline the date comparison
+  at a call site.
+- **The guard is satisfiable with a single verified student**, including a test
+  account created by the school itself. That is intentional — the rule proves
+  the mechanism works here, not that adoption is high — but it means a school
+  determined to lock its intake out can still do so by verifying one person
+  first. The guard raises the cost of the mistake; it does not make it
+  impossible. Combined with `verification_enforced_from`, a school that does
+  this deliberately at least has to schedule it.
 
 ### Consequences of the caretaker resolution
 

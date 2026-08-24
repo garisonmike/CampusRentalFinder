@@ -59,7 +59,7 @@ frontend/
     lib/          utils.ts, errors.ts
     test/         setup.ts, utils.tsx, msw/
 docs/
-  AUDIT.md  DOMAIN_MODEL.md  ENGINEERING.md  adr/
+  AUDIT.md  DOMAIN_MODEL.md  ENGINEERING.md  OPERATIONS.md  adr/
 ```
 
 `DJANGO_SETTINGS_MODULE` defaults to `config.settings.dev` in `manage.py`,
@@ -293,16 +293,30 @@ only; `LandlordProfile`, `CaretakerAssignment`, `StudentProfile` and
 vacancy, photos, availability, tenancy claims and inquiries — **not** delete a
 property, transfer ownership, grant assignments, touch payout fields, or post a
 `ReviewResponse`. Student verification is **per-university policy, off by
-default**, earning a badge rather than gating access. **ID documents are
+default**, earning a badge rather than gating access. `signup_policy` replaces
+the old boolean and **cannot be set to `verification_required` unless the
+university already has at least one verified student** — so a school that
+enabled verification but has not issued addresses cannot lock out its own
+intake. Policy applies at signup only; existing users are prompted, never
+blocked. **ID documents are
 regulated personal data under Kenya's Data Protection Act 2019:** private
 bucket only, signed URLs, scheduled deletion after
 `id_review_retention_days`, every read logged, byte-level content-type
 validation on upload.
 
-**ADR-004 — Review integrity via a `Tenancy` record.** **The tenant creates a
-`TenancyClaim`;** the landlord and caretakers have 7 days to confirm or
-dispute, and silence auto-confirms. Landlord silence is a signal, not a veto.
-`Tenancy` records `confirmation_source ∈ {landlord, caretaker, auto, admin}`.
+**ADR-004 — Review integrity via a `Tenancy` record.** **An accepted
+`Application` creates a confirmed `Tenancy` directly** — the platform witnessed
+it, so no claim and no dispute surface. `TenancyClaim` exists only for stays the
+platform did not witness; that is the primary control on dispute volume and must
+not be "simplified" away. For claims: the tenant initiates, the landlord and
+caretakers have 7 days, and silence auto-confirms. **Disputes are typed** —
+`dates_incorrect` resolves between the parties, `duplicate` auto-resolves, and
+only `never_tenanted` plus unresolved counters reach an admin. **The timeout is
+symmetric:** an escalated dispute we have not resolved in 14 days auto-resolves
+for the tenant, and the review carries a neutral `disputed_by_landlord`
+annotation. `Tenancy` records `confirmation_source` across
+`application | landlord | caretaker | auto | admin | dispute_timeout`. See
+`docs/OPERATIONS.md` for the SLA and alerting.
 Overlapping confirmed tenancies are blocked by an `ExclusionConstraint`
 (`btree_gist`); one open claim per user per unit; claims are rate-limited. The
 30-day minimum stay cannot be a `CheckConstraint` for an ongoing tenancy, so it

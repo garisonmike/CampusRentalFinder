@@ -2,7 +2,8 @@
 
 **Status:** Proposed — the schema rewrite implements this.
 **Date:** 2026-08-23
-**Updated:** 2026-08-24 — reflects the ADR amendments of the same date
+**Updated:** 2026-08-25 — signup policy enum, typed disputes, application-sourced
+tenancies
 
 This is the target schema described in ADR-001 through ADR-007. It is not what
 the code contains today; `docs/AUDIT.md` §2 describes that.
@@ -47,8 +48,9 @@ actually exist around a Kenyan campus.
 | `accent_hsl` | `CharField(32)` | |
 | `verification_methods_enabled` | `ArrayField(CharField(24))` | subset of `{email_domain, student_id_upload}`; **may be empty** |
 | `student_email_domains` | `ArrayField(CharField(255))` | `["s.kyu.ac.ke"]` |
+| `signup_policy` | `CharField(24)` | `open \| verification_encouraged \| verification_required`, default **`open`** |
+| `verification_enforced_from` | `DateField` | null — the policy is inert before this date |
 | `verification_required_to_review` | `BooleanField` | default **`False`** |
-| `verification_required_to_signup` | `BooleanField` | default **`False`** |
 | `id_review_retention_days` | `PositiveSmallIntegerField` | default **7** (ADR-003) |
 | `is_active` | `BooleanField` | default `True` |
 
@@ -64,8 +66,16 @@ than gating anything.
 - `CheckConstraint` on each `*_hsl` field matching
   `^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$`
 - `CheckConstraint` — `id_review_retention_days` between 1 and 90
-- `CheckConstraint` — `verification_required_to_signup` may not be true while
-  `verification_methods_enabled` is empty; that combination locks everyone out
+
+**Not a constraint, because it spans tables:** `signup_policy` may not be set to
+`verification_required` unless the university already has at least one
+`StudentProfile` with `verification_status='verified'`. Enforced by
+`assert_signup_policy_is_safe(university, policy)` — one named service function,
+called by every write path, with a named test for the exact failure case
+(methods enabled, zero verified students, attempt to require). See ADR-003.
+
+Policy changes apply **at signup only**. Existing unverified users keep their
+access and are prompted, never blocked.
 
 ### `Campus`
 
@@ -125,6 +135,15 @@ Built on `AbstractBaseUser` + `PermissionsMixin`, **not** `AbstractUser` — the
 | `verified_at` | `DateTimeField` | null |
 | `verified_by` | FK → `User` | `SET_NULL`, staff only |
 | `payout_phone` | `CharField(13)` | blank — M-Pesa number, for later |
+| `claims_received_count` | `PositiveIntegerField` | denormalised, refreshed by the deadline job |
+| `disputes_raised_count` | `PositiveIntegerField` | denormalised |
+| `disputes_upheld_count` | `PositiveIntegerField` | denormalised |
+
+`dispute_rate` and `dispute_upheld_rate` are computed from these (ADR-004).
+Admin-visible from the start; a public trust signal only once the denominator
+is large enough to mean something — below roughly ten claims, any ratio
+misleads. A per-landlord rate limit on disputes raised per rolling 30 days is
+configured by `settings.MAX_DISPUTES_PER_LANDLORD_PER_MONTH`.
 
 **Indexes:** `Index(fields=["verification_status"])`
 
@@ -451,6 +470,12 @@ intent to take the unit.
 | `decided_at` | `DateTimeField` | null |
 | `decision_note` | `TextField` | blank |
 
+**Accepting an application creates a confirmed `Tenancy` directly**, with
+`confirmation_source='application'` and no `TenancyClaim` (ADR-004). The
+platform witnessed the agreement — it holds the application, the acceptance, the
+actor and the timestamp — so a second confirmation adds latency and a dispute
+surface for nothing. This is the primary control on dispute-queue volume.
+
 **Constraints / indexes**
 
 - `UniqueConstraint(fields=["unit", "applicant"], condition=Q(status__in=["submitted", "under_review"]), name="one_open_application")`
@@ -460,9 +485,14 @@ intent to take the unit.
 
 ### `TenancyClaim` (ADR-004)
 
-**The tenant initiates.** The landlord and any assigned caretaker have
+**Only for stays the platform did not witness** — off-platform arrangements and
+pre-platform history. An accepted `Application` creates a confirmed `Tenancy`
+directly with no claim at all. This is the primary control on dispute volume;
+do not route witnessed tenancies through here for uniformity.
+
+The tenant initiates. The landlord and any assigned caretaker have
 `settings.TENANCY_CONFIRMATION_WINDOW_DAYS` (7) to confirm or dispute; silence
-auto-confirms via a scheduled job. Landlord silence is a signal, not a veto.
+auto-confirms.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -471,45 +501,81 @@ auto-confirms via a scheduled job. Landlord silence is a signal, not a veto.
 | `start_date` | `DateField` | |
 | `end_date` | `DateField` | null while ongoing |
 | `monthly_rent_kes` | `Decimal(10,2)` | as claimed |
-| `status` | `CharField(16)` | `pending \| confirmed \| disputed \| withdrawn` |
+| `status` | `CharField(16)` | `pending \| confirmed \| disputed \| escalated \| withdrawn \| expired` |
 | `confirmation_deadline` | `DateTimeField` | `created_at + window` |
-| `resolved_by` | FK → `User` | `SET_NULL`, null — null when auto-confirmed |
+| `dispute_reason` | `CharField(20)` | `dates_incorrect \| never_tenanted \| duplicate`, blank while undisputed |
+| `dispute_note` | `TextField` | blank — **additional** to the reason, never instead |
+| `disputed_by` | FK → `User` | `SET_NULL`, null |
+| `disputed_at` | `DateTimeField` | null |
+| `proposed_start_date` | `DateField` | null — the disputer's correction |
+| `proposed_end_date` | `DateField` | null |
+| `counter_start_date` | `DateField` | null — the tenant's single counter |
+| `counter_end_date` | `DateField` | null |
+| `escalated_at` | `DateTimeField` | null — entered the admin queue |
+| `escalation_deadline` | `DateTimeField` | null — `escalated_at + DISPUTE_RESOLUTION_WINDOW_DAYS` |
+| `resolved_by` | FK → `User` | `SET_NULL`, null — null when resolved by timeout |
 | `resolved_at` | `DateTimeField` | null |
-| `dispute_reason` | `TextField` | blank |
 
 **Constraints / indexes**
 
-- `UniqueConstraint(fields=["unit", "claimant"], condition=Q(status="pending"), name="one_open_claim_per_unit")`
+- `UniqueConstraint(fields=["unit", "claimant"], condition=Q(status__in=["pending", "disputed", "escalated"]), name="one_open_claim_per_unit")`
 - `CheckConstraint` — `end_date` is null or `>= start_date`
-- `CheckConstraint` — a non-`pending` status requires `resolved_at`
-- `Index(fields=["status", "confirmation_deadline"])` — what the auto-confirm
-  job scans, and what an alert on overdue pending claims reads
+- `CheckConstraint` — a `disputed` or `escalated` status requires a non-blank
+  `dispute_reason`; an untyped dispute cannot be routed
+- `CheckConstraint` — `dispute_reason='dates_incorrect'` requires
+  `proposed_start_date`
+- `CheckConstraint` — `counter_start_date` requires `proposed_start_date`; you
+  cannot counter a correction that was not proposed
+- `CheckConstraint` — a terminal status requires `resolved_at`
+- `CheckConstraint` — `escalation_deadline` is non-null exactly when
+  `escalated_at` is
+- `Index(fields=["status", "confirmation_deadline"])` — the auto-confirm job,
+  and the overdue-claim alert
+- `Index(fields=["status", "escalation_deadline"])` — the dispute
+  auto-resolution job, and the SLA alert. **Both alerts read the oldest row,
+  not the count** (`docs/OPERATIONS.md`)
 - `Index(fields=["claimant", "-created_at"])` — the per-user rate limit
+- `Index(fields=["disputed_by", "-disputed_at"])` — the per-landlord dispute
+  rate limit and the `dispute_rate` metric
 
-A disputed claim freezes and opens a moderation entry for platform admins; it
-yields no review until resolved.
+**Dispute routing (ADR-004).** Only three cases reach an admin:
+
+| Reason | Path |
+|---|---|
+| `dates_incorrect` | Disputer proposes dates → tenant accepts (confirms, **no admin**) or counters once → an unaccepted counter escalates *as `never_tenanted`* |
+| `duplicate` | Auto-resolves if a confirmed overlapping tenancy exists for the same unit and user; otherwise escalates |
+| `never_tenanted` | Escalates |
+
+**Symmetric timeout.** An escalated claim past `escalation_deadline`
+auto-resolves in the tenant's favour: the claim confirms with
+`confirmation_source='dispute_timeout'`, and the resulting `Review` carries
+`disputed_by_landlord=True` as a neutral annotation.
 
 ### `Tenancy` (ADR-004)
 
 The evidence that a stay happened. Nothing else can vouch for a review.
 
+**Two sources, and they must not converge:**
+
+- **witnessed** — an `Application` accepted on-platform creates this directly in
+  confirmed state, `confirmation_source='application'`, `claim` null. No
+  confirmation window, no dispute surface, no queue entry.
+- **claimed** — a `TenancyClaim` that confirmed, by any route.
+
 | Field | Type | Notes |
 |---|---|---|
 | `unit` | FK → `Unit` | `PROTECT` |
 | `tenant` | FK → `User` | `PROTECT` |
-| `claim` | FK → `TenancyClaim` | `SET_NULL`, null — where it came from |
-| `application` | FK → `Application` | `SET_NULL`, null |
-| `confirmation_source` | `CharField(16)` | `landlord \| caretaker \| auto \| admin` |
-| `confirmed_by` | FK → `User` | `SET_NULL`, **null when `confirmation_source='auto'`** |
+| `application` | FK → `Application` | `SET_NULL`, null — the witnessed path |
+| `claim` | FK → `TenancyClaim` | `SET_NULL`, null — the claimed path |
+| `confirmation_source` | `CharField(20)` | `application \| landlord \| caretaker \| auto \| admin \| dispute_timeout` |
+| `confirmed_by` | FK → `User` | `SET_NULL`, **null for `auto` and `dispute_timeout`** |
 | `confirmed_at` | `DateTimeField` | |
+| `was_disputed` | `BooleanField` | default `False` — a dispute occurred, whatever its outcome |
 | `start_date` | `DateField` | |
 | `end_date` | `DateField` | null while ongoing |
-| `monthly_rent_kes` | `Decimal(10,2)` | the agreed figure, for the record |
-| `status` | `CharField(16)` | `active \| ended \| disputed` |
-
-`confirmation_source` is a cheap and durable trust signal: it supports
-"this landlord confirms 12% of claims" later, and surfaces a caretaker
-confirming implausible volumes.
+| `monthly_rent_kes` | `Decimal(10,2)` | |
+| `status` | `CharField(16)` | `active \| ended` |
 
 **Constraints / indexes**
 
@@ -517,13 +583,16 @@ confirming implausible volumes.
 - `UniqueConstraint(fields=["unit", "tenant", "start_date"], name="uniq_tenancy_per_unit_tenant_start")`
 - **`ExclusionConstraint`** over `(unit =, daterange(start_date, end_date) &&)`
   where `status='active'`, named `no_overlapping_confirmed_tenancy`. Requires
-  the `btree_gist` extension, added by
-  `django.contrib.postgres.operations.BtreeGistExtension`. A serializer cannot
-  see a concurrent insert; this can.
+  `btree_gist`. A serializer cannot see a concurrent insert; this can. It is
+  also the exact predicate the `duplicate` dispute auto-resolution queries.
+- `CheckConstraint` — `confirmation_source='application'` requires a non-null
+  `application` and a null `claim`; any other source requires a non-null `claim`
+  and a null `application`. The two paths cannot blur.
 - `CheckConstraint` — `confirmed_by` is null if and only if
-  `confirmation_source = 'auto'`
+  `confirmation_source` is `auto` or `dispute_timeout`
 - `Index(fields=["tenant", "-start_date"])`
 - `Index(fields=["unit", "status"])`
+- `Index(fields=["confirmation_source"])` — the volume-control metric
 - `CheckConstraint(condition=Q(monthly_rent_kes__gt=0), name="tenancy_rent_positive")`
 
 ---
@@ -545,7 +614,12 @@ confirming implausible volumes.
 | `would_recommend` | `BooleanField` | null |
 | `editable_until` | `DateTimeField` | `created_at + 14 days` |
 | `is_published` | `BooleanField` | default `True` |
+| `disputed_by_landlord` | `BooleanField` | default `False` — set when the tenancy confirmed by dispute timeout |
 | `hidden_reason` | `CharField(200)` | blank; staff only |
+
+`disputed_by_landlord` is surfaced as a **neutral annotation** — "the landlord
+disputed this stay" — never as a discredit. The review is not greyed out,
+collapsed, excluded from the average, or labelled unverified (ADR-004).
 
 The verified badge is read from `review.tenancy.tenant.student_profile.verification_status`
 at render time, not copied onto the review. When the university has
@@ -640,11 +714,16 @@ User 1──1 UniversityStaffProfile
 User 1──* CaretakerAssignment *──1 Property
 
 Unit 1──* Application   *──1 User
-Unit 1──* TenancyClaim  *──1 User                        (ADR-004: the TENANT
-                                                          initiates)
+Application 0..1──1 Tenancy                              (ADR-004: WITNESSED —
+                                                          acceptance creates a
+                                                          confirmed tenancy,
+                                                          no claim)
+Unit 1──* TenancyClaim  *──1 User                        (ADR-004: CLAIMED —
+                                                          only for stays the
+                                                          platform did not
+                                                          witness)
 TenancyClaim 0..1──1 Tenancy
 Unit 1──* Tenancy       *──1 User
-Application 0..1──1 Tenancy
 
 Tenancy 1──0..1 Review 1──0..1 ReviewResponse            (ADR-004: a review
                                                           cannot exist without
@@ -681,10 +760,16 @@ needs an alert on its *backlog* rather than on its own success.
 
 | Job | Trigger | Alert on |
 |---|---|---|
-| Auto-confirm tenancy claims | scheduled, hourly | `TenancyClaim` rows past `confirmation_deadline` still `pending` |
+| Auto-confirm tenancy claims | scheduled, hourly | oldest `TenancyClaim` past `confirmation_deadline` still `pending` |
+| Auto-resolve escalated disputes | scheduled, hourly | oldest `escalated` claim past `escalation_deadline` |
 | Route campus walking distance | on `PropertyCampusDistance` create; periodic refresh of oldest `routed_at` | rows with null `walking_minutes` older than a day; provider quota |
-| Delete verification documents | scheduled, hourly | `StudentVerificationRequest` past its retention window with `document_deleted_at` null |
-| Generate image variants | on `UnitPhoto` create | `UnitPhoto` rows in `processing_status='pending'` older than an hour |
+| Delete verification documents | scheduled, hourly | oldest `StudentVerificationRequest` past its retention window with `document_deleted_at` null |
+| Generate image variants | on `UnitPhoto` create | oldest `UnitPhoto` in `processing_status='pending'` |
+
+**Alert on the age of the oldest unresolved item, never on volume.** Forty items
+with the oldest two days old is a busy week; three items with the oldest
+thirteen days old is an emergency, and a volume threshold does not fire on it.
+Thresholds and the dispute SLA are in `docs/OPERATIONS.md`.
 
 ## Storage buckets (ADR-007)
 

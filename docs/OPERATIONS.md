@@ -1,0 +1,180 @@
+# Operations
+
+**Date:** 2026-08-25
+
+What has to keep running for the platform's promises to hold, what we commit to,
+and what it looks like when something stops.
+
+This document exists because of a specific failure shape. Every job listed here
+fails **silently**: nothing errors, no request 500s, no alert fires from an
+exception tracker. The system simply stops doing something it promised, and the
+symptom is an absence — reviews that never appear, documents that are never
+deleted, claims that never confirm. **A job whose failure is invisible is worse
+than no job**, because no job at least makes the gap obvious.
+
+---
+
+## Commitments
+
+### Dispute resolution SLA
+
+> An escalated tenancy dispute is resolved within **14 days**
+> (`settings.DISPUTE_RESOLUTION_WINDOW_DAYS`).
+
+This is a commitment, not a target. It is enforced by the system rather than by
+diligence: an escalated dispute we have not resolved by the deadline
+**auto-resolves in the tenant's favour** (ADR-004). The claim confirms, the
+review becomes possible, and the review carries a neutral
+`disputed_by_landlord` annotation.
+
+Missing the deadline is therefore not a backlog, it is a decision — and the
+decision is made for us, in the direction that protects the party with less
+power. That is deliberate: an indefinite block would turn our capacity limits
+into a landlord veto by proxy.
+
+**What this means in practice:** the queue cannot grow without consequence. If
+we are missing deadlines, we are not "behind" — we are auto-confirming disputes
+we never looked at. Treat sustained auto-resolution as a staffing signal, not a
+tolerable steady state.
+
+### Verification document retention
+
+> A student ID document is deleted within `University.id_review_retention_days`
+> (default **7**) of a decision being recorded.
+
+This is a **legal obligation** under Kenya's Data Protection Act 2019, not a
+housekeeping preference (ADR-003). The decision outcome is retained; the image
+is not.
+
+---
+
+## Jobs that must be running
+
+Four jobs on django-rq (ADR-007). For each: what it does, what breaks when it
+stops, and how long that takes to become visible.
+
+### 1. Claim auto-confirmation
+
+| | |
+|---|---|
+| **Schedule** | Hourly |
+| **Does** | Confirms `TenancyClaim` rows past `confirmation_deadline` that are still `pending` |
+| **Guarantees** | ADR-004's core property: landlord silence is a signal, not a veto |
+
+**Symptom if it stops:** claims sit in `pending` for ever. No error anywhere.
+Tenants who submitted a claim never become able to review, and it looks
+identical to landlords simply not confirming — which is exactly the behaviour
+the timeout was introduced to defeat. **The failure restores the bug.**
+
+**Time to visible:** 7 days plus however long anyone takes to notice a quiet
+week in review volume. Realistically: never, without the alert.
+
+### 2. Dispute auto-resolution
+
+| | |
+|---|---|
+| **Schedule** | Hourly |
+| **Does** | Resolves escalated disputes past `escalation_deadline` in the tenant's favour |
+| **Guarantees** | The SLA above, and that platform backlog cannot block a review indefinitely |
+
+**Symptom if it stops:** escalated disputes accumulate and the reviews behind
+them stay impossible. The platform is silently vetoing reviews on behalf of
+landlords who disputed them. This is the most damaging of the four failures,
+because the thing being suppressed is precisely the content a landlord had an
+incentive to suppress.
+
+**Time to visible:** 14 days, then indefinitely.
+
+### 3. Verification document retention deletion
+
+| | |
+|---|---|
+| **Schedule** | Hourly |
+| **Does** | Deletes documents from the private bucket `id_review_retention_days` after `decided_at`; sets `document_deleted_at` |
+| **Guarantees** | The Data Protection Act commitment above |
+
+**Symptom if it stops:** national IDs and student cards accumulate in object
+storage indefinitely. Nothing in the product changes. Nothing errors. The first
+signal is a subject access request, a breach, or an audit — all of which arrive
+after the exposure, not before.
+
+**Time to visible:** never, without the alert. **This is the one to wire up
+first.**
+
+### 4. Image variant generation
+
+| | |
+|---|---|
+| **Schedule** | On `UnitPhoto` create |
+| **Does** | Produces thumb/medium/large WebP variants; sets `processing_status` |
+| **Guarantees** | Page weight, not correctness |
+
+**Symptom if it stops:** the API serves originals, so listings still work and
+still show photos — they are just 4–8 MB each, on metered mobile connections.
+Degradation, not breakage, which is the design intent and also why nobody
+notices.
+
+**Time to visible:** a bandwidth bill, or a complaint about slow pages.
+
+---
+
+## Alerting
+
+**Alert on the age of the oldest unresolved item, never on queue volume.**
+
+Volume is not a health signal. Forty items with the oldest two days old is a
+busy week. Three items with the oldest thirteen days old is an emergency, and a
+volume threshold will not fire on it. Every threshold below is an age.
+
+| Alert | Condition | Severity |
+|---|---|---|
+| Dispute SLA at risk | Oldest escalated dispute > **10 days** old | Page |
+| Dispute SLA breached | Any dispute auto-resolved by timeout in the last 24h | Page |
+| Claim confirmation stalled | Oldest `pending` claim past its `confirmation_deadline` by > **2 hours** | Page |
+| Retention overdue | Oldest `StudentVerificationRequest` past its retention window with `document_deleted_at IS NULL` > **6 hours** | Page |
+| Variants stalled | Oldest `UnitPhoto` in `processing_status='pending'` > **1 hour** | Warn |
+| Routing stalled | Oldest `PropertyCampusDistance` with null `walking_minutes` > **24 hours** | Warn |
+| Worker absent | No RQ job of any kind completed in **15 minutes** | Page |
+
+The "dispute SLA at risk" threshold is deliberately 10 days rather than 13: it
+has to leave time to actually do the work, not merely to observe the miss.
+
+**Do not alert on job success.** A job that runs and finds nothing to do is
+indistinguishable from a job that runs correctly, and both are indistinguishable
+from a job whose query is subtly wrong. Alert on the *backlog it is supposed to
+be draining* — that is the only signal that survives a bug in the job itself.
+
+The "worker absent" alert is the catch-all: it fires when the queue is not being
+serviced at all, which is the common failure (a worker container that exited and
+was not restarted) and would otherwise show up as four separate age alerts
+firing at four different times.
+
+---
+
+## Metrics worth watching
+
+Not alerts — trends that indicate whether the design is working.
+
+| Metric | Why | Watch for |
+|---|---|---|
+| Share of tenancies by `confirmation_source` | ADR-004's volume control | `application` should dominate. If `claim`-sourced tenancies grow as a share, either the on-platform application flow has friction or landlords are settling off-platform |
+| Escalated share of disputes | Whether dispute typing is working | Should be a minority. If most disputes escalate, the typed reasons are not matching reality — see the open question in ADR-004 |
+| Per-landlord `dispute_rate` | Tactical disputing | Requires a denominator guard; meaningless below ~10 claims |
+| Per-landlord `dispute_upheld_rate` | Whether disputes are honest | A landlord with high rate and low upheld rate is gaming the mechanism |
+| Reviews carrying `disputed_by_landlord` | SLA health, indirectly | A rising share means we are missing deadlines |
+
+---
+
+## Runbook stubs
+
+**Worker is down.** `docker compose ps rq-worker`; check the container exited
+rather than being unhealthy. Restart, then check the four age alerts have
+cleared — a restarted worker drains the backlog, it does not retroactively meet
+a missed deadline.
+
+**Retention backlog.** Do not clear `document_deleted_at` to silence the alert.
+Run the job manually, verify the objects are gone from the private bucket, and
+work out why the schedule stopped. The alert is measuring a legal obligation.
+
+**Dispute queue over threshold.** Work oldest-first, always. Working newest-first
+maximises the number of deadlines missed.

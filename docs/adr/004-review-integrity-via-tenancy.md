@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — claim-with-timeout adopted; minimum-stay enforcement settled
+**Amended:** 2026-08-25 — dispute queue bounded: application path, typed disputes, symmetric timeout
 **Deciders:** Tech lead
 
 ## Context
@@ -27,34 +28,47 @@ representation of a stay.
 cannot exist without one.**
 
 ```
-TenancyClaim
+TenancyClaim            ONLY for stays the platform did not witness
 ├── unit                    FK → Unit (PROTECT)
 ├── claimant                FK → User (PROTECT) — the tenant
 ├── start_date, end_date
-├── status                  pending | confirmed | disputed | withdrawn | expired
+├── status                  pending | confirmed | disputed | escalated
+│                           | withdrawn | expired
 ├── confirmation_deadline   claimed_at + TENANCY_CONFIRMATION_WINDOW_DAYS
+├── dispute_reason          dates_incorrect | never_tenanted | duplicate
+├── dispute_note            free text, ADDITIONAL to the reason, never instead
+├── proposed_start_date     set by the disputer for dates_incorrect
+├── proposed_end_date
+├── counter_start_date      set once by the tenant, if they disagree
+├── counter_end_date
+├── escalated_at            when it entered the admin queue
+├── escalation_deadline     escalated_at + DISPUTE_RESOLUTION_WINDOW_DAYS
 ├── resolved_by             FK → User, nullable
-├── resolved_at, dispute_reason
+├── resolved_at
 └── created_at, updated_at
 
 Tenancy
 ├── unit                 FK → Unit (PROTECT)
 ├── tenant               FK → User (PROTECT)
-├── claim                FK → TenancyClaim (SET_NULL) — where it came from
-├── confirmation_source  landlord | caretaker | auto | admin
-├── confirmed_by         FK → User, NULL when confirmation_source is 'auto'
+├── application          FK → Application (SET_NULL) — the witnessed path
+├── claim                FK → TenancyClaim (SET_NULL) — the claimed path
+├── confirmation_source  application | landlord | caretaker | auto
+│                        | admin | dispute_timeout
+├── confirmed_by         FK → User, NULL for 'auto' and 'dispute_timeout'
 ├── confirmed_at
+├── was_disputed         BooleanField — the dispute happened, whatever the outcome
 ├── start_date           DateField
 ├── end_date             DateField, nullable while ongoing
 ├── monthly_rent_kes     the agreed rent, for the record
-├── status               active | ended | disputed
+├── status               active | ended
 └── created_at, updated_at
 
 Review
-├── tenancy           OneToOneField → Tenancy (PROTECT)   ← REQUIRED
+├── tenancy               OneToOneField → Tenancy (PROTECT)   ← REQUIRED
 ├── rating 1..5 + category ratings
 ├── comment
-├── editable_until    DateTimeField — set on creation
+├── disputed_by_landlord  BooleanField — surfaced as a NEUTRAL annotation
+├── editable_until        DateTimeField — set on creation
 ├── is_published
 └── created_at, updated_at
 ```
@@ -68,6 +82,9 @@ The five rules, and where each is enforced:
 | Tenancy dates are ordered | `CheckConstraint` — schema |
 | No overlapping confirmed tenancy per unit | `ExclusionConstraint` — schema |
 | One open claim per user per unit | partial `UniqueConstraint` — schema |
+| A witnessed tenancy has an application and no claim | `CheckConstraint` — schema |
+| A disputed claim carries an enumerated reason | `CheckConstraint` — schema |
+| Corrected dates accompany a `dates_incorrect` dispute | `CheckConstraint` — schema |
 | Minimum stay before reviewing | one service function, threshold in settings — see below |
 | Reviews freeze after an edit window | `editable_until` + permission class — schema stores it, view enforces it |
 | A landlord may respond once | `ReviewResponse` with a `OneToOneField` to `Review` — schema |
@@ -129,15 +146,18 @@ students need. The mechanism was sound against *fake* reviews and weak against
 **Resolved: claim-with-timeout, adopted in full.**
 
 1. **A tenant creates a `TenancyClaim`** against a specific unit, with claimed
-   `start_date` and `end_date`.
+   `start_date` and `end_date`. Only for stays the platform did not witness —
+   an accepted `Application` produces a confirmed `Tenancy` directly, with no
+   claim at all. See "Bounding the dispute queue" below.
 2. **The landlord and every assigned caretaker are notified.** They have
    `settings.TENANCY_CONFIRMATION_WINDOW_DAYS` (7) to confirm or dispute.
 3. **Silence auto-confirms**, via a scheduled job on the ADR-007 queue. This is
    the whole point: landlord silence becomes a signal, not a veto.
-4. **A dispute freezes the claim** and opens a moderation entry for platform
-   admins. A disputed claim yields no review until it is resolved.
-5. **`Tenancy` records `confirmation_source` ∈ {landlord, caretaker, auto,
-   admin}** and the confirming actor. This is retained from the original design
+4. **A dispute freezes the claim.** Disputes are typed, and only some reach an
+   admin; an escalated one that we do not resolve within 14 days auto-resolves
+   in the tenant's favour. See "Bounding the dispute queue" below.
+5. **`Tenancy` records `confirmation_source` ∈ {application, landlord,
+   caretaker, auto, admin, dispute_timeout}** and the confirming actor. This is retained from the original design
    — it costs one column and it is a genuinely useful trust signal later, both
    for surfacing "this landlord confirms 12% of claims" and for spotting a
    caretaker confirming implausible volumes.
@@ -154,6 +174,122 @@ any single actor manufacture a reviewer (see ADR-003).
   `ExclusionConstraint` over `(unit, daterange(start_date, end_date))` with the
   `btree_gist` extension. This is enforced in the schema rather than in a
   serializer because a serializer cannot see a concurrent insert.
+
+### Bounding the dispute queue
+
+Design review accepted the claim-with-timeout mechanism and then found its
+successor problem: the timeout removed the landlord's veto by silence, but it
+made *disputing* the only way to stop a review. Disputing is cheap, so it will
+not be rare — and every disputed claim lands on platform admins, which is a
+team of one. An unresolved dispute blocks its review indefinitely. The veto had
+moved from silence to paperwork, and the paperwork was ours.
+
+Three changes bound the queue. They are listed in order of how much volume each
+removes, and the first is by far the largest.
+
+#### 1. Most tenancies never become claims
+
+**When an `Application` is accepted by a landlord or caretaker on-platform, a
+`Tenancy` is created directly in confirmed state**, with
+`confirmation_source = 'application'`. No claim, no confirmation window, no
+dispute, no queue entry. The platform already witnessed the agreement: it holds
+the application, the acceptance, the actor and the timestamp. Asking the
+landlord to confirm a second time what they just accepted adds latency and a
+dispute surface for nothing.
+
+**`TenancyClaim` exists only for stays the platform did not witness:**
+
+- off-platform arrangements — the student found the room through a friend, a
+  noticeboard or a WhatsApp group, and only later wants to review it;
+- pre-platform history — stays that predate the university's onboarding, which
+  is how a new tenant gets any reviews at all in its first months.
+
+This is the primary volume control. **A future reader must not "simplify" this
+by routing every tenancy through a claim for uniformity.** Doing so would
+restore the unbounded queue that this amendment exists to prevent, and it would
+do so silently, because the code would look tidier. If the two paths ever feel
+like duplication, the duplication is the point: one path is evidence the
+platform already holds, the other is an assertion it has to test.
+
+#### 2. Disputes are typed, and most never reach an admin
+
+A dispute requires an **enumerated reason**. Free text is captured in
+`dispute_note` as additional context, never as a substitute — an untyped
+dispute cannot be routed, so it can only go to a human.
+
+| Reason | Meaning | Path |
+|---|---|---|
+| `dates_incorrect` | The stay happened; the dates are wrong. | Resolved between the parties |
+| `never_tenanted` | Identity dispute: this person never lived here. | Admin |
+| `duplicate` | Already covered by an existing tenancy. | Auto-resolved where possible |
+
+**`dates_incorrect`** — the landlord or caretaker submits corrected dates in
+`proposed_start_date` / `proposed_end_date`. The tenant either accepts, in which
+case the claim confirms with the corrected dates and **no admin is involved**,
+or counters **once** with `counter_start_date` / `counter_end_date`. A counter
+that the disputer does not accept escalates, and it escalates *as
+`never_tenanted`*: two parties who cannot agree on when someone lived somewhere
+are, in substance, disagreeing about whether they lived there.
+
+**`duplicate`** — auto-resolves if a confirmed tenancy already exists that
+overlaps the claimed range for the same unit and the same user. That is a
+database query, not a judgement call, and it is the same predicate the
+`ExclusionConstraint` already enforces. If no such tenancy exists, the claim is
+not in fact a duplicate and the dispute escalates.
+
+**Only three things reach the admin queue:** a `never_tenanted` dispute, an
+unresolved counter, and a `duplicate` that matched nothing.
+
+#### 3. The timeout is symmetric
+
+**An escalated dispute that is unresolved after
+`settings.DISPUTE_RESOLUTION_WINDOW_DAYS` (14) auto-resolves in the tenant's
+favour.** The claim confirms, `confirmation_source` is `dispute_timeout`, the
+review becomes possible, and the resulting `Review` carries
+`disputed_by_landlord = True`.
+
+That flag is surfaced in the UI as a **neutral annotation** — "the landlord
+disputed this stay" — shown alongside the review. **Never as a discredit**: not
+greyed out, not collapsed, not excluded from the average, not labelled
+"unverified". The reader is told a fact and left to weigh it. A landlord who
+disputes honestly and a landlord who disputes tactically produce the same
+annotation, which is precisely why it must not read as a verdict.
+
+The rationale belongs in the record, because this is the clause most likely to
+be softened by someone trying to be fair to landlords:
+
+> An indefinite block turns platform backlog into a landlord veto by proxy. If
+> a dispute stops a review until we get to it, then our capacity — not the
+> merits — decides which reviews exist, and a landlord who disputes everything
+> gets exactly the outcome the original silence-veto gave them. A deadline that
+> binds the platform is the only version where the trust property survives our
+> own capacity limits.
+
+The deadline binds us, not the tenant. Missing it is our failure, and the
+default on our failure must favour the party with less power.
+
+#### 4. Disputing is visible and costly
+
+Two per-landlord rates, computed from `TenancyClaim` and recorded on
+`LandlordProfile` as denormalised counters refreshed by the same job that
+processes deadlines:
+
+| Metric | Definition |
+|---|---|
+| `dispute_rate` | disputes raised ÷ claims received |
+| `dispute_upheld_rate` | disputes resolved in the landlord's favour ÷ disputes raised |
+
+**Admin-visible from the start**, so a pattern is legible before it becomes a
+problem. **A public trust signal later** — a landlord who disputes 80% of claims
+and is upheld in 5% of them is telling students something useful, but that
+should not ship until there is enough volume for the ratio to mean anything. A
+denominator of three makes any percentage misleading.
+
+A **per-landlord rate limit** caps disputes raised per rolling 30 days,
+configurable as `settings.MAX_DISPUTES_PER_LANDLORD_PER_MONTH`. Hitting the cap
+does not silently drop a dispute: it refuses it with an explanation and a route
+to contact support, so a landlord with a genuine flood of fraudulent claims has
+somewhere to go.
 
 ### Minimum stay is a service function, not a constraint
 
@@ -231,13 +367,13 @@ the review is immutable — including to its author.
   worker stops, claims sit in `pending` and no review is ever written — a silent
   failure that looks like a quiet week. Alert on the count of claims past their
   `confirmation_deadline` that are still pending, not on the job's own success.
-- **Disputes now need a moderation workflow**, and platform admins are the
-  bottleneck. A dispute queue nobody works blocks the reviews it touches
-  indefinitely. Surface queue age, and set an expectation for resolution time
-  before the feature ships.
-- **`confirmation_source` will skew towards `auto`** early on, while landlords
-  are unfamiliar with the flow. That is expected and not itself a signal; only
-  a *per-landlord* pattern is. Do not surface the raw distribution to students
+- **Disputes need a moderation workflow**, and platform admins are the
+  bottleneck. This is what the 2026-08-25 amendment addresses; see its
+  consequences below and `docs/OPERATIONS.md` for the alerting and the SLA.
+- **`confirmation_source` will skew towards `application`** once the on-platform
+  path is the normal route, and towards `auto` among the claims that remain
+  while landlords are unfamiliar with the flow. Neither is itself a signal; only
+  a *per-landlord* pattern is. Do not surface any raw distribution to students
   until there is enough volume for it to mean something.
 - **Two records where there was one.** `TenancyClaim` and `Tenancy` both exist,
   and the relationship between them must stay clear: the claim is the request,
@@ -255,6 +391,40 @@ the review is immutable — including to its author.
 - Changing `REVIEW_MINIMUM_STAY_DAYS` retroactively changes who may review.
   That is usually wanted, but it means the setting is policy, not configuration
   — change it deliberately.
+
+### Consequences of bounding the dispute queue
+
+- **Two ways a `Tenancy` comes into existence**, and they must not converge.
+  `application`-sourced tenancies skip the whole claim machinery; claim-sourced
+  ones go through it. Every query over tenancies has to be correct for both, and
+  a test should assert that the application path creates no `TenancyClaim` row.
+- **The `dates_incorrect` flow is a small state machine** — propose, accept or
+  counter, escalate — and state machines rot when a new state is added without
+  revisiting the transitions. Keep the transitions in one service module with a
+  table-driven test, not spread across serializer methods.
+- **"Counter once" needs enforcing, not documenting.** A tenant who can counter
+  repeatedly has a denial-of-service against the landlord's attention. The
+  single counter is a nullable field pair that is written once; a second attempt
+  is refused.
+- **`disputed_by_landlord` is a durable mark on a review that the landlord may
+  have raised in bad faith**, and there is no path to remove it if the dispute
+  is later shown to be spurious. That is a deliberate asymmetry — the annotation
+  is neutral by design — but if `dispute_upheld_rate` shows a landlord disputing
+  tactically at scale, the right response is acting on that landlord, not
+  quietly clearing flags.
+- **The 14-day platform deadline is a commitment we can fail.** It has to be
+  monitored on the *oldest unresolved item*, not on queue volume: a queue of
+  three items where the oldest is 13 days old is an emergency, and a queue of
+  forty where the oldest is two days old is fine. `docs/OPERATIONS.md` states
+  the thresholds.
+- **The rate limit can misfire on a genuine victim.** A landlord facing a
+  coordinated wave of false claims hits the cap and is then unable to defend
+  themselves. The cap refuses with a route to support rather than silently
+  dropping, and support can raise it per account. Watch for the first real
+  instance.
+- **`dispute_rate` needs a denominator guard before it is shown to anyone**,
+  including admins. Three claims and one dispute is not "33% dispute rate" in
+  any useful sense.
 
 ### Still open, and not blocking
 
