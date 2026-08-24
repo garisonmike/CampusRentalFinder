@@ -16,12 +16,14 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import User
 from tests.factories import (
+    CampusFactory,
     LandlordFactory,
     PlatformAdminFactory,
     RentalFactory,
     ReviewFactory,
     StaffFactory,
     TenantFactory,
+    UniversityFactory,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,6 +53,34 @@ def authenticate() -> Callable[[User], APIClient]:
         return client
 
     return _authenticate
+
+
+# ---------------------------------------------------------------------------
+# Tenants
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def university_factory(db):
+    """Build additional universities, for cross-tenant assertions."""
+    return UniversityFactory
+
+
+@pytest.fixture
+def campus_factory(db):
+    return CampusFactory
+
+
+@pytest.fixture
+def university(db):
+    """The tenant under test."""
+    return UniversityFactory(
+        name="Kenyatta University",
+        display_name="KyU",
+        slug="kenyatta",
+        subdomain="kyu",
+        domain="ku.ac.ke",
+    )
 
 
 # ---------------------------------------------------------------------------

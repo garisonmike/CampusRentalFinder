@@ -18,10 +18,67 @@ from factory.django import DjangoModelFactory
 
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
+from universities.models import Campus, University
 
 User = get_user_model()
 
 TEST_PASSWORD = "test-password-123"
+
+
+class TenantScopedFactory(DjangoModelFactory):
+    """Base for factories over tenant-scoped models.
+
+    factory_boy reaches for ``Model.objects``, which on a scoped model raises
+    rather than returning every tenant's rows (ADR-001). Building a fixture is
+    exactly the case where unscoped access is correct, so factories use
+    ``all_objects`` explicitly.
+    """
+
+    class Meta:
+        abstract = True
+
+    @classmethod
+    def _get_manager(cls, model_class):
+        return model_class.all_objects
+
+
+class UniversityFactory(DjangoModelFactory):
+    """A tenant.
+
+    No ``django_get_or_create``: a test that passes a duplicate subdomain is
+    asserting that the database refuses it, and get-or-create would quietly
+    return the existing row instead.
+    """
+
+    class Meta:
+        model = University
+
+    name = factory.Sequence(lambda n: f"Test University {n}")
+    display_name = factory.Sequence(lambda n: f"TU{n}")
+    slug = factory.Sequence(lambda n: f"test-university-{n}")
+    subdomain = factory.Sequence(lambda n: f"tu{n}")
+    domain = factory.Sequence(lambda n: f"tu{n}.ac.ke")
+    county = "nairobi"
+    town = "Nairobi"
+    primary_hsl = "142 71% 45%"
+    secondary_hsl = "30 50% 40%"
+    accent_hsl = "142 71% 95%"
+    is_active = True
+
+
+class CampusFactory(TenantScopedFactory):
+    class Meta:
+        model = Campus
+
+    university = factory.SubFactory(UniversityFactory)
+    name = factory.Sequence(lambda n: f"Campus {n}")
+    town = "Nairobi"
+    county = "nairobi"
+    # Nairobi, which is close enough to the equator that a latitude-correction
+    # bug divides by zero -- see ADR-006.
+    latitude = -1.286389
+    longitude = 36.817223
+    is_main = False
 
 
 class UserFactory(DjangoModelFactory):

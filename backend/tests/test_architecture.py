@@ -341,6 +341,9 @@ def test_every_line_exemption_carries_a_reason() -> None:
 #: schema rewrite lands. A new model must be either tenant-scoped or listed
 #: here — inheriting neither is what this test prevents.
 NOT_TENANT_SCOPED: dict[str, str] = {
+    # The tenant itself. University does not belong to a scope, it *is* the
+    # scope, so a scoped manager on it would be circular.
+    "universities.University": "The tenant model. It is the scope, not scoped data.",
     # Identity is deliberately unscoped: a landlord may serve several
     # universities, so User cannot belong to one (docs/DOMAIN_MODEL.md).
     "accounts.User": "Identity, not tenant data. A landlord may serve several universities.",
