@@ -18,12 +18,15 @@ from __future__ import annotations
 from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.postgres.fields import ArrayField
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from accounts.capabilities import CaretakerPermission
 from config.tenancy import TenantScopedModel
 from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import University
@@ -339,3 +342,104 @@ class UniversityStaffProfile(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.user.get_full_name()} — {self.university.display_name}"
+
+
+class CaretakerAssignment(TenantScopedModel):
+    """A user authorised to manage ONE property, granted by its landlord.
+
+    Scoped to the property, not to the person: "caretaker" is not a global fact
+    about someone, it is a fact about their relationship to a particular
+    building. A fourth ``user_type`` string would have given every caretaker
+    authority over every property (ADR-003).
+
+    Revocation is a flag, never a delete, so the grant history survives.
+    """
+
+    tenant_lookup = "property__campus_distances__university"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="caretaker_assignments")
+    property = models.ForeignKey(
+        "properties.Property", on_delete=models.CASCADE, related_name="caretaker_assignments"
+    )
+    granted_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="caretaker_assignments_granted",
+        help_text=_("The landlord. PROTECT so the audit trail cannot be deleted away."),
+    )
+    permissions = ArrayField(
+        models.CharField(max_length=32, choices=CaretakerPermission.choices),
+        verbose_name=_("permissions"),
+        default=list,
+        blank=True,
+        help_text=_(
+            "A subset of CaretakerPermission. Values outside it are rejected on "
+            "write, so the list cannot drift from the code that checks it."
+        ),
+    )
+
+    is_active = models.BooleanField(_("active"), default=True)
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(_("revoked at"), null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="caretaker_assignments_revoked",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Caretaker assignment")
+        verbose_name_plural = _("Caretaker assignments")
+        ordering = ["-granted_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "all_objects"
+        indexes = [
+            # The object-permission check, on every write to a property.
+            models.Index(fields=["property", "is_active"], name="caretaker_property_idx"),
+            models.Index(fields=["user", "is_active"], name="caretaker_user_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "property"],
+                condition=Q(is_active=True),
+                name="caretaker_one_active_assignment",
+            ),
+            models.CheckConstraint(
+                condition=Q(is_active=True) | Q(revoked_at__isnull=False),
+                name="caretaker_revoked_has_timestamp",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.get_full_name()} → {self.property.name}"
+
+    def clean(self) -> None:
+        """Reject permissions outside the delegable set.
+
+        ADR-003 fixes what a landlord may hand over. A value not in
+        CaretakerPermission is either a typo or an attempt to grant something
+        that is never delegable, and both should fail loudly.
+        """
+        super().clean()
+        allowed = set(CaretakerPermission.values)
+        unknown = sorted(set(self.permissions) - allowed)
+        if unknown:
+            raise ValidationError(
+                {
+                    "permissions": _(
+                        "Not delegable to a caretaker: %(values)s. Allowed: %(allowed)s."
+                    )
+                    % {"values": ", ".join(unknown), "allowed": ", ".join(sorted(allowed))}
+                }
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean(exclude=[f.name for f in self._meta.fields if f.name != "permissions"])
+        super().save(*args, **kwargs)
+
+    def has_permission(self, permission: str) -> bool:
+        """Whether this assignment grants ``permission`` right now."""
+        return self.is_active and permission in self.permissions

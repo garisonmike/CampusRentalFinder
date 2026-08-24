@@ -8,7 +8,13 @@ from django.contrib.auth.forms import AdminPasswordChangeForm, UserChangeForm, U
 from django.http import HttpRequest
 from django.utils.translation import gettext_lazy as _
 
-from .models import LandlordProfile, StudentProfile, UniversityStaffProfile, User
+from .models import (
+    CaretakerAssignment,
+    LandlordProfile,
+    StudentProfile,
+    UniversityStaffProfile,
+    User,
+)
 
 
 @admin.register(User)
@@ -118,3 +124,15 @@ class UniversityStaffProfileAdmin(admin.ModelAdmin):
     autocomplete_fields = ("user", "university")
     list_select_related = ("user", "university")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(CaretakerAssignment)
+class CaretakerAssignmentAdmin(admin.ModelAdmin):
+    list_display = ("user", "property", "granted_by", "is_active", "granted_at", "revoked_at")
+    list_filter = ("is_active", "granted_at")
+    search_fields = ("user__email", "property__name", "granted_by__email")
+    ordering = ("-granted_at",)
+    date_hierarchy = "granted_at"
+    autocomplete_fields = ("user", "property", "granted_by", "revoked_by")
+    list_select_related = ("user", "property", "granted_by")
+    readonly_fields = ("granted_at", "updated_at")

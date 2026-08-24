@@ -130,3 +130,55 @@ class IsOwnerOrReadOnly(BasePermission):
             if owner_id is not None:
                 return owner_id == request.user.id
         return False
+
+
+class IsPropertyManager(BasePermission):
+    """The owning landlord, or a caretaker assigned to this property.
+
+    The relationship check ADR-003 specifies. It answers a question with a
+    definite answer — does this user stand in this relationship to this object?
+    — which is what makes the negative cases straightforward to assert.
+    """
+
+    message = "You do not manage this property."
+
+    #: Subclasses name the capability an unsafe method needs. None means any
+    #: active assignment suffices, which is only correct for reads.
+    required_permission: str | None = None
+
+    def has_permission(self, request, view) -> bool:
+        return request.method in SAFE_METHODS or request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj) -> bool:
+        if request.method in SAFE_METHODS:
+            return True
+
+        property_id = self._property_id(obj)
+        if property_id is None:
+            return False
+
+        if capabilities.is_platform_staff(request.user):
+            return True
+
+        # The owner. Checked before any permission list: an assignment's
+        # subset must never restrict the person who granted it.
+        landlord_profile = getattr(request.user, "landlord_profile", None)
+        if landlord_profile is not None and self._owner_id(obj) == landlord_profile.pk:
+            return True
+
+        if self.required_permission is None:
+            return bool(capabilities.caretaker_permissions_for(request.user, property_id))
+        return capabilities.can_manage_property(request.user, property_id, self.required_permission)
+
+    @staticmethod
+    def _property_id(obj) -> int | None:
+        if obj.__class__.__name__ == "Property":
+            return obj.pk
+        return getattr(obj, "property_id", None)
+
+    @staticmethod
+    def _owner_id(obj) -> int | None:
+        if obj.__class__.__name__ == "Property":
+            return obj.landlord_id
+        owner = getattr(obj, "property", None)
+        return getattr(owner, "landlord_id", None)

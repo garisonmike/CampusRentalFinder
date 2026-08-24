@@ -18,7 +18,9 @@ import factory
 from django.utils import timezone
 from factory.django import DjangoModelFactory
 
+from accounts.capabilities import CaretakerPermission
 from accounts.models import (
+    CaretakerAssignment,
     LandlordProfile,
     StudentProfile,
     UniversityStaffProfile,
@@ -255,6 +257,25 @@ class UnitFactory(TenantScopedFactory):
     total_count = 1
     vacant_count = 1
     min_stay_months = 4
+    is_active = True
+
+
+class CaretakerAssignmentFactory(TenantScopedFactory):
+    """A caretaker granted management of one property (ADR-003)."""
+
+    class Meta:
+        model = CaretakerAssignment
+
+    user = factory.SubFactory(UserFactory)
+    property = factory.SubFactory(PropertyFactory)
+    granted_by = factory.LazyAttribute(lambda o: o.property.landlord.user)
+    permissions = factory.LazyFunction(
+        lambda: [
+            CaretakerPermission.MANAGE_VACANCY,
+            CaretakerPermission.MANAGE_PHOTOS,
+            CaretakerPermission.RESPOND_INQUIRIES,
+        ]
+    )
     is_active = True
 
 

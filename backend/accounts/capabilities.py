@@ -129,8 +129,9 @@ def is_platform_staff(user) -> bool:
 def managed_property_ids(user) -> list[int]:
     """Properties this user may manage as a caretaker.
 
-    Empty until CaretakerAssignment lands with the Property model in phase 3;
-    the shape is established now so the frontend contract does not change then.
+    Only active assignments. Revocation is a flag rather than a delete, so
+    filtering on it every time is what makes revocation immediate — a cached
+    permission map that outlives a revocation is a real hole (ADR-003).
     """
     if not user.is_authenticated:
         return []
@@ -139,7 +140,38 @@ def managed_property_ids(user) -> list[int]:
     if assignments is None:
         return []
 
-    return list(assignments.filter(is_active=True).values_list("property_id", flat=True))
+    return sorted(assignments.filter(is_active=True).values_list("property_id", flat=True))
+
+
+def caretaker_permissions_for(user, property_id: int) -> set[str]:
+    """What this user may do on one property as a caretaker.
+
+    Empty when there is no active assignment, which is also the answer for the
+    landlord — ownership is checked separately, and conflating the two would let
+    a permission subset restrict the person who granted it.
+    """
+    if not user.is_authenticated:
+        return set()
+
+    assignments = getattr(user, "caretaker_assignments", None)
+    if assignments is None:
+        return set()
+
+    granted: set[str] = set()
+    for assignment in assignments.filter(is_active=True, property_id=property_id):
+        granted.update(assignment.permissions)
+    return granted
+
+
+def can_manage_property(user, property_id: int, permission: str) -> bool:
+    """Whether ``user`` may do ``permission`` on this property as a caretaker.
+
+    Anything in NEVER_DELEGABLE is refused outright, whatever an assignment
+    says, so a malformed permissions array cannot widen the grant.
+    """
+    if permission in NEVER_DELEGABLE:
+        return False
+    return permission in caretaker_permissions_for(user, property_id)
 
 
 def capabilities_for(user) -> Capabilities:
