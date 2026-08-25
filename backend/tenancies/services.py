@@ -132,6 +132,26 @@ def withdraw_application(application: Application) -> Application:
 # ---------------------------------------------------------------------------
 
 
+class VerificationRequiredError(ValidationError):
+    """This university gates claiming on student verification."""
+
+
+def _assert_verification_permits(user: User) -> None:
+    """ADR-003 gating, answered in one place (`accounts.gating.can_perform`)."""
+    from accounts.gating import GatedAction, GateReason, can_perform
+
+    decision = can_perform(user, GatedAction.CLAIM_TENANCY)
+    if decision.allowed:
+        return
+
+    if decision.reason is GateReason.REJECTED:
+        message = _("Your student verification was not accepted.")
+    else:
+        message = _("Your university asks students to verify before claiming a stay.")
+
+    raise VerificationRequiredError({"verification": message})
+
+
 class ClaimRateLimitExceededError(ValidationError):
     """This user has raised too many claims recently."""
 
@@ -179,6 +199,7 @@ def create_claim(
     through here (ADR-004 §1.1).
     """
     now = now or timezone.now()
+    _assert_verification_permits(claimant)
     _assert_claim_rate_limit(claimant, now=now)
 
     return TenancyClaim.all_objects.create(

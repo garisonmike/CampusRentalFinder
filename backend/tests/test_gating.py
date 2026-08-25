@@ -42,6 +42,23 @@ def require_verification(university, *, grace_days: int = 14):
     return university
 
 
+def registered_under(profile, university):
+    """Freeze the university's current policy onto a profile.
+
+    Gating reads what was in force when a student registered, not the live
+    value, so a test that only changes the university has changed nothing for
+    an existing profile -- which is the whole point of
+    `TestPolicyChangeAppliesForwardOnly`. Tests that want a *gated* student
+    have to say the student registered under the gate.
+    """
+    from accounts.gating import registration_gating_snapshot
+
+    for field, value in registration_gating_snapshot(university).items():
+        setattr(profile, field, value)
+    profile.save()
+    return profile
+
+
 # ---------------------------------------------------------------------------
 # Registration always succeeds
 # ---------------------------------------------------------------------------
@@ -213,6 +230,9 @@ class TestCanPerform:
 
     def test_a_verified_student_is_allowed(self, university, verified_student_profile):
         require_verification(university)
+        registered_under(verified_student_profile, university)
+        verified_student_profile.verification_status = VerificationStatus.VERIFIED
+        verified_student_profile.save(update_fields=["verification_status"])
 
         decision = can_perform(verified_student_profile.user, GatedAction.WRITE_REVIEW)
 
@@ -221,6 +241,7 @@ class TestCanPerform:
 
     def test_within_grace_is_allowed(self, university, verified_student_profile, student_profile):
         require_verification(university)
+        registered_under(student_profile, university)
         student_profile.verification_status = VerificationStatus.PENDING
         student_profile.grace_period_ends_at = timezone.now() + dt.timedelta(days=3)
         student_profile.save()
@@ -235,6 +256,7 @@ class TestCanPerform:
         self, university, verified_student_profile, student_profile
     ):
         require_verification(university)
+        registered_under(student_profile, university)
         student_profile.verification_status = VerificationStatus.PENDING
         student_profile.grace_period_ends_at = timezone.now() - dt.timedelta(days=1)
         student_profile.save()
@@ -261,6 +283,7 @@ class TestCanPerform:
         self, university, verified_student_profile, student_profile
     ):
         require_verification(university)
+        registered_under(student_profile, university)
         student_profile.verification_status = VerificationStatus.REJECTED
         student_profile.rejection_reason = "Document did not match"
         student_profile.grace_period_ends_at = timezone.now() + dt.timedelta(days=10)
@@ -274,12 +297,15 @@ class TestCanPerform:
     def test_a_null_grace_period_under_a_gating_policy_blocks(
         self, university, verified_student_profile, student_profile
     ):
-        """A profile predating the policy has no deadline recorded.
+        """A student who registered under the gate but has no deadline.
 
-        It is not within grace, because no grace was ever granted — and the
-        gated action is the only thing affected.
+        Not within grace, because none was granted -- and the gated action is
+        the only thing affected. Distinct from a student who predates the
+        policy entirely, who is not gated at all: see
+        `TestPolicyChangeAppliesForwardOnly`.
         """
         require_verification(university)
+        registered_under(student_profile, university)
         student_profile.grace_period_ends_at = None
         student_profile.save()
 
@@ -324,7 +350,14 @@ class TestPolicyChangeAppliesForwardOnly:
     def test_lowering_the_policy_restores_the_gated_actions(
         self, university, verified_student_profile, student_profile
     ):
+        """A policy change can only ever WIDEN what an existing student may do.
+
+        Freezing the policy at registration stops a raise reaching backwards;
+        this is the other direction. Leaving a student gated after their school
+        stopped requiring it would be punitive for no reason.
+        """
         require_verification(university)
+        registered_under(student_profile, university)
         student_profile.grace_period_ends_at = timezone.now() - dt.timedelta(days=1)
         student_profile.save()
 

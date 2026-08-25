@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
+from accounts.gating import GatedAction
 from tenancies.models import Tenancy
 
 from .constants import DisputeAnnotation
@@ -38,6 +39,31 @@ def _queue_aggregate_refresh(review: Review) -> None:
     from .jobs import enqueue_aggregate_refresh
 
     transaction.on_commit(lambda: enqueue_aggregate_refresh(review.pk))
+
+
+def _assert_verification_permits(user, action) -> None:
+    """The single call site for student-verification gating in this app.
+
+    Delegates to `accounts.gating.can_perform`, which is the one place the
+    policy is answered -- so the rule cannot drift between the API, the admin
+    and a background job.
+    """
+    from accounts.gating import GateReason, can_perform
+
+    decision = can_perform(user, action)
+    if decision.allowed:
+        return
+
+    if decision.reason is GateReason.REJECTED:
+        message = _("Your student verification was not accepted.")
+    else:
+        message = _("Your university asks students to verify before reviewing.")
+
+    raise VerificationRequiredError({"verification": message})
+
+
+class VerificationRequiredError(ValidationError):
+    """This university gates this action on student verification."""
 
 
 class TenancyNotReviewableError(ValidationError):
@@ -69,6 +95,8 @@ def assert_tenancy_is_reviewable(tenancy: Tenancy, *, today: dt.date | None = No
     that is only exercised through a serializer is an invariant the admin can
     walk past.
     """
+    _assert_verification_permits(tenancy.tenant, GatedAction.WRITE_REVIEW)
+
     days = stay_days(tenancy, today=today)
 
     if days < settings.REVIEW_MINIMUM_STAY_DAYS:

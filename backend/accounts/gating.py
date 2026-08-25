@@ -95,12 +95,50 @@ class GateDecision:
 
 
 def university_gates(university: University, action: GatedAction) -> bool:
-    """Whether this university gates this action on verification."""
+    """Whether this university gates this action **right now**.
+
+    Read when a profile is created, to freeze the answer onto it. Gating an
+    existing student goes through :func:`profile_is_gated` instead, which
+    reads the frozen value -- see the note there.
+    """
     if action is GatedAction.WRITE_REVIEW:
         return university.verification_required_to_review
     # CLAIM_TENANCY and SUBMIT_APPLICATION follow the signup policy: a school
     # that requires verification to join requires it to transact.
     return signup_verification_is_enforced(university)
+
+
+def profile_is_gated(profile, action: GatedAction) -> bool:
+    """Whether THIS STUDENT is gated on ``action``.
+
+    **Gated only if the policy said so when they registered AND still says so
+    now.** Both halves are load-bearing, in opposite directions:
+
+    *The frozen half* stops a raise reaching backwards. Without it, a school
+    switching to ``verification_required`` blocked every existing unverified
+    student in the same instant -- under ``GRACE_EXPIRED``, a grace period they
+    never had, because nothing had ever told them anything was expected of
+    them. ADR-003 says policy changes apply to new signups only; this is the
+    line that makes that true rather than aspirational.
+
+    *The live half* lets a **lowering** reach them. Freezing alone would leave
+    a student gated after their school stopped requiring it, which is punitive
+    for no reason. When the subject is a student's access, the least
+    restrictive reading of two policies is the right one.
+
+    So the rule is: a policy change can only ever *widen* what an existing
+    student may do. A school that genuinely wants to gate its existing students
+    backfills ``signup_policy_at_registration`` -- a decision with an author,
+    which is exactly the difference from a dropdown quietly locking people out.
+    """
+    if action is GatedAction.WRITE_REVIEW:
+        return profile.review_gated_at_registration and (
+            profile.university.verification_required_to_review
+        )
+
+    return profile.signup_policy_at_registration == SignupPolicy.REQUIRED and (
+        signup_verification_is_enforced(profile.university)
+    )
 
 
 def can_perform(user, action: GatedAction, *, now: dt.datetime | None = None) -> GateDecision:
@@ -116,7 +154,7 @@ def can_perform(user, action: GatedAction, *, now: dt.datetime | None = None) ->
         # them; other permission classes decide.
         return GateDecision(allowed=True, reason=GateReason.NO_PROFILE)
 
-    if not university_gates(profile.university, action):
+    if not profile_is_gated(profile, action):
         return GateDecision(allowed=True, reason=GateReason.NOT_GATED)
 
     if profile.verification_status == VerificationStatus.VERIFIED:
@@ -137,6 +175,20 @@ def can_perform(user, action: GatedAction, *, now: dt.datetime | None = None) ->
     return GateDecision(
         allowed=False, reason=GateReason.GRACE_EXPIRED, grace_period_ends_at=ends_at
     )
+
+
+def registration_gating_snapshot(university: University) -> dict:
+    """The fields a new profile freezes at registration.
+
+    One function, so the two flags and the grace period cannot be set from
+    different moments in time.
+    """
+    return {
+        "signup_policy_at_registration": university.signup_policy,
+        "review_gated_at_registration": university.verification_required_to_review,
+        "grace_period_ends_at": grace_period_end_for(university),
+        "verification_status": initial_verification_status(university),
+    }
 
 
 def grace_period_end_for(

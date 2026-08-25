@@ -5,6 +5,7 @@
 **Amended:** 2026-08-24 — caretaker capabilities and student verification resolved
 **Amended:** 2026-08-25 — signup gating replaced by a policy enum with a lockout guard
 **Amended:** 2026-08-25 — enforcement point resolved: register-then-verify with a grace period
+**Amended:** 2026-08-26 — gating reads the policy frozen at registration, intersected with the live one
 **Deciders:** Tech lead
 
 ## Context
@@ -418,3 +419,38 @@ guardian on top would mean two sources of truth.
 Correct for a system with many rules changing independently of code. We have
 roughly six rules, all stable. The operational cost of a policy engine is not
 repaid at this size.
+
+
+## Amendment: gating reads a frozen policy, intersected with the live one
+
+This ADR said, and `accounts/gating.py` repeated:
+
+> **Policy changes apply to new signups only.** An existing unverified student
+> keeps everything they had.
+
+**That was false in the implementation**, and it was found by writing the test
+for it. `can_perform` read `university.signup_policy` — the live value — so a
+school switching to `verification_required` blocked every existing unverified
+student in the same instant. Worse, it blocked them under `GRACE_EXPIRED`: a
+grace period they never had, because when they registered nothing had told them
+anything was expected of them.
+
+**Resolved:** `StudentProfile` freezes `signup_policy_at_registration` and
+`review_gated_at_registration` at creation, and a student is gated only if the
+frozen policy said so **and** the live policy still says so.
+
+Both halves matter, in opposite directions:
+
+| Change | Frozen alone | Live alone | Both (chosen) |
+|---|---|---|---|
+| School raises the policy | existing student unaffected ✓ | existing student blocked instantly ✗ | unaffected ✓ |
+| School lowers the policy | existing student stays gated ✗ | freed ✓ | freed ✓ |
+| New student under a gate | gated ✓ | gated ✓ | gated ✓ |
+
+So **a policy change can only ever widen what an existing student may do.**
+When the subject is a student's access to the platform, the least restrictive
+reading of two policies is the right one.
+
+A school that genuinely wants to gate its existing students backfills
+`signup_policy_at_registration`. That is a decision with an author, which is
+precisely the difference from a dropdown quietly locking people out.

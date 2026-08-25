@@ -28,7 +28,7 @@ from django.utils.translation import gettext_lazy as _
 
 from accounts.capabilities import CaretakerPermission
 from config.tenancy import TenantScopedModel
-from universities.constants import VerificationMethod, VerificationStatus
+from universities.constants import SignupPolicy, VerificationMethod, VerificationStatus
 from universities.models import University
 
 #: Kenyan mobile numbers in E.164. The draft's regex was `^\+?1?\d{9,15}$` —
@@ -255,6 +255,24 @@ class StudentProfile(TenantScopedModel):
         help_text=_("Null for the automated email-domain path."),
     )
     rejection_reason = models.CharField(_("rejection reason"), max_length=255, blank=True)
+    #: The policy in force WHEN THIS STUDENT REGISTERED, frozen here.
+    #:
+    #: Gating reads this, never the university's current value. Without it,
+    #: a school raising its policy blocks every existing unverified student
+    #: instantly -- and blocks them with "your grace period expired", when
+    #: they never had one, because nobody told them anything was expected.
+    #: ADR-003 says policy changes apply to new signups only; this field is
+    #: what makes that true rather than aspirational.
+    signup_policy_at_registration = models.CharField(
+        _("signup policy at registration"),
+        max_length=24,
+        choices=SignupPolicy.choices,
+        default=SignupPolicy.OPEN,
+    )
+    #: As above: whether reviews were gated when this student registered.
+    review_gated_at_registration = models.BooleanField(
+        _("reviews gated at registration"), default=False
+    )
     grace_period_ends_at = models.DateTimeField(
         _("grace period ends"),
         null=True,
