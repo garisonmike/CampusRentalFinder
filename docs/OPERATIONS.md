@@ -51,8 +51,8 @@ is not.
 
 ## Jobs that must be running
 
-Five jobs on django-rq (ADR-002, ADR-007). For each: what it does, what breaks
-when it stops, and how long that takes to become visible.
+Six jobs on django-rq (ADR-002, ADR-004, ADR-007). For each: what it does, what
+breaks when it stops, and how long that takes to become visible.
 
 ### 1. Claim auto-confirmation
 
@@ -122,6 +122,27 @@ while the job reports success.
 
 **Time to visible:** never, without the alert.
 
+### 3b. Rating aggregate reconciliation
+
+| | |
+|---|---|
+| **Schedule** | Daily |
+| **Does** | Recomputes a rolling sample of aggregates from `Review`, compares against stored values, **alerts on drift** |
+| **Guarantees** | That the cached ratings still match their source |
+
+**It never silently corrects.** Self-healing would hide the bug that caused the
+drift, and the bug is the thing worth knowing about. A drift alert means
+"recompute this one and then find out why", not "the system fixed itself".
+
+**Symptom if it stops:** ratings drift from their source and nobody finds out.
+Every page still renders a number; the number is simply wrong, and it is wrong
+in the direction of whatever the incremental update got wrong — which on a
+platform selling trustworthy ratings is the worst available failure.
+
+**Time to visible:** never, without the alert. A specific "this rating is wrong"
+complaint is answered by recomputing that property directly, not by waiting for
+the sweep to sample it.
+
 ### 4. Image variant generation
 
 | | |
@@ -155,6 +176,8 @@ volume threshold will not fire on it. Every threshold below is an age.
 | Retention overdue | Oldest `StudentVerificationRequest` past its retention window with `document_deleted_at IS NULL` > **6 hours** | Page |
 | Variants stalled | Oldest `UnitPhoto` in `processing_status='pending'` > **1 hour** | Warn |
 | Routing stalled | Oldest `PropertyCampusDistance` with null `walking_minutes` > **24 hours** | Warn |
+| Rating drift | Any sampled aggregate differing from its recomputed value | Page |
+| Reconciler stalled | Oldest aggregate `computed_at` > **48 hours** | Warn |
 | Worker absent | No RQ job of any kind completed in **15 minutes** | Page |
 
 The "dispute SLA at risk" threshold is deliberately 10 days rather than 13: it

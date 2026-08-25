@@ -5,6 +5,7 @@
 **Amended:** 2026-08-24 — claim-with-timeout adopted; minimum-stay enforcement settled
 **Amended:** 2026-08-25 — dispute queue bounded: application path, typed disputes, symmetric timeout
 **Amended:** 2026-08-26 — escalation reasons separated; correction-defeats-review closed; annotation derived
+**Amended:** 2026-08-27 — annotation batched per page; transitions table-driven; rating aggregates; cold start
 **Deciders:** Tech lead
 
 ## Context
@@ -325,6 +326,46 @@ plausible-looking correction, and left no trace anywhere a human would look.
 After it, the same move puts the claim in front of an administrator under a
 label naming precisely what is being attempted.
 
+#### 2c. Transitions live in one table, not in an implied mapping
+
+Design review found that `dispute_reason` and `escalation_reason` are two enums
+with a mapping between them that exists only in whichever function happens to
+branch on it. A new `dispute_reason` with no escalation path would be a dispute
+that can be **raised and never routed** — it would sit in `disputed` for ever,
+which is precisely the indefinite block the timeout was introduced to remove.
+
+A test would catch the drift, but only after someone had written the
+unreachable state. **Resolved: make the invalid state unconstructable.**
+
+A single module-level table maps every `dispute_reason` to its permitted
+`escalation_reason` values and its resolution paths:
+
+```python
+DISPUTE_TRANSITIONS = {
+    DisputeReason.DATES_INCORRECT: DisputeTransition(
+        escalates_to=(EscalationReason.COUNTER_UNRESOLVED,
+                      EscalationReason.CORRECTION_DEFEATS_REVIEW),
+        can_resolve_between_parties=True,
+    ),
+    DisputeReason.NEVER_TENANTED: DisputeTransition(
+        escalates_to=(EscalationReason.IDENTITY_DISPUTED,),
+        can_resolve_between_parties=False,
+    ),
+    DisputeReason.DUPLICATE: DisputeTransition(
+        escalates_to=(EscalationReason.DUPLICATE_UNMATCHED,),
+        can_resolve_between_parties=False,
+        auto_resolves=True,
+    ),
+}
+```
+
+- **The state machine reads this table. Nothing else encodes a transition.**
+- **Raising a dispute with a reason absent from the table raises at
+  construction**, so an unroutable dispute cannot be created at all.
+- Two tests, in both directions: every `dispute_reason` has at least one
+  escalation path, and every `escalation_reason` is reachable from at least one
+  `dispute_reason`. A reason nobody can reach is dead code in a state machine,
+  which is its own kind of drift.
 #### 3. The timeout is symmetric
 
 **An escalated dispute that is unresolved after
@@ -388,6 +429,27 @@ edit and a settings change, not a data migration rewriting a boolean on every
 live review — and not a decision that silently persists on reviews written under
 the old policy.
 
+**The annotation is computed per page, not per review.** Design review pointed
+out that deriving it makes the review list an N+1 waiting to happen, and that
+enabling the policy hook would then look like it *caused* a performance
+regression when the real cause is the access pattern. The interface therefore
+forbids the per-review shape outright:
+
+```python
+def review_dispute_annotations(reviews) -> dict[int, DisputeAnnotation]:
+    ...  # annotations for a COLLECTION, keyed by review id
+```
+
+- It takes a **collection** and returns a **mapping**. There is no public
+  single-review entry point that touches the database; a caller needing one
+  review passes a one-element collection.
+- Landlord counters for the policy hook are fetched in **one query keyed by
+  landlord id**, covering every landlord on the page.
+- **A query-count test asserts that rendering 1 review and rendering 50 issue
+  the same number of queries, with the hook both disabled and enabled.** That
+  test is what stops the hook being switched on in production and being blamed
+  for the result.
+
 **Everything the annotation needs is reconstructable from the dispute record**,
 which is why two things changed alongside:
 
@@ -431,6 +493,85 @@ does not silently drop a dispute: it refuses it with an explanation and a route
 to contact support, so a landlord with a genuine flood of fraudulent claims has
 somewhere to go.
 
+### Ratings are aggregate tables, not a denormalised foreign key
+
+Uniqueness stays at the tenancy: one stay, one review. A `(unit, tenant)` or
+`(property, tenant)` constraint would block a legitimate second review — a
+student who moves from a bedsitter to a one-bedroom in the same block has two
+genuinely different experiences to describe — and there is no honest way to
+choose which of the two to keep.
+
+That leaves a fairness problem in the **aggregate**: a student who moved twice
+contributes two ratings to the block's score, so one person is weighted 2×.
+
+**Resolved: de-duplicate in the aggregate, not the schema.**
+
+- The property rating averages **one contribution per `(property, tenant)`**,
+  taking the mean of that tenant's reviews for that property.
+- **Unit-level ratings show on the unit, property-level on the property.**
+- The property figure is labelled **"from N students"**, never "N reviews", so
+  the denominator means what a reader assumes it means.
+
+#### Why aggregate tables and not a denormalised `Review.property_id`
+
+A denormalised FK makes the grouping cheaper, and it was the obvious
+suggestion. It was declined, and the reasoning is worth keeping because both
+options are denormalisation and the difference is entirely in how they fail:
+
+| | Denormalised `property_id` | Aggregate tables |
+|---|---|---|
+| Still dedupes and averages per page load | **Yes** | No — precomputed |
+| Failure mode when it drifts | A duplicated FK disagreeing with `tenancy.unit.property`: **silent corruption**, reviews attributed to the wrong building | A stale cached number, **found by the reconciler** |
+| Rebuildable | Not meaningfully — you cannot tell which value is right | Fully, from `Review` alone |
+
+**A cache with a reconciler fails loudly. A duplicated foreign key fails
+silently.** On a platform whose product is trustworthy ratings, that difference
+decides it.
+
+Three tables, one row each per property, unit and landlord, carrying
+`average_rating`, `student_count`, `review_count`, a 1–5 `rating_distribution`,
+`last_review_at` and `computed_at`. `student_count` and `review_count` are
+**separate columns and are expected to differ** — that divergence *is* the
+de-duplication, and a test asserts it for a tenant with two reviews on one
+property.
+
+Rules:
+
+- **Recomputed by a job** on review create, edit, and moderation state change.
+  Never inline in a request.
+- **Fully rebuildable from source.** A management command recomputes any or all
+  aggregates from `Review`, and it is *the same code path the job uses*. One
+  implementation, two entry points — otherwise the rebuild and the incremental
+  update drift and only one of them is right.
+- **A scheduled reconciler recomputes a rolling sample, compares, and alerts on
+  drift rather than silently correcting.** Self-healing hides the bug that
+  caused the drift, and the bug is the thing worth knowing about.
+
+### The cold start is solved with the same machinery, not a lower bar
+
+A tenancy-anchored review model starts empty, which is its main cost. Three
+decisions, and the third is a product constraint rather than an engineering one:
+
+**(a) Launch seeding runs through `TenancyClaim`.** At onboarding, students may
+claim past off-platform stays. **Same claim machinery, same confirmation window,
+same dispute typing — no separate code path and no lower evidentiary bar.** A
+review from a seeded claim is exactly as verified as any other, because the
+mechanism is identical. `TenancyClaim.is_retrospective` records that the stay
+predates the property's presence on the platform, **for analytics and for the
+operations queue only — never for display and never for weighting.** A flag that
+reaches the UI becomes a second class of review, which is the lower bar arriving
+by the back door.
+
+**(b) `LandlordRatingAggregate` is the secondary signal.** A property with no
+reviews can show its landlord's record across their other properties,
+**explicitly labelled as being about the landlord**, never about this property.
+
+**(c) The empty state is honest.** No review means **"no verified reviews
+yet"**. Never a neutral score, never a placeholder star count, never an average
+over zero rows. This is written here as a constraint so a later UI pass cannot
+quietly invent a default rating: **on a trust platform a fabricated signal is
+worse than no signal**, because it is indistinguishable from a real one and it
+is the platform itself doing the fabricating.
 ### Minimum stay is a service function, not a constraint
 
 Design review was right that a 30-day minimum stay cannot be a
@@ -573,13 +714,31 @@ the review is immutable — including to its author.
   including admins. Three claims and one dispute is not "33% dispute rate" in
   any useful sense.
 
+### Consequences of the aggregate resolution
+
+- **The aggregates can be stale**, by design. Between a review landing and the
+  job running, a property shows the previous number. Acceptable — the alternative
+  is computing it inline on the busiest read in the product — but it means
+  `computed_at` has to be visible to anyone debugging a "wrong rating" report.
+- **The reconciler is only as good as its sample.** A rolling sample finds
+  systematic drift quickly and a single corrupted row slowly. That is the right
+  trade for a scheduled job, but it means a specific complaint should be answered
+  by recomputing that property, not by waiting for the sweep.
+- **`student_count` will be smaller than `review_count`** wherever anyone has
+  moved within a building, and the two numbers appearing side by side in an
+  admin view will look like a bug to whoever sees it first. Label them.
+- **A landlord aggregate is a reputation number attached to a person.** It is
+  the right cold-start signal, and it is also the thing most likely to be
+  disputed by the landlord it describes. Keep it rebuildable and keep
+  `computed_at`, so "this is wrong" has a factual answer.
+
 ### Still open, and not blocking
 
-- **One review per tenancy, but tenancies renew.** A student who stays two
-  academic years under two tenancy records gets two reviews of the same unit,
-  which reads as inflated volume. Either treat a renewal as one continuing
-  tenancy, or de-duplicate by `(unit, tenant)` when computing the average. This
-  can be decided when the aggregate rating is implemented; it does not affect
+- **Renewals still produce two reviews.** A student who stays two academic years
+  under two tenancy records writes two reviews of the same unit. The aggregate
+  now counts them as one student, which fixes the fairness problem, but the
+  *unit* page still shows two entries from one person. Deciding whether a
+  renewal is one continuing tenancy is a product question that does not affect
   the schema.
 
 ## Alternatives considered
