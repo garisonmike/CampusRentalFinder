@@ -122,6 +122,11 @@ def student_profile(db, university):
 
 
 @pytest.fixture
+def student_profile_factory(db):
+    return StudentProfileFactory
+
+
+@pytest.fixture
 def verified_student_profile(db, university):
     """A student carrying the verification badge."""
     return VerifiedStudentProfileFactory(university=university)

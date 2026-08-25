@@ -353,6 +353,15 @@ NOT_TENANT_SCOPED: dict[str, str] = {
     # A landlord near two campuses serves both universities, which is the whole
     # reason ADR-002 exists. Scoping the profile would contradict it.
     "accounts.LandlordProfile": "A landlord may own property serving several universities.",
+    # Reached only by its own secret hash, never listed, and the profile it
+    # points at carries the tenant -- so a scoped manager would be ceremony
+    # around a table nobody queries by university. The per-address rate limit
+    # is also deliberately GLOBAL: scoping it per university would let an
+    # attacker reset their budget by targeting a different school.
+    "accounts.EmailVerificationToken": (
+        "Reached only by its secret; the profile it points at carries the "
+        "tenant, and its rate limit must span universities to work."
+    ),
     # A landlord's record spans universities, for the same reason their
     # profile does. Scoping it would report a different number to each
     # university, which is worse than reporting one number because both would

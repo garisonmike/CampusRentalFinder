@@ -443,3 +443,9 @@ class CaretakerAssignment(TenantScopedModel):
     def has_permission(self, permission: str) -> bool:
         """Whether this assignment grants ``permission`` right now."""
         return self.is_active and permission in self.permissions
+
+
+# Django discovers models through `models`. EmailVerificationToken lives beside
+# the logic that issues and consumes it, because reading either without the
+# other is how single-use tokens quietly stop being single-use.
+from .verification import EmailVerificationToken  # noqa: E402,F401

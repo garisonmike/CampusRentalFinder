@@ -352,6 +352,25 @@ MAX_DISPUTES_PER_LANDLORD_PER_MONTH = config(
 # Per-claimant cap on claims raised in a rolling 30 days.
 MAX_CLAIMS_PER_USER_PER_MONTH = config("MAX_CLAIMS_PER_USER_PER_MONTH", default=10, cast=int)
 
+# --------------------------------------------------------------------------
+# Student verification (ADR-003)
+# --------------------------------------------------------------------------
+
+# How long an emailed verification link stays usable. Short: the student is
+# looking at their inbox when it arrives.
+EMAIL_VERIFICATION_TOKEN_HOURS = config("EMAIL_VERIFICATION_TOKEN_HOURS", default=24, cast=int)
+
+# Rate limits are per user AND per address, independently. Per user alone lets
+# one attacker mail-bomb many addresses; per address alone lets one account
+# grind through a university's namespace.
+EMAIL_VERIFICATION_RATE_WINDOW_HOURS = config(
+    "EMAIL_VERIFICATION_RATE_WINDOW_HOURS", default=24, cast=int
+)
+EMAIL_VERIFICATION_MAX_PER_USER = config("EMAIL_VERIFICATION_MAX_PER_USER", default=5, cast=int)
+EMAIL_VERIFICATION_MAX_PER_ADDRESS = config(
+    "EMAIL_VERIFICATION_MAX_PER_ADDRESS", default=3, cast=int
+)
+
 # The dispute annotation on a review is DERIVED, not stored (ADR-004 3a), so
 # these are policy knobs rather than a migration over live reviews.
 #
