@@ -48,6 +48,17 @@ repos:
 
   - repo: local
     hooks:
+      # Must run BEFORE anything imports Django. `property = ForeignKey(...)`
+      # beside an `@property` raises TypeError while the app registry loads,
+      # so a pytest assertion for it never runs -- the suite dies at collection
+      # instead. Pure AST, no Django import, readable message.
+      - id: field-shadows-property-builtin
+        name: no model field named `property` beside @property
+        entry: python backend/tools/check_field_shadowing.py
+        language: system
+        pass_filenames: false
+        files: ^backend/.*\.py$
+
       # Catches the classic "changed a model, forgot makemigrations" commit.
       # Runs without a database: --check --dry-run only needs the model state.
       - id: django-missing-migrations

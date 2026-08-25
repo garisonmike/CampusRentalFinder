@@ -76,6 +76,13 @@ jobs:
       - name: mypy
         run: mypy .
 
+      # Before every step that imports Django. A field named `property` beside
+      # an `@property` raises TypeError while the app registry loads, so every
+      # step below would fail with a collection stack trace instead of a
+      # message naming the class.
+      - name: No model field shadows the property builtin
+        run: python tools/check_field_shadowing.py
+
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
 

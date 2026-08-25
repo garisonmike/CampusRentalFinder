@@ -11,9 +11,10 @@ build and forces the decision at the point it is being made.
 
 from __future__ import annotations
 
-import ast
 import importlib
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -374,16 +375,35 @@ NOT_TENANT_SCOPED: dict[str, str] = {
 
 #: App labels whose models are ours to classify.
 #:
-#: Derived from settings rather than hard-coded: the hand-written list silently
-#: stopped covering `properties` when that app was added, so the scoping walk
-#: reported success on models it had never looked at.
-def _local_app_labels() -> frozenset[str]:
-    from django.conf import settings
+#: Derived from **where the code lives**, not from a settings list. Two earlier
+#: versions of this leaked:
+#:
+#: 1. A hand-written list silently stopped covering `properties` when that app
+#:    was added, so the walk reported success on models it had never seen.
+#: 2. Deriving it from `settings.LOCAL_APPS` fixed that and introduced a new
+#:    bypass: `config` was later added to its own `PROJECT_APPS` slot, which
+#:    the walk did not read. A settings slot the walk does not cover is a
+#:    bypass by construction, and the walk's whole value is that adding a model
+#:    forces a decision.
+#:
+#: An app whose package sits inside `backend/` is ours. That is a fact about
+#: the repository rather than a fact about a settings file, so no new slot,
+#: rename or reordering can route around it.
+def _first_party_app_labels() -> frozenset[str]:
+    from django.apps import apps as django_apps
 
-    return frozenset(app.rsplit(".", 1)[-1] for app in settings.LOCAL_APPS)
+    labels = set()
+    for app_config in django_apps.get_app_configs():
+        try:
+            path = Path(app_config.path).resolve()
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            continue
+        if path.is_relative_to(BACKEND_ROOT):
+            labels.add(app_config.label)
+    return frozenset(labels)
 
 
-LOCAL_APP_LABELS = _local_app_labels()
+LOCAL_APP_LABELS = _first_party_app_labels()
 
 
 def local_models():
@@ -413,6 +433,48 @@ def test_every_local_model_is_scoped_or_explicitly_exempt() -> None:
         + "\n".join(f"  {label}" for label in undecided)
         + "\n\nEither give the model a TenantScopedManager, or add it to "
         "NOT_TENANT_SCOPED in this file with a reason."
+    )
+
+
+def test_the_walk_covers_every_first_party_app() -> None:
+    """Every app whose code lives in `backend/` is walked.
+
+    Asserted against the settings slots explicitly, so that adding an app to
+    any of them -- LOCAL_APPS, PROJECT_APPS, or a slot invented next year --
+    cannot quietly place it outside the walk.
+    """
+    from django.conf import settings
+
+    declared = {
+        app.rsplit(".", 1)[-1]
+        for slot in ("LOCAL_APPS", "PROJECT_APPS")
+        for app in getattr(settings, slot, [])
+    }
+    missed = sorted(declared - set(LOCAL_APP_LABELS))
+
+    assert not missed, (
+        "These first-party apps are declared in settings but not walked:\n"
+        + "\n".join(f"  {label}" for label in missed)
+    )
+
+
+def test_the_project_package_holds_no_models() -> None:
+    """`config` is an installed app so its cross-app management commands are
+    discovered. It must not become a place models live.
+
+    A model in the project package would sit outside every app boundary the
+    tenant rules are organised around, and `config` is imported by everything,
+    so it is the one package where a model creates an import cycle rather than
+    a dependency. If this ever needs to change it should be a deliberate argued
+    edit, not a silent addition.
+    """
+    from django.apps import apps
+
+    models = [model.__name__ for model in apps.get_app_config("config").get_models()]
+
+    assert not models, (
+        f"config now defines models: {models}. Move them to a domain app, or "
+        "argue the case here and change this test on purpose."
     )
 
 
@@ -464,137 +526,59 @@ def test_no_viewset_exposes_a_tenant_model_through_the_default_manager() -> None
 # ---------------------------------------------------------------------------
 
 
-def model_class_nodes() -> list[tuple[Path, ast.ClassDef]]:
-    """Every class defined in a models.py under an app we own."""
-    found: list[tuple[Path, ast.ClassDef]] = []
+def test_the_shadowing_check_runs_before_django_does() -> None:
+    """The `property`-field rule lives in `tools/check_field_shadowing.py`.
 
-    for path in python_sources():
-        if path.name != "models.py":
-            continue
-        if path.parent.name not in LOCAL_APP_LABELS:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                found.append((path, node))
+    It cannot live here, and the reason is worth stating because it looks like
+    an arbitrary split. `property = ForeignKey(...)` beside an `@property`
+    raises `TypeError` **at import**, and Django imports every model module
+    while populating its app registry -- before pytest collects a single test.
+    An assertion in this file would never run: the suite would die at
+    collection with the same stack trace the rule exists to replace.
 
-    return found
-
-
-def _declares_property_field(node: ast.ClassDef) -> bool:
-    """Whether the class body assigns a model field named ``property``."""
-    for statement in node.body:
-        targets = []
-        if isinstance(statement, ast.Assign):
-            targets = statement.targets
-        elif isinstance(statement, ast.AnnAssign):
-            targets = [statement.target]
-
-        for target in targets:
-            if isinstance(target, ast.Name) and target.id == "property":
-                return True
-
-    return False
-
-
-def _uses_property_decorator(node: ast.ClassDef) -> list[str]:
-    """Names of methods in the class body decorated with a bare ``@property``."""
-    offenders = []
-
-    for statement in node.body:
-        if not isinstance(statement, ast.FunctionDef):
-            continue
-        for decorator in statement.decorator_list:
-            if isinstance(decorator, ast.Name) and decorator.id == "property":
-                offenders.append(statement.name)
-
-    return offenders
-
-
-def test_a_model_with_a_property_field_never_uses_the_property_decorator() -> None:
-    """``property = ForeignKey(...)`` shadows the builtin inside the class body.
-
-    ``@property`` further down then resolves to a ForeignKey instance and the
-    module raises ``TypeError: 'ForeignKey' object is not callable`` at import
-    — before any test runs, so the failure is a stack trace at collection
-    rather than a readable assertion.
-
-    ``Unit`` hit this first (see properties/models.py). Anything on such a model
-    that would naturally be a property has to be a method instead.
+    So the check is pure AST, imports nothing, and runs from pre-commit and CI
+    ahead of everything else. This test asserts it is wired up and passing, not
+    that the repository is clean -- the check itself decides that.
     """
-    offenders: list[str] = []
-
-    for path, node in model_class_nodes():
-        if not _declares_property_field(node):
-            continue
-        for method in _uses_property_decorator(node):
-            offenders.append(
-                f"{path.relative_to(BACKEND_ROOT).as_posix()}: {node.name}.{method} uses @property"
-            )
-
-    assert not offenders, (
-        "These models declare a field named `property` and also use the "
-        "@property decorator, which resolves to that field:\n"
-        + "\n".join(f"  {entry}" for entry in offenders)
-        + "\n\nMake it a method. See Unit.is_available in properties/models.py "
-        "for the precedent and the comment explaining why."
+    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, no user input
+        [sys.executable, str(BACKEND_ROOT / "tools" / "check_field_shadowing.py")],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
+    assert result.returncode == 0, result.stdout + result.stderr
 
-def test_the_shadowing_check_can_actually_see_a_violation() -> None:
-    """Guards against the check passing because it parses nothing.
 
-    A structural test that silently matches zero classes is worse than no test:
-    it reports success for a rule it never applied.
+def test_the_shadowing_check_actually_detects_the_pattern(tmp_path) -> None:
+    """A check that has never fired is a check nobody knows the state of.
+
+    Exercised against a synthetic file rather than the repository, so it proves
+    the detector works without depending on the repository being dirty.
     """
-    source = """
-class Thing:
-    property = models.ForeignKey("x", on_delete=models.CASCADE)
+    from tools.check_field_shadowing import find_offenders
 
-    @property
-    def broken(self):
-        return True
-"""
-    node = next(entry for entry in ast.walk(ast.parse(source)) if isinstance(entry, ast.ClassDef))
-
-    assert _declares_property_field(node) is True
-    assert _uses_property_decorator(node) == ["broken"]
-
-
-def test_the_shadowing_check_examines_real_models() -> None:
-    """And that it is looking at our actual models, not an empty list."""
-    names = {node.name for _path, node in model_class_nodes()}
-
-    assert {"Property", "Unit", "User", "University"} <= names
-
-
-# ---------------------------------------------------------------------------
-# 6. The header fallback cannot exist in production
-# ---------------------------------------------------------------------------
-
-
-def test_prod_settings_reject_the_tenant_header_fallback() -> None:
-    """ADR-001: absence is not enough, it must be impossible.
-
-    Read as source rather than imported: prod.py raises on import by design, so
-    the behaviour is exercised in a subprocess by test_smoke.py. Here we assert
-    the guard exists at all, so it cannot be deleted quietly.
-    """
-    source = (BACKEND_ROOT / "config" / "settings" / "prod.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    raises_on_fallback = any(
-        isinstance(node, ast.If)
-        and any(isinstance(inner, ast.Raise) for inner in ast.walk(node))
-        and "TENANT_HEADER_FALLBACK_ENABLED" in ast.dump(node)
-        for node in ast.walk(tree)
+    offender = tmp_path / "models.py"
+    offender.write_text(
+        "class Unit:\n"
+        "    property = object()\n"
+        "\n"
+        "    @property\n"
+        "    def is_available(self):\n"
+        "        return True\n"
+    )
+    clean = tmp_path / "clean.py"
+    clean.write_text(
+        "class Unit:\n"
+        "    property_reviewed = object()\n"
+        "\n"
+        "    @property\n"
+        "    def is_available(self):\n"
+        "        return True\n"
     )
 
-    assert raises_on_fallback, (
-        "config/settings/prod.py must raise ImproperlyConfigured when "
-        "TENANT_HEADER_FALLBACK_ENABLED is true. Without it, any client can "
-        "select a tenant with a header."
-    )
+    assert any("is_available" in entry for entry in find_offenders([offender]))
+    assert find_offenders([clean]) == []
 
 
 # ---------------------------------------------------------------------------

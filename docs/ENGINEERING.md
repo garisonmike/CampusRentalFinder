@@ -395,10 +395,37 @@ decision:
 - every route carries an explicit host class in `config/hosts.py`
 - no `PUBLIC_CANONICAL` route serves an unsafe method
 - absolute URLs come only from `config.hosts.build_absolute_url`
-- every local model is tenant-scoped or exempt **with a reason**
+- every first-party model is tenant-scoped or exempt **with a reason**
+- `config` defines no models
+- every scheduled job is real, queued and documented in `OPERATIONS.md`
 
 When one of these fails on your branch, the fix is to make the decision it is
 asking for, not to widen the exemption list.
+
+**The set of apps walked is derived from where the code lives**, not from a
+settings list. Two earlier versions leaked: a hand-written list stopped
+covering `properties`, and then deriving it from `LOCAL_APPS` left `config`
+uncovered when that got its own `PROJECT_APPS` slot. An app whose package sits
+under `backend/` is ours — a fact about the repository, not about a settings
+file, so no new slot can route around it. A separate test asserts every app
+declared in any slot is in fact walked.
+
+### The one rule that is not a pytest test
+
+`backend/tools/check_field_shadowing.py` catches `property = ForeignKey(...)`
+declared beside an `@property`. It runs from pre-commit and from CI **before
+any step that imports Django**, and it cannot be a pytest test:
+
+> The pattern raises `TypeError: 'ForeignKey' object is not callable` at
+> *import*, and Django imports every model module while populating its app
+> registry — before pytest collects a single test. An assertion in
+> `test_architecture.py` would never run; the suite would die at collection
+> with exactly the stack trace the rule exists to replace.
+
+So it is pure AST, imports nothing, scans every first-party file rather than
+only those named `models.py` (which missed `ratings/aggregates.py`), and prints
+the file, class and method. `test_architecture.py` asserts it is wired up and
+that the detector fires against a synthetic file.
 
 ## Where things stand
 
