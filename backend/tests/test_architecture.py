@@ -12,6 +12,7 @@ build and forces the decision at the point it is being made.
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from config.hosts import (
 pytestmark = pytest.mark.architecture
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = BACKEND_ROOT.parent
 
 SAFE_METHODS = frozenset({"get", "head", "options"})
 
@@ -585,3 +587,58 @@ def test_prod_settings_reject_the_tenant_header_fallback() -> None:
         "TENANT_HEADER_FALLBACK_ENABLED is true. Without it, any client can "
         "select a tenant with a header."
     )
+
+
+# ---------------------------------------------------------------------------
+# Scheduled jobs
+# ---------------------------------------------------------------------------
+
+
+class TestScheduledJobs:
+    """Every job in SCHEDULE must be real and must be documented.
+
+    These jobs fail silently. A schedule entry pointing at a renamed function
+    would fail at *schedule install time* on a deploy machine and be noticed;
+    an OPERATIONS.md entry for a job nobody schedules would never be noticed at
+    all, because its symptom is indistinguishable from the feature working.
+    """
+
+    def test_every_scheduled_function_is_importable(self):
+        from config.jobs.schedule import SCHEDULE
+
+        for job in SCHEDULE:
+            module_path, _, name = job.func.rpartition(".")
+            module = importlib.import_module(module_path)
+
+            assert hasattr(module, name), f"{job.func} does not exist"
+            assert callable(getattr(module, name))
+
+    def test_every_scheduled_job_says_what_its_failure_looks_like(self):
+        """The on_failure text is for whoever is reading this at 2am."""
+        from config.jobs.schedule import SCHEDULE
+
+        for job in SCHEDULE:
+            assert len(job.on_failure) > 40, f"{job.func} has no failure description"
+
+    def test_every_scheduled_job_targets_a_configured_queue(self):
+        from django.conf import settings
+
+        from config.jobs.schedule import SCHEDULE
+
+        for job in SCHEDULE:
+            assert job.queue in settings.RQ_QUEUES
+
+    def test_every_scheduled_job_appears_in_the_operations_runbook(self):
+        """A job that runs but is not in OPERATIONS.md has no alert, and a job
+        with no alert may as well not run: its failure is invisible."""
+        from config.jobs.schedule import SCHEDULE
+
+        runbook = (REPO_ROOT / "docs" / "OPERATIONS.md").read_text()
+
+        for job in SCHEDULE:
+            _, _, name = job.func.rpartition(".")
+            subject = name.replace("sweep_overdue_", "").replace("_", " ")
+
+            assert subject.split()[0] in runbook.lower(), (
+                f"{job.func} is scheduled but not described in docs/OPERATIONS.md"
+            )

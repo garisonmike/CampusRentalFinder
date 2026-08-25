@@ -64,7 +64,12 @@ LOCAL_APPS = [
     "reviews",
 ]
 
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+# The project package itself, so its cross-app management commands are
+# discovered. Deliberately NOT in LOCAL_APPS: that list is the domain apps, and
+# the architecture test walks it for tenant scoping. config holds no models.
+PROJECT_APPS = ["config"]
+
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -323,16 +328,12 @@ RQ_SHOW_ADMIN_LINK = True
 
 # How long a landlord or caretaker has to confirm or dispute a claim before
 # silence auto-confirms it. Landlord silence is a signal, not a veto.
-TENANCY_CONFIRMATION_WINDOW_DAYS = config(
-    "TENANCY_CONFIRMATION_WINDOW_DAYS", default=7, cast=int
-)
+TENANCY_CONFIRMATION_WINDOW_DAYS = config("TENANCY_CONFIRMATION_WINDOW_DAYS", default=7, cast=int)
 
 # How long WE have to resolve an escalated dispute before it auto-resolves in
 # the tenant's favour. This deadline binds the platform: an indefinite block
 # would turn our backlog into a landlord veto by proxy.
-DISPUTE_RESOLUTION_WINDOW_DAYS = config(
-    "DISPUTE_RESOLUTION_WINDOW_DAYS", default=14, cast=int
-)
+DISPUTE_RESOLUTION_WINDOW_DAYS = config("DISPUTE_RESOLUTION_WINDOW_DAYS", default=14, cast=int)
 
 # Minimum stay before a tenancy can be reviewed. Policy, not an invariant, so
 # it lives here rather than in a constraint -- and it cannot be one anyway,

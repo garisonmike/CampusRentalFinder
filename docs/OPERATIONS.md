@@ -160,6 +160,45 @@ notices.
 
 ---
 
+### Installing the schedule
+
+`config/jobs/schedule.py` is the single table of recurring jobs, and
+`manage.py install_schedules` registers them with rq-scheduler idempotently.
+Run it on deploy; `--dry-run` prints the table without touching Redis.
+
+The set of things that must be running is a fact about the system, so it lives
+in one readable place rather than as `scheduler.cron(...)` calls scattered
+across app modules. An architecture test asserts that every entry points at a
+real function, targets a configured queue, and is described in this document —
+because a job with no runbook entry has no alert, and a job with no alert may
+as well not run: its failure is invisible.
+
+### The NULL-ordering trap in sweeps
+
+PostgreSQL sorts NULLs **last** in an ascending order and **first** in a
+descending one. Every sweep that picks "the oldest N rows" is therefore one
+`order_by` away from a backlog that grows while the job reports success.
+
+It has already bitten once, in `route_stale_distances`: a nullable `routed_at`
+ordered ascending returned the rows that already *had* an answer and left the
+never-routed ones permanently at the back. Fixed with
+`F("routed_at").asc(nulls_first=True)`.
+
+The tenancy sweeps avoid it differently, and the difference is worth knowing:
+they filter `deadline__lte=now` first, which excludes nulls regardless of where
+they would have sorted. The filter is what makes them safe, not the ordering.
+
+**A new sweep that orders on a nullable column without such a filter must say
+`nulls_first=True` explicitly.** The audit as of this writing:
+
+| Query | Column | Nullable | Safe because |
+|---|---|---|---|
+| `route_stale_distances` | `routed_at` | yes | explicit `nulls_first=True` |
+| `sweep_overdue_claims` | `confirmation_deadline` | **no** | column is NOT NULL |
+| `sweep_overdue_disputes` | `escalation_deadline` | yes | `__lte` filter excludes nulls |
+| `Property.Meta.ordering` | `published_at` | yes | explicit `nulls_first=True` — drafts lead a landlord's own list, which is intended and now stated rather than inherited from the sort direction |
+| `order_by_campus_distance` | `nearest_campus_km` | no in practice | tenant scoping reaches properties *through* `campus_distances`, so `Min()` is never taken over an empty set |
+
 ## Alerting
 
 **Alert on the age of the oldest unresolved item, never on queue volume.**

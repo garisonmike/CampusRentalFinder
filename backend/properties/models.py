@@ -112,7 +112,13 @@ class Property(TenantScopedModel):
     class Meta:
         verbose_name = _("Property")
         verbose_name_plural = _("Properties")
-        ordering = ["-published_at", "-created_at"]
+        # published_at is null exactly when the property is a draft, and
+        # PostgreSQL sorts NULLs FIRST in a descending order -- so drafts lead
+        # any listing that includes them. That is what a landlord's own list
+        # and the admin want, so nulls_first states it deliberately rather
+        # than inheriting it from the sort direction, where a later change of
+        # direction would silently flip it.
+        ordering = [F("published_at").desc(nulls_first=True), "-created_at"]
         base_manager_name = "all_objects"
         default_manager_name = "all_objects"
         indexes = [

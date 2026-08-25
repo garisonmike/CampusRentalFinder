@@ -116,6 +116,10 @@ def order_by_campus_distance(queryset: QuerySet) -> QuerySet:
     two campuses of the same university would otherwise appear twice
     (ADR-002).
     """
+    # No explicit null ordering needed on either key. straight_line_km is NOT
+    # NULL and a tenant-scoped queryset reaches properties THROUGH
+    # campus_distances, so Min() is never taken over an empty set; and a
+    # published property always has a published_at (check constraint).
     return queryset.annotate(nearest_campus_km=Min("campus_distances__straight_line_km")).order_by(
         "nearest_campus_km", "-published_at"
     )

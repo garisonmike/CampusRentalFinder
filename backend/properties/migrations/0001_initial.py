@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
             options={
                 'verbose_name': 'Property',
                 'verbose_name_plural': 'Properties',
-                'ordering': ['-published_at', '-created_at'],
+                'ordering': [django.db.models.expressions.OrderBy(django.db.models.expressions.F('published_at'), descending=True, nulls_first=True), '-created_at'],
                 'base_manager_name': 'all_objects',
                 'default_manager_name': 'all_objects',
             },
