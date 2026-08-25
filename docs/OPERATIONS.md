@@ -24,8 +24,9 @@ than no job**, because no job at least makes the gap obvious.
 This is a commitment, not a target. It is enforced by the system rather than by
 diligence: an escalated dispute we have not resolved by the deadline
 **auto-resolves in the tenant's favour** (ADR-004). The claim confirms, the
-review becomes possible, and the review carries a neutral
-`disputed_by_landlord` annotation.
+review becomes possible, and it is shown with a neutral annotation — derived at
+read time from the dispute record by `review_dispute_annotation()`, not stored
+on the review.
 
 Missing the deadline is therefore not a backlog, it is a decision — and the
 decision is made for us, in the direction that protects the party with less
@@ -50,8 +51,8 @@ is not.
 
 ## Jobs that must be running
 
-Four jobs on django-rq (ADR-007). For each: what it does, what breaks when it
-stops, and how long that takes to become visible.
+Five jobs on django-rq (ADR-002, ADR-007). For each: what it does, what breaks
+when it stops, and how long that takes to become visible.
 
 ### 1. Claim auto-confirmation
 
@@ -181,7 +182,7 @@ Not alerts — trends that indicate whether the design is working.
 | Escalated share of disputes | Whether dispute typing is working | Should be a minority. If most disputes escalate, the typed reasons are not matching reality — see the open question in ADR-004 |
 | Per-landlord `dispute_rate` | Tactical disputing | Requires a denominator guard; meaningless below ~10 claims |
 | Per-landlord `dispute_upheld_rate` | Whether disputes are honest | A landlord with high rate and low upheld rate is gaming the mechanism |
-| Reviews carrying `disputed_by_landlord` | SLA health, indirectly | A rising share means we are missing deadlines |
+| Reviews carrying a dispute annotation | SLA health, indirectly | A rising share means we are missing deadlines |
 
 ---
 

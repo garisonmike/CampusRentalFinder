@@ -20,9 +20,16 @@ JWT via `djangorestframework-simplejwt` (with `token_blacklist`), OpenAPI via
 primitives, Zustand, TanStack Query, axios, React Router 6. API types are
 **generated** from the OpenAPI schema by openapi-typescript.
 
-**Queue** — django-rq on the same Redis (ADR-007). Four jobs depend on it:
-tenancy auto-confirmation, campus routing, verification-document retention, and
-image variants.
+**Queue** — django-rq with rq-scheduler on the same Redis (ADR-007). Five jobs
+depend on it: tenancy auto-confirmation, dispute auto-resolution, campus
+routing, verification-document retention, and image variants. Every one fails
+**silently** if the worker stops; `docs/OPERATIONS.md` says what each failure
+looks like and what to alert on.
+
+**Storage** — two S3 buckets behind two backend classes (ADR-007): public media
+and private verification documents. `config.storage.check_storage_separation`
+is a Django system check, so a misconfiguration that pointed both at one bucket
+would fail `manage.py check` rather than reaching production.
 
 **Tooling** — `ruff` (lint **and** format — no black, no isort, no flake8),
 `mypy` (non-strict), `pytest` + `pytest-django` + `factory_boy`, `vitest` +
@@ -309,12 +316,17 @@ validation on upload.
 it, so no claim and no dispute surface. `TenancyClaim` exists only for stays the
 platform did not witness; that is the primary control on dispute volume and must
 not be "simplified" away. For claims: the tenant initiates, the landlord and
-caretakers have 7 days, and silence auto-confirms. **Disputes are typed** —
-`dates_incorrect` resolves between the parties, `duplicate` auto-resolves, and
-only `never_tenanted` plus unresolved counters reach an admin. **The timeout is
-symmetric:** an escalated dispute we have not resolved in 14 days auto-resolves
-for the tenant, and the review carries a neutral `disputed_by_landlord`
-annotation. `Tenancy` records `confirmation_source` across
+caretakers have 7 days, and silence auto-confirms. **Disputes are typed**, and
+`escalation_reason` is separate from `dispute_reason` so the admin queue says
+what has to be decided rather than what was claimed. **A proposed date
+correction that would drop the stay under the review minimum cannot settle
+privately**, even with the tenant's acceptance — it escalates as
+`correction_defeats_review`, because that is the cheapest attack on the trust
+property and it should be the most conspicuous. **The timeout is symmetric:**
+an escalated dispute we have not resolved in 14 days auto-resolves for the
+tenant, and the review is shown with a neutral annotation **derived at read
+time** by `review_dispute_annotation()`, not stored on a column. `Tenancy`
+records `confirmation_source` across
 `application | landlord | caretaker | auto | admin | dispute_timeout`. See
 `docs/OPERATIONS.md` for the SLA and alerting.
 Overlapping confirmed tenancies are blocked by an `ExclusionConstraint`
@@ -347,15 +359,21 @@ storage backend class. Never merge them.
 | Phase | State |
 |---|---|
 | 1 — tenancy foundation | **Done.** btree_gist, `University`, `Campus`, the resolution middleware, the scoped manager, the public tenant config endpoint |
-| 2 — identity | **Done.** `User` on `AbstractBaseUser`, the three profile models, relationship-based permissions, capabilities on `/auth/me/` |
-| 3 — properties | Next. `Property`, `Unit`, `PropertyCampusDistance`, then storage, then `UnitPhoto` |
-| 4 — storage and queue | django-rq, MinIO, the two buckets |
-| 5 — the trust property | `Application`, `TenancyClaim`, `Tenancy`, `Review` |
+| 2 — identity | **Done.** `User` on `AbstractBaseUser`, the three profile models, relationship-based permissions, capabilities on `/auth/me/`, signup gating with a grace period |
+| 3 — properties | **Done.** `Property`, `Unit`, `PropertyCampusDistance`, `CaretakerAssignment`, `UnitPhoto`, the FilterSet |
+| 4 — storage and queue | **Done.** django-rq, MinIO, the two buckets, image variants, campus routing |
+| 5 — the trust property | Next. `Application`, `TenancyClaim`, `Tenancy`, `Review`, `ReviewResponse` |
 | 6 — verification | The two student paths and document retention |
 | 7 — cleanup | Remove the draft apps, rebuild the frontend pages |
 
-`CaretakerAssignment` is defined by its foreign key to `Property`, so it lands
-in phase 3 rather than with the other role models.
+`CaretakerAssignment` landed with `Property`, because the foreign key to it is
+what defines the model.
+
+### Running the tests locally
+
+The suite needs PostgreSQL **and** Redis: django-rq holds a broker connection
+even with `ASYNC: False`, so the job tests exercise the real enqueue path. CI
+provides both as service containers.
 
 ### Architecture tests
 

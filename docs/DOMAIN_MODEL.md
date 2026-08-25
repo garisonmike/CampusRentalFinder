@@ -1,9 +1,10 @@
 # Target Domain Model
 
-**Status:** Partly implemented. Phases 1 and 2 have landed: `University`,
-`Campus`, `User`, `LandlordProfile`, `StudentProfile` and
-`UniversityStaffProfile` exist in code. Everything below them is still
-proposed.
+**Status:** Partly implemented. Phases 1 to 4 have landed: `University`,
+`Campus`, `User`, the three profile models, `CaretakerAssignment`, `Property`,
+`Unit`, `PropertyCampusDistance` and `UnitPhoto` exist in code, on object
+storage and with the queue behind them. `Application`, `TenancyClaim`,
+`Tenancy`, `Review` and the verification models are still proposed.
 **Date:** 2026-08-23
 **Updated:** 2026-08-25 — signup policy enum, typed disputes, application-sourced
 tenancies
@@ -53,6 +54,7 @@ actually exist around a Kenyan campus.
 | `student_email_domains` | `ArrayField(CharField(255))` | `["s.kyu.ac.ke"]` |
 | `signup_policy` | `CharField(24)` | `open \| verification_encouraged \| verification_required`, default **`open`** |
 | `verification_enforced_from` | `DateField` | null — the policy is inert before this date |
+| `verification_grace_period_days` | `PositiveSmallIntegerField` | default **14** — how long a pending student may use gated actions |
 | `verification_required_to_review` | `BooleanField` | default **`False`** |
 | `id_review_retention_days` | `PositiveSmallIntegerField` | default **7** (ADR-003) |
 | `is_active` | `BooleanField` | default `True` |
@@ -154,13 +156,9 @@ configured by `settings.MAX_DISPUTES_PER_LANDLORD_PER_MONTH`.
 
 ### `CaretakerAssignment`
 
-**Not yet implemented.** It is defined by its foreign key to `Property`, which
-lands in phase 3, so it ships with that model. The permission set below and the
-`manages_properties` shape in the `/auth/me/` capability block are already
-fixed, so neither the model nor the frontend contract changes when it arrives.
-
 A user authorised to manage **one** property, granted by that property's
-landlord.
+landlord. Shipped with `Property`, because the foreign key to it is what
+defines the model.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -226,6 +224,7 @@ blast radius of a compromised account. Every document read is logged (see
 | `verified_at` | `DateTimeField` | null |
 | `verified_by` | FK → `User` | `SET_NULL`, null — null for the automated email path |
 | `rejection_reason` | `CharField(255)` | blank |
+| `grace_period_ends_at` | `DateTimeField` | null — set at signup when the school gates actions. Read access never depends on it (ADR-003) |
 | `year_of_study` | `PositiveSmallIntegerField` | null, 1..8 |
 | `course` | `CharField(200)` | blank |
 
@@ -460,6 +459,13 @@ showing the straight-line figure must label it as such.
 A property with zero rows here is invisible to every tenant. Enforce ≥ 1 at the
 serializer and monitor for orphans (ADR-002).
 
+**A property with no coordinates cannot join a campus at all.**
+`straight_line_km` is `NOT NULL` and is always present, so there is no honest
+value for an unpinned property; the join refuses with a named error rather than
+letting the database report a null column. The consequence is that an unpinned
+property is invisible to every tenant, so the serializer must require
+coordinates before publication.
+
 ---
 
 ## Transactions
@@ -514,7 +520,7 @@ auto-confirms.
 | `monthly_rent_kes` | `Decimal(10,2)` | as claimed |
 | `status` | `CharField(16)` | `pending \| confirmed \| disputed \| escalated \| withdrawn \| expired` |
 | `confirmation_deadline` | `DateTimeField` | `created_at + window` |
-| `dispute_reason` | `CharField(20)` | `dates_incorrect \| never_tenanted \| duplicate`, blank while undisputed |
+| `dispute_reason` | `CharField(20)` | `dates_incorrect \| never_tenanted \| duplicate` **as raised**; never rewritten |
 | `dispute_note` | `TextField` | blank — **additional** to the reason, never instead |
 | `disputed_by` | FK → `User` | `SET_NULL`, null |
 | `disputed_at` | `DateTimeField` | null |
@@ -522,7 +528,10 @@ auto-confirms.
 | `proposed_end_date` | `DateField` | null |
 | `counter_start_date` | `DateField` | null — the tenant's single counter |
 | `counter_end_date` | `DateField` | null |
+| `dispute_withdrawn_at` | `DateTimeField` | null — the disputer took it back; clears the annotation |
+| `tenant_accepted_correction_at` | `DateTimeField` | null — **evidence**, not necessarily a resolution |
 | `escalated_at` | `DateTimeField` | null — entered the admin queue |
+| `escalation_reason` | `CharField(28)` | `counter_unresolved \| correction_defeats_review \| identity_disputed \| duplicate_unmatched` |
 | `escalation_deadline` | `DateTimeField` | null — `escalated_at + DISPUTE_RESOLUTION_WINDOW_DAYS` |
 | `resolved_by` | FK → `User` | `SET_NULL`, null — null when resolved by timeout |
 | `resolved_at` | `DateTimeField` | null |
@@ -553,14 +562,14 @@ auto-confirms.
 
 | Reason | Path |
 |---|---|
-| `dates_incorrect` | Disputer proposes dates → tenant accepts (confirms, **no admin**) or counters once → an unaccepted counter escalates *as `never_tenanted`* |
+| `dates_incorrect` | Disputer proposes dates → tenant accepts (confirms, **no admin**) or counters once → an unaccepted counter escalates as `counter_unresolved`. **A correction that would drop the stay under the review minimum cannot auto-resolve at all**, even with the tenant's acceptance: it escalates as `correction_defeats_review` (ADR-004) |
 | `duplicate` | Auto-resolves if a confirmed overlapping tenancy exists for the same unit and user; otherwise escalates |
 | `never_tenanted` | Escalates |
 
 **Symmetric timeout.** An escalated claim past `escalation_deadline`
 auto-resolves in the tenant's favour: the claim confirms with
 `confirmation_source='dispute_timeout'`, and the resulting `Review` carries
-`disputed_by_landlord=True` as a neutral annotation.
+a neutral annotation, derived at read time rather than stored.
 
 ### `Tenancy` (ADR-004)
 
@@ -578,7 +587,7 @@ The evidence that a stay happened. Nothing else can vouch for a review.
 | `unit` | FK → `Unit` | `PROTECT` |
 | `tenant` | FK → `User` | `PROTECT` |
 | `application` | FK → `Application` | `SET_NULL`, null — the witnessed path |
-| `claim` | FK → `TenancyClaim` | `SET_NULL`, null — the claimed path |
+| `claim` | FK → `TenancyClaim` | **`PROTECT`**, null — the claimed path. PROTECT because the review annotation is derived from this record, so it must survive |
 | `confirmation_source` | `CharField(20)` | `application \| landlord \| caretaker \| auto \| admin \| dispute_timeout` |
 | `confirmed_by` | FK → `User` | `SET_NULL`, **null for `auto` and `dispute_timeout`** |
 | `confirmed_at` | `DateTimeField` | |
@@ -625,12 +634,18 @@ The evidence that a stay happened. Nothing else can vouch for a review.
 | `would_recommend` | `BooleanField` | null |
 | `editable_until` | `DateTimeField` | `created_at + 14 days` |
 | `is_published` | `BooleanField` | default `True` |
-| `disputed_by_landlord` | `BooleanField` | default `False` — set when the tenancy confirmed by dispute timeout |
 | `hidden_reason` | `CharField(200)` | blank; staff only |
 
-`disputed_by_landlord` is surfaced as a **neutral annotation** — "the landlord
-disputed this stay" — never as a discredit. The review is not greyed out,
-collapsed, excluded from the average, or labelled unverified (ADR-004).
+**No `disputed_by_landlord` column.** The annotation is derived at read time by
+`review_dispute_annotation(review)`, which returns `None` for a withdrawn
+dispute and — behind a settings-gated hook that is off by default — for a
+landlord whose `dispute_upheld_rate` is too low over a large enough sample.
+Store facts, derive presentation: changing the policy is a function edit rather
+than a migration over live reviews (ADR-004).
+
+The dispute annotation reads "the landlord disputed this stay" and is
+**neutral** — never a discredit. The review is not greyed out, collapsed,
+excluded from the average, or labelled unverified (ADR-004).
 
 The verified badge is read from `review.tenancy.tenant.student_profile.verification_status`
 at render time, not copied onto the review. When the university has
@@ -773,7 +788,7 @@ needs an alert on its *backlog* rather than on its own success.
 |---|---|---|
 | Auto-confirm tenancy claims | scheduled, hourly | oldest `TenancyClaim` past `confirmation_deadline` still `pending` |
 | Auto-resolve escalated disputes | scheduled, hourly | oldest `escalated` claim past `escalation_deadline` |
-| Route campus walking distance | on `PropertyCampusDistance` create; periodic refresh of oldest `routed_at` | rows with null `walking_minutes` older than a day; provider quota |
+| Route campus walking distance | on `PropertyCampusDistance` create; a sweep takes the oldest, **nulls first** | rows with null `walking_minutes` older than a day; provider quota |
 | Delete verification documents | scheduled, hourly | oldest `StudentVerificationRequest` past its retention window with `document_deleted_at` null |
 | Generate image variants | on `UnitPhoto` create | oldest `UnitPhoto` in `processing_status='pending'` |
 
