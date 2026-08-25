@@ -26,13 +26,14 @@ from rest_framework import status
 
 from accounts.models import StudentProfile, User
 from rentals.models import Rental, RentalFavorite, RentalInquiry
-from reviews.models import Review, ReviewHelpfulness, ReviewReport
+from reviews.models import Review as DraftReview
+from reviews.models import ReviewHelpfulness, ReviewReport
 from tests.factories import (
     TEST_PASSWORD,
+    DraftReviewFactory,
     LandlordFactory,
     RentalFactory,
     RentalImageFactory,
-    ReviewFactory,
     TenantFactory,
 )
 
@@ -813,7 +814,15 @@ class TestReviewWrites:
         """The core trust hole ADR-004 exists to close.
 
         No tenancy, no stay, no proof of any relationship to the property is
-        required. This assertion is expected to be INVERTED by the rewrite.
+        required. This documents the DRAFT's behaviour, on the draft's own
+        endpoint, and is removed with the draft in Phase 7.
+
+        **The inversion has landed**, on the rebuilt model rather than here:
+        `tests/test_reviews.py::TestAReviewRequiresAStay`. `ratings.Review`
+        hangs off a NOT NULL `OneToOneField` to `Tenancy`, so no serializer,
+        admin action, management command or shell session can produce the row
+        this test creates. The two suites coexist only until `rentals` and
+        `reviews` are deleted.
         """
         response = tenant_client.post(
             self.url,
@@ -822,7 +831,7 @@ class TestReviewWrites:
         )
 
         assert response.status_code == status.HTTP_201_CREATED
-        assert Review.objects.filter(tenant=tenant, rental=rental).exists()
+        assert DraftReview.objects.filter(tenant=tenant, rental=rental).exists()
 
     def test_a_landlord_cannot_write_a_review(self, landlord_client, rental):
         response = landlord_client.post(
@@ -833,7 +842,7 @@ class TestReviewWrites:
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_a_second_review_of_the_same_rental_is_rejected(self, tenant_client, tenant, rental):
-        ReviewFactory(rental=rental, tenant=tenant)
+        DraftReviewFactory(rental=rental, tenant=tenant)
 
         response = tenant_client.post(
             self.url,
@@ -895,7 +904,7 @@ class TestReviewWrites:
         response = tenant_client.delete(f"{self.url}{review.pk}/")
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert not Review.objects.filter(pk=review.pk).exists()
+        assert not DraftReview.objects.filter(pk=review.pk).exists()
 
 
 class TestReviewReads:
@@ -906,22 +915,22 @@ class TestReviewReads:
         assert response.status_code == status.HTTP_200_OK
 
     def test_filters_by_rental(self, api_client, review, landlord):
-        ReviewFactory(rental=RentalFactory(landlord=landlord))
+        DraftReviewFactory(rental=RentalFactory(landlord=landlord))
 
         body = api_client.get(self.url, {"rental_id": review.rental_id}).json()
 
         assert body["count"] == 1
 
     def test_filters_by_minimum_rating(self, api_client, rental):
-        ReviewFactory(rental=rental, tenant=TenantFactory(), rating=2)
-        ReviewFactory(rental=rental, tenant=TenantFactory(), rating=5)
+        DraftReviewFactory(rental=rental, tenant=TenantFactory(), rating=2)
+        DraftReviewFactory(rental=rental, tenant=TenantFactory(), rating=5)
 
         body = api_client.get(self.url, {"min_rating": 4}).json()
 
         assert body["count"] == 1
 
     def test_my_reviews_returns_only_the_callers_reviews(self, tenant_client, review, rental):
-        ReviewFactory(rental=rental, tenant=TenantFactory())
+        DraftReviewFactory(rental=rental, tenant=TenantFactory())
 
         response = tenant_client.get(f"{self.url}my_reviews/")
 
@@ -1135,8 +1144,8 @@ class TestModelBehaviour:
         assert rental.review_count == 0
 
     def test_rental_average_rating_aggregates_reviews(self, rental):
-        ReviewFactory(rental=rental, tenant=TenantFactory(), rating=2)
-        ReviewFactory(rental=rental, tenant=TenantFactory(), rating=4)
+        DraftReviewFactory(rental=rental, tenant=TenantFactory(), rating=2)
+        DraftReviewFactory(rental=rental, tenant=TenantFactory(), rating=4)
 
         assert rental.average_rating == pytest.approx(3.0)
 
@@ -1163,11 +1172,11 @@ class TestModelBehaviour:
         assert first.is_primary is False
 
     def test_a_review_title_is_generated_when_blank(self, rental, tenant):
-        review = ReviewFactory(rental=rental, tenant=tenant, rating=5, title="")
+        review = DraftReviewFactory(rental=rental, tenant=tenant, rating=5, title="")
         assert review.title == "5 - Excellent experience"
 
     def test_stay_duration_is_reported_in_months(self, rental, tenant):
-        review = ReviewFactory(
+        review = DraftReviewFactory(
             rental=rental,
             tenant=tenant,
             move_in_date=dt.date(2025, 1, 1),

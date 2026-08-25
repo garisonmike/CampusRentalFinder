@@ -20,6 +20,7 @@ from tests.factories import (
     CampusFactory,
     CaretakerAssignmentFactory,
     DraftPropertyFactory,
+    DraftReviewFactory,
     LandlordFactory,
     LandlordProfileFactory,
     PlatformAdminFactory,
@@ -31,6 +32,7 @@ from tests.factories import (
     StaffFactory,
     StudentProfileFactory,
     TenancyClaimFactory,
+    TenancyFactory,
     TenantFactory,
     UnitFactory,
     UnitPhotoFactory,
@@ -226,6 +228,22 @@ def tenancy_claim_factory(db):
 
 
 @pytest.fixture
+def tenancy_factory(db):
+    return TenancyFactory
+
+
+@pytest.fixture
+def review_factory(db):
+    """The rebuilt Review (ADR-004). The draft's is `draft_review_factory`."""
+    return ReviewFactory
+
+
+@pytest.fixture
+def draft_review_factory(db):
+    return DraftReviewFactory
+
+
+@pytest.fixture
 def unit_photo_factory(db):
     return UnitPhotoFactory
 
@@ -259,5 +277,5 @@ def rental(db, landlord) -> RentalFactory:
 
 
 @pytest.fixture
-def review(db, rental, tenant) -> ReviewFactory:
-    return ReviewFactory(rental=rental, tenant=tenant)
+def review(db, rental, tenant) -> DraftReviewFactory:
+    return DraftReviewFactory(rental=rental, tenant=tenant)

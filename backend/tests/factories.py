@@ -33,10 +33,16 @@ from properties.constants import (
     PropertyType,
 )
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
+from ratings.models import Review
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
-from reviews.models import Review
-from tenancies.constants import ApplicationStatus, ClaimStatus
-from tenancies.models import Application, TenancyClaim
+from reviews.models import Review as DraftReview
+from tenancies.constants import (
+    ApplicationStatus,
+    ClaimStatus,
+    ConfirmationSource,
+    TenancyStatus,
+)
+from tenancies.models import Application, Tenancy, TenancyClaim
 from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import Campus, University
 
@@ -306,6 +312,33 @@ class ApplicationFactory(TenantScopedFactory):
     message = "Is the bedsitter still vacant?"
 
 
+class TenancyFactory(TenantScopedFactory):
+    """A confirmed stay, long enough to be reviewable."""
+
+    class Meta:
+        model = Tenancy
+
+    unit = factory.SubFactory(UnitFactory)
+    tenant = factory.SubFactory(UserFactory)
+    application = factory.SubFactory(ApplicationFactory)
+    confirmation_source = ConfirmationSource.APPLICATION
+    confirmed_by = factory.SubFactory(UserFactory)
+    confirmed_at = factory.LazyFunction(timezone.now)
+    start_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=200))
+    end_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=20))
+    monthly_rent_kes = Decimal("9500.00")
+    status = TenancyStatus.ACTIVE
+
+
+class ReviewFactory(TenantScopedFactory):
+    class Meta:
+        model = Review
+
+    tenancy = factory.SubFactory(TenancyFactory)
+    rating = 4
+    comment = "Water was reliable, the gate was not."
+
+
 class TenancyClaimFactory(TenantScopedFactory):
     """A claim for a stay the platform did not witness (ADR-004)."""
 
@@ -394,9 +427,11 @@ class RentalInquiryFactory(DjangoModelFactory):
     status = "new"
 
 
-class ReviewFactory(DjangoModelFactory):
+class DraftReviewFactory(DjangoModelFactory):
+    """The pre-rewrite Review. Removed in Phase 7 with the rest of `reviews`."""
+
     class Meta:
-        model = Review
+        model = DraftReview
 
     rental = factory.SubFactory(RentalFactory)
     tenant = factory.SubFactory(TenantFactory)

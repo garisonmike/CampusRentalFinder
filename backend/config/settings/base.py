@@ -60,6 +60,7 @@ LOCAL_APPS = [
     "accounts",
     "properties",
     "tenancies",
+    "ratings",
     "rentals",
     "reviews",
 ]
@@ -350,6 +351,24 @@ MAX_DISPUTES_PER_LANDLORD_PER_MONTH = config(
 
 # Per-claimant cap on claims raised in a rolling 30 days.
 MAX_CLAIMS_PER_USER_PER_MONTH = config("MAX_CLAIMS_PER_USER_PER_MONTH", default=10, cast=int)
+
+# The dispute annotation on a review is DERIVED, not stored (ADR-004 3a), so
+# these are policy knobs rather than a migration over live reviews.
+#
+# OFF by default. Suppressing the annotation for a landlord whose disputes are
+# rarely upheld is defensible, but it is also a judgement the platform makes
+# about a named person, and it should be switched on deliberately.
+REVIEW_ANNOTATION_RESPECTS_DISPUTE_RECORD = config(
+    "REVIEW_ANNOTATION_RESPECTS_DISPUTE_RECORD", default=False, cast=bool
+)
+
+# A rate over a small sample says nothing, so both guards must pass.
+REVIEW_ANNOTATION_MINIMUM_DISPUTE_SAMPLE = config(
+    "REVIEW_ANNOTATION_MINIMUM_DISPUTE_SAMPLE", default=10, cast=int
+)
+REVIEW_ANNOTATION_MINIMUM_UPHELD_RATE = config(
+    "REVIEW_ANNOTATION_MINIMUM_UPHELD_RATE", default=0.2, cast=float
+)
 
 # --------------------------------------------------------------------------
 # Routing (ADR-002)
