@@ -88,6 +88,13 @@ class UniversityFactory(DjangoModelFactory):
     secondary_hsl = "30 50% 40%"
     accent_hsl = "142 71% 95%"
     is_active = True
+    #: Both offered by default, so a test about something else does not have
+    #: to know that verification methods are per-university configuration.
+    #: `UniversityFactory(verification_methods_enabled=[])` is the way to
+    #: assert a school that offers neither.
+    verification_methods_enabled = factory.LazyFunction(
+        lambda: [VerificationMethod.EMAIL_DOMAIN, VerificationMethod.STUDENT_ID_UPLOAD]
+    )
 
 
 class CampusFactory(TenantScopedFactory):

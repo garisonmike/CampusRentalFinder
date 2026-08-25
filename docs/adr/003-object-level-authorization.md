@@ -6,6 +6,7 @@
 **Amended:** 2026-08-25 — signup gating replaced by a policy enum with a lockout guard
 **Amended:** 2026-08-25 — enforcement point resolved: register-then-verify with a grace period
 **Amended:** 2026-08-26 — gating reads the policy frozen at registration, intersected with the live one
+**Amended:** 2026-08-26 — `verification_methods_enabled` is enforced at both entry points
 **Deciders:** Tech lead
 
 ## Context
@@ -454,3 +455,27 @@ reading of two policies is the right one.
 A school that genuinely wants to gate its existing students backfills
 `signup_policy_at_registration`. That is a decision with an author, which is
 precisely the difference from a dropdown quietly locking people out.
+
+
+## Amendment: the enabled-methods list is now enforced
+
+`University.verification_methods_enabled` existed from phase 2, appeared in the
+admin, and **was read by nothing**. Both verification paths were built in phase
+6 without consulting it, so:
+
+- a school that had turned email-domain verification *off* could still have
+  students verify that way; and
+- a school with no document reviewers could still receive identity documents
+  into a queue nobody would ever work — which, because the retention clock
+  starts at **upload**, meant collecting national IDs purely in order to delete
+  them thirty days later.
+
+The second is the serious one. It is a Data Protection Act problem produced
+entirely by a configuration field being decorative.
+
+**Resolved:** `assert_verification_method_is_enabled()` gates both
+`issue_email_token()` and `submit_verification_document()`. The model default
+stays `[]` — a school offers nothing until it opts in — and `UniversityFactory`
+enables both so the several hundred tests about something else do not each have
+to know that verification is per-university configuration. A separate test
+asserts the *model's* default rather than the factory's.

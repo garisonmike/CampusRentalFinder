@@ -39,7 +39,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from config.tenancy import TenantScopedModel
-from universities.constants import VerificationStatus
+from universities.constants import VerificationMethod, VerificationStatus
+from universities.services import assert_verification_method_is_enabled
 
 from .models import StudentProfile, User
 
@@ -439,6 +440,7 @@ def submit_verification_document(profile: StudentProfile, data: bytes) -> Verifi
             }
         )
 
+    assert_verification_method_is_enabled(profile.university, VerificationMethod.STUDENT_ID_UPLOAD)
     attempt = _assert_within_resubmission_limit(profile)
     clean = strip_image_metadata(data, content_type)
     key = random_document_key(EXTENSIONS[content_type])

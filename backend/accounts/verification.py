@@ -34,6 +34,7 @@ from django.utils.translation import gettext_lazy as _
 
 from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import University
+from universities.services import assert_verification_method_is_enabled
 
 from .models import StudentProfile
 
@@ -189,6 +190,7 @@ def issue_email_token(
     now = now or timezone.now()
     email = email.strip()
 
+    assert_verification_method_is_enabled(profile.university, VerificationMethod.EMAIL_DOMAIN)
     assert_email_domain_is_accepted(profile.university, email)
     _assert_within_rate_limit(profile, email, now=now)
 

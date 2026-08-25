@@ -19,8 +19,11 @@ from universities.constants import SignupPolicy, VerificationMethod
 from universities.models import Campus, University
 from universities.services import (
     UnsafeSignupPolicyError,
+    VerificationMethodNotOfferedError,
     assert_signup_policy_is_safe,
+    assert_verification_method_is_enabled,
     signup_verification_is_enforced,
+    verification_method_is_enabled,
 )
 
 pytestmark = pytest.mark.django_db
@@ -36,8 +39,17 @@ class TestUniversity:
         """Nothing is gated until a school opts in."""
         assert university.signup_policy == SignupPolicy.OPEN
         assert university.verification_required_to_review is False
-        assert university.verification_methods_enabled == []
         assert university.id_review_retention_days == 7
+
+    def test_no_verification_method_is_offered_by_default(self):
+        """Read from the MODEL, not the factory.
+
+        `UniversityFactory` enables both methods so that the several hundred
+        tests about something else do not each have to know that verification
+        is per-university configuration. The field's own default is what has
+        to be safe, and that is what this asserts.
+        """
+        assert University._meta.get_field("verification_methods_enabled").default() == []
 
     def test_subdomain_is_unique(self, university, university_factory):
         with pytest.raises(IntegrityError), transaction.atomic():
@@ -275,3 +287,73 @@ def test_the_old_signup_boolean_is_gone():
     assert "verification_required_to_signup" not in field_names
     assert "signup_policy" in field_names
     assert "verification_enforced_from" in field_names
+
+
+class TestVerificationMethodsAreOffered:
+    """`verification_methods_enabled` was configuration nothing read.
+
+    It existed from phase 2, appeared in the admin, and was consulted by
+    neither verification path until both were built in phase 6. A school that
+    had turned email-domain verification off could still have students verify
+    that way, and one with no document reviewers could still receive identity
+    documents into a queue nobody would work -- which, since the retention
+    clock starts at upload, meant collecting national IDs purely to delete
+    them 30 days later.
+    """
+
+    def test_an_enabled_method_is_offered(self, university):
+        assert verification_method_is_enabled(university, VerificationMethod.EMAIL_DOMAIN)
+
+    def test_a_disabled_method_is_not(self, university_factory):
+        university = university_factory(
+            verification_methods_enabled=[VerificationMethod.EMAIL_DOMAIN]
+        )
+
+        assert not verification_method_is_enabled(university, VerificationMethod.STUDENT_ID_UPLOAD)
+
+    def test_a_school_offering_nothing_offers_nothing(self, university_factory):
+        university = university_factory(verification_methods_enabled=[])
+
+        for method in VerificationMethod.values:
+            assert not verification_method_is_enabled(university, method)
+
+    def test_the_gate_refuses_with_an_explanation(self, university_factory):
+        university = university_factory(verification_methods_enabled=[])
+
+        with pytest.raises(VerificationMethodNotOfferedError) as caught:
+            assert_verification_method_is_enabled(university, VerificationMethod.EMAIL_DOMAIN)
+
+        assert "does not offer" in str(caught.value)
+
+    def test_email_verification_honours_it(self, university_factory, student_profile_factory):
+        from accounts.verification import issue_email_token
+
+        university = university_factory(
+            verification_methods_enabled=[VerificationMethod.STUDENT_ID_UPLOAD],
+            student_email_domains=["s.example.ac.ke"],
+        )
+        profile = student_profile_factory(university=university)
+
+        with pytest.raises(VerificationMethodNotOfferedError):
+            issue_email_token(profile, "brenda@s.example.ac.ke")
+
+    def test_document_upload_honours_it(self, university_factory, student_profile_factory):
+        """A school with no reviewers must not be able to receive identity
+        documents at all."""
+        import io
+
+        from PIL import Image
+
+        from accounts.documents import VerificationDocument, submit_verification_document
+
+        university = university_factory(
+            verification_methods_enabled=[VerificationMethod.EMAIL_DOMAIN]
+        )
+        profile = student_profile_factory(university=university)
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(buffer, format="JPEG")
+
+        with pytest.raises(VerificationMethodNotOfferedError):
+            submit_verification_document(profile, buffer.getvalue())
+
+        assert VerificationDocument.objects.count() == 0

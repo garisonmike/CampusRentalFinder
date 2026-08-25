@@ -98,3 +98,32 @@ def signup_verification_is_enforced(university: University, *, on: dt.date | Non
 
     today = on or timezone.localdate()
     return today >= university.verification_enforced_from
+
+
+class VerificationMethodNotOfferedError(ValidationError):
+    """This university has not enabled that verification method."""
+
+
+def verification_method_is_enabled(university, method: str) -> bool:
+    """Whether this university offers this way of proving enrolment (ADR-003).
+
+    ``verification_methods_enabled`` existed as configuration from phase 2 and
+    was read by nothing until both paths were built. A school that had turned
+    email-domain verification off could still have students verify that way,
+    and one with no document reviewers could still receive identity documents
+    into a queue nobody would ever work -- which, given the retention clock
+    starts at upload, meant collecting national IDs purely to delete them 30
+    days later.
+    """
+    return method in (university.verification_methods_enabled or [])
+
+
+def assert_verification_method_is_enabled(university, method: str) -> None:
+    """Gate, in one place, so both paths and the admin go through it."""
+    if not verification_method_is_enabled(university, method):
+        raise VerificationMethodNotOfferedError(
+            {
+                "method": _("%(university)s does not offer this way of verifying.")
+                % {"university": university.display_name or university.name}
+            }
+        )
