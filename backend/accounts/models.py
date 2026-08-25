@@ -109,6 +109,12 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text=_("The only meaning of 'platform administrator'. Not settable via the API."),
     )
 
+    #: Set when the account is anonymised under a DPA erasure request
+    #: (ADR-008). The row survives -- every foreign key depends on it, and a
+    #: tombstone needs something to be a tombstone ON -- but no field on it
+    #: names a person any more.
+    erased_at = models.DateTimeField(_("erased at"), null=True, blank=True)
+
     date_joined = models.DateTimeField(_("date joined"), default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 

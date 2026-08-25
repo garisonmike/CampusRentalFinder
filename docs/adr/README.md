@@ -16,6 +16,7 @@ history.
 | [005](005-per-university-theming.md) | Per-university theming through database-stored design tokens | Accepted, amended 2026-08-24 |
 | [006](006-geo-search.md) | Geo search stays simple initially | Accepted, amended 2026-08-24 |
 | [007](007-media-object-storage.md) | Media on S3-compatible object storage | Accepted, amended 2026-08-24 |
+| [008](008-subject-access-and-erasure.md) | Subject access and erasure under the DPA | Accepted 2026-08-26 |
 
 ## Format
 
