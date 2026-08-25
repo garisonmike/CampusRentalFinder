@@ -701,6 +701,54 @@ every other invariant here is a database constraint.
 **Constraints:** `UNIQUE (review)` — enforced by the schema, not by the
 `if review.landlord_response:` check the draft used.
 
+### Rating aggregates (ADR-004)
+
+Three caches over `Review`, in `ratings/aggregates.py`. Chosen over a
+denormalised `Review.property_id` because both are denormalisation and the
+difference is how they fail: a duplicated FK that drifts is silent corruption
+with no way to tell which value is right; a stale cached number is found by the
+reconciler and rebuilt from source.
+
+| Model | Row per | De-duplicates | Tenant-scoped |
+|---|---|---|---|
+| `PropertyRatingAggregate` | property | **per `(property, tenant)`** | yes |
+| `UnitRatingAggregate` | unit | no — one stay, one review already | yes |
+| `LandlordRatingAggregate` | landlord profile | per tenant, across all their properties | **no** |
+
+`LandlordRatingAggregate` is deliberately unscoped: a landlord's record spans
+universities, and a per-tenant figure would give two authoritative-looking
+answers to the same question. Registered in `NOT_TENANT_SCOPED` with that
+reason.
+
+**Shared fields:** `average_rating` (null = no verified reviews yet),
+`student_count`, `review_count`, `rating_distribution` (1–5, every bucket
+present), `last_review_at`, `computed_at`. `LandlordRatingAggregate` adds
+`property_count`, because "4.2 across one property" and "4.2 across nine" are
+different claims.
+
+**`student_count` and `review_count` are separate columns and are expected to
+differ.** That divergence *is* the de-duplication. A student who moves from a
+bedsitter to a one-bedroom in the same block writes two genuine reviews and
+contributes one voice; the property shows "from N students", never "N reviews".
+The per-tenant contribution is the **mean of that tenant's own reviews**, so
+editing one of two moves their single voice halfway and changes neither count.
+
+**Constraints:**
+
+- `average_rating` is null or within 1–5
+- `student_count <= review_count` — de-duplication can only collapse rows,
+  never invent contributors
+- `review_count > 0 OR average_rating IS NULL` — an average over zero rows is
+  the fabricated signal this design exists to prevent, and a later UI pass
+  cannot quietly invent a default because the database will not store one
+
+**Rules:** recomputed by a job on review create, edit and moderation change,
+never inline in a request; fully rebuildable from `Review` by
+`manage.py recompute_ratings`, which calls *the same functions the job calls*;
+and reconciled nightly against source, **alerting on drift rather than
+correcting it**. A hidden review is excluded from every aggregate and restoring
+it recomputes the number — the difference between moderation and deletion.
+
 ---
 
 ## Engagement

@@ -50,6 +50,16 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="ratings.jobs.reconcile_rating_aggregates",
+        cron="0 3 * * *",
+        queue="default",
+        on_failure=(
+            "Ratings drift from their source and nobody finds out. Every page "
+            "still renders a number; the number is simply wrong, which on a "
+            "platform selling trustworthy ratings is the worst failure there is."
+        ),
+    ),
+    ScheduledJob(
         func="properties.jobs.route_stale_distances",
         cron="*/15 * * * *",
         queue="default",

@@ -27,6 +27,19 @@ from .constants import DisputeAnnotation
 from .models import Review, ReviewResponse
 
 
+def _queue_aggregate_refresh(review: Review) -> None:
+    """Recompute this review's three aggregates, after the transaction commits.
+
+    ``on_commit``, because a job that reads the row before the write lands
+    computes an average over data that does not exist yet. Never inline: a page
+    load that recomputes an aggregate is a page load whose cost grows with the
+    property's popularity.
+    """
+    from .jobs import enqueue_aggregate_refresh
+
+    transaction.on_commit(lambda: enqueue_aggregate_refresh(review.pk))
+
+
 class TenancyNotReviewableError(ValidationError):
     """This stay does not yet support a review."""
 
@@ -81,7 +94,9 @@ def create_review(tenancy: Tenancy, **fields) -> Review:
     a `Review` correctly that skips it.
     """
     assert_tenancy_is_reviewable(tenancy)
-    return Review.all_objects.create(tenancy=tenancy, **fields)
+    review = Review.all_objects.create(tenancy=tenancy, **fields)
+    _queue_aggregate_refresh(review)
+    return review
 
 
 @transaction.atomic
@@ -108,6 +123,7 @@ def update_review(review: Review, *, now: dt.datetime | None = None, **fields) -
     for field, value in fields.items():
         setattr(review, field, value)
     review.save()
+    _queue_aggregate_refresh(review)
     return review
 
 

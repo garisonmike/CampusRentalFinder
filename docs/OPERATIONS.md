@@ -141,7 +141,20 @@ platform selling trustworthy ratings is the worst available failure.
 
 **Time to visible:** never, without the alert. A specific "this rating is wrong"
 complaint is answered by recomputing that property directly, not by waiting for
-the sweep to sample it.
+the sweep to sample it:
+
+```
+manage.py recompute_ratings --property <id>
+```
+
+The command and the job call the same functions in `ratings/recompute.py`. Do
+not add a second averaging implementation anywhere: the rebuild and the
+incremental update would drift, and only one of them would be right with no way
+to tell which from the outside.
+
+Drift is logged at ERROR as `rating_aggregate_drift`, one line per disagreeing
+field, carrying both the stored and the computed value. Alert on any
+occurrence.
 
 ### 4. Image variant generation
 

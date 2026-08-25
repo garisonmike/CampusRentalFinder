@@ -138,6 +138,13 @@ def landlord_profile_factory(db):
 
 
 @pytest.fixture
+def landlord_profile(db, landlord):
+    """The profile, which is what Property.landlord actually points at."""
+    profile = getattr(landlord, "landlord_profile", None)
+    return profile if profile is not None else LandlordProfileFactory(user=landlord)
+
+
+@pytest.fixture
 def university_staff(db, university) -> User:
     """A member of university staff, scoped to one institution."""
     return cast(User, UniversityStaffProfileFactory(university=university).user)

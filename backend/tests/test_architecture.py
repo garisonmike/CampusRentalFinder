@@ -352,6 +352,14 @@ NOT_TENANT_SCOPED: dict[str, str] = {
     # A landlord near two campuses serves both universities, which is the whole
     # reason ADR-002 exists. Scoping the profile would contradict it.
     "accounts.LandlordProfile": "A landlord may own property serving several universities.",
+    # A landlord's record spans universities, for the same reason their
+    # profile does. Scoping it would report a different number to each
+    # university, which is worse than reporting one number because both would
+    # look authoritative (ADR-004).
+    "ratings.LandlordRatingAggregate": (
+        "A landlord's reputation spans universities; a per-tenant figure would "
+        "give two authoritative-looking answers to the same question."
+    ),
     # Pre-rewrite draft models. These predate the tenant boundary entirely and
     # are removed by the schema rewrite; see docs/AUDIT.md.
     "rentals.Rental": "Pre-rewrite draft model, removed by the schema rewrite.",

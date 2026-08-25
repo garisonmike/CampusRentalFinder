@@ -182,3 +182,24 @@ class ReviewResponse(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"response to {self.review_id}"
+
+
+# The aggregate caches live in their own module for readability, but Django
+# discovers models through `models`. Re-exported rather than moved: the
+# distinction between the source of truth and the caches over it is worth
+# keeping visible in the file layout.
+from .aggregates import (  # noqa: E402
+    BaseRatingAggregate,
+    LandlordRatingAggregate,
+    PropertyRatingAggregate,
+    UnitRatingAggregate,
+)
+
+__all__ = [
+    "BaseRatingAggregate",
+    "LandlordRatingAggregate",
+    "PropertyRatingAggregate",
+    "Review",
+    "ReviewResponse",
+    "UnitRatingAggregate",
+]
