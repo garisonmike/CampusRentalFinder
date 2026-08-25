@@ -315,3 +315,17 @@ RQ_QUEUES = {
     "media": {"URL": REDIS_URL, "DEFAULT_TIMEOUT": 900},
 }
 RQ_SHOW_ADMIN_LINK = True
+
+# --------------------------------------------------------------------------
+# Routing (ADR-002)
+# --------------------------------------------------------------------------
+
+# Walking distance and time come from here, never from the straight line.
+# The null provider is the default: an unconfigured deployment leaves the
+# walking fields null, which renders as an em dash, rather than inventing a
+# number.
+ROUTE_PROVIDER = config(
+    "ROUTE_PROVIDER",
+    default="properties.routing.openrouteservice.NullRouteProvider",
+)
+OPENROUTESERVICE_API_KEY = config("OPENROUTESERVICE_API_KEY", default="")

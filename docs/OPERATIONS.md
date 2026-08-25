@@ -101,6 +101,26 @@ after the exposure, not before.
 **Time to visible:** never, without the alert. **This is the one to wire up
 first.**
 
+### 3a. Campus routing
+
+| | |
+|---|---|
+| **Schedule** | On `PropertyCampusDistance` create; a sweep takes the oldest |
+| **Does** | Fills `walking_distance_km`, `walking_minutes`, `routed_at` from the routing provider |
+| **Guarantees** | That walking times exist at all — never that they are invented |
+
+**Symptom if it stops:** every property shows a straight-line distance and an
+em dash where the walking time should be. Listings still work; the number
+students actually care about is simply missing, and it looks identical to a
+provider that has no route for that pair.
+
+The sweep orders by `routed_at` **nulls first**. PostgreSQL sorts NULLs last in
+an ascending order, so the obvious ordering would re-route rows that already
+have an answer and leave the never-routed ones for ever — a backlog that grows
+while the job reports success.
+
+**Time to visible:** never, without the alert.
+
 ### 4. Image variant generation
 
 | | |

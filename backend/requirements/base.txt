@@ -39,6 +39,9 @@ rq-scheduler==0.14.0
 # Cloudflare R2 in production, MinIO locally. Two buckets, two backends.
 django-storages[s3]==1.14.6
 
+# --- HTTP client (routing providers, ADR-002) ------------------------------
+requests==2.32.5
+
 # --- Observability ---------------------------------------------------------
 structlog==25.5.0
 
