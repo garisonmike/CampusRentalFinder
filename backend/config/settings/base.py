@@ -59,6 +59,7 @@ LOCAL_APPS = [
     "universities",
     "accounts",
     "properties",
+    "tenancies",
     "rentals",
     "reviews",
 ]

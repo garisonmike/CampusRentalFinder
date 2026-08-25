@@ -16,6 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import User
 from tests.factories import (
+    ApplicationFactory,
     CampusFactory,
     CaretakerAssignmentFactory,
     DraftPropertyFactory,
@@ -211,6 +212,11 @@ def campus_distance_factory(db):
 @pytest.fixture
 def caretaker_assignment_factory(db):
     return CaretakerAssignmentFactory
+
+
+@pytest.fixture
+def application_factory(db):
+    return ApplicationFactory
 
 
 @pytest.fixture

@@ -35,6 +35,8 @@ from properties.constants import (
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
+from tenancies.constants import ApplicationStatus
+from tenancies.models import Application
 from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import Campus, University
 
@@ -288,6 +290,20 @@ class ReadyUnitPhotoFactory(UnitPhotoFactory):
     thumb_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "thumb"))
     medium_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "medium"))
     large_key = factory.LazyAttribute(lambda o: o.original_key.replace("original", "large"))
+
+
+class ApplicationFactory(TenantScopedFactory):
+    """A student applying for a unit."""
+
+    class Meta:
+        model = Application
+
+    unit = factory.SubFactory(UnitFactory)
+    applicant = factory.SubFactory(UserFactory)
+    status = ApplicationStatus.SUBMITTED
+    move_in_date = factory.LazyFunction(lambda: dt.date.today() + dt.timedelta(days=14))
+    intended_months = 8
+    message = "Is the bedsitter still vacant?"
 
 
 class CaretakerAssignmentFactory(TenantScopedFactory):
