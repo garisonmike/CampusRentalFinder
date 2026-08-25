@@ -103,6 +103,7 @@ addopts = [
 markers = [
     "smoke: minimal checks that the project boots and its plumbing works",
     "architecture: structural rules that must not erode (host classes, tenant scoping)",
+    "minio: needs a real S3-compatible store; skipped when MinIO is unreachable",
 ]
 filterwarnings = [
     "error::DeprecationWarning:accounts.*",

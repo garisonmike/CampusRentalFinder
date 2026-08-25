@@ -90,17 +90,63 @@ incentive to suppress.
 
 | | |
 |---|---|
-| **Schedule** | Hourly |
-| **Does** | Deletes documents from the private bucket `id_review_retention_days` after `decided_at`; sets `document_deleted_at` |
+| **Schedule** | Daily, 02:00 |
+| **Does** | Deletes verification document images past **either** of two independent deadlines, verifies each deletion, and auto-rejects requests that expired unreviewed |
 | **Guarantees** | The Data Protection Act commitment above |
 
-**Symptom if it stops:** national IDs and student cards accumulate in object
+**Two deadlines, and they are independent.**
+
+| Setting | Default | Runs from | Catches |
+|---|---|---|---|
+| `VERIFICATION_DECISION_RETENTION_DAYS` | 7 | the decision | documents whose review is done |
+| `VERIFICATION_ABSOLUTE_RETENTION_DAYS` | 30 | the upload | **documents nobody ever reviewed** |
+
+The second is not a backstop for the first, it is the main one. An earlier
+version of this spec had only the post-decision deadline, which meant a
+document nobody reviewed lived for ever — and an unworked queue is the
+likeliest real-world case, not an edge one. On absolute expiry the image is
+deleted *and the request is auto-rejected with a reason naming expiry*, so the
+student knows to resubmit rather than waiting on a queue that will never reach
+them. No reviewer is recorded: nobody decided it, a clock did.
+
+**Three distinct failures, three distinct symptoms.**
+
+**(a) The job stops running.** National ID documents accumulate in object
 storage indefinitely. Nothing in the product changes. Nothing errors. The first
 signal is a subject access request, a breach, or an audit — all of which arrive
-after the exposure, not before.
+after the exposure, not before. *Time to visible: never, without the alert.*
+**This is the one to wire up first.**
 
-**Time to visible:** never, without the alert. **This is the one to wire up
-first.**
+**(b) The job runs but deletion silently fails.** S3-compatible stores answer a
+delete of an unremovable key with a 204 in several situations: a bucket policy
+denying `DeleteObject`, an eventually-consistent replica, a versioned bucket
+where deletion writes a marker and leaves the version readable. A job that
+trusts the return value writes `deleted_at` over a file that is still there —
+**a compliance record asserting something false, which is worse than no
+record.** So every delete is followed by a re-read and `deleted_at` is written
+only when the object is confirmed gone. A delete that cannot be confirmed
+increments `delete_attempts`, records `last_delete_error`, logs
+`retention_delete_unconfirmed` at ERROR, and is retried. *Alert on any row in
+`unconfirmed_deletions()` — retrying does not fix a permissions problem.*
+
+**(c) The queue is never worked.** Requests sit `pending` and students wait on
+a review that never comes. The absolute deadline bounds this: at 30 days the
+document goes and the student is told to resubmit. *Symptom before the fix was
+added: indefinite silence, indistinguishable from the platform ignoring them.*
+
+**Alert on the age of the oldest undeleted document past its deadline**, never
+on volume and never on job success. A count tells you the queue is big, which
+it may legitimately be. Age tells you whether something has been abandoned, and
+**one document abandoned for six months is a worse breach than a thousand
+deleted on time**. `oldest_overdue_document_age()` is the query.
+
+**Testing note.** The verified-delete property cannot be tested against
+`InMemoryStorage`: it is a dict whose `delete()` always works and whose
+`exists()` always tells the truth, so those tests pass whether or not the
+verification does anything at all. `tests/test_retention_minio.py` runs against
+a real S3 API and CI provides MinIO as a service container. A test in that file
+fails the build if MinIO is unreachable while `CI` is set, because a silently
+skipped compliance test is indistinguishable from a passing one.
 
 ### 3a. Campus routing
 

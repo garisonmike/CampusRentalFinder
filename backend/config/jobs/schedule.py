@@ -50,6 +50,17 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="accounts.retention.sweep_expired_documents",
+        cron="0 2 * * *",
+        queue="default",
+        on_failure=(
+            "National ID documents accumulate in object storage indefinitely. "
+            "Nothing in the product changes and nothing errors. The first "
+            "signal is a subject access request, a breach, or an audit -- all "
+            "of which arrive after the exposure. THE ONE TO WIRE UP FIRST."
+        ),
+    ),
+    ScheduledJob(
         func="ratings.jobs.reconcile_rating_aggregates",
         cron="0 3 * * *",
         queue="default",

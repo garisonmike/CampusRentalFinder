@@ -43,6 +43,23 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
+      # The verified-delete tests need real S3 semantics. InMemoryStorage is a
+      # dict whose delete() always works, so they would pass against it whether
+      # or not the verification does anything -- which is the one property the
+      # retention job exists to have (docs/OPERATIONS.md).
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "mc ready local"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     env:
       DJANGO_SETTINGS_MODULE: config.settings.test
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/campus_rental_test
@@ -82,6 +99,18 @@ jobs:
       # message naming the class.
       - name: No model field shadows the property builtin
         run: python tools/check_field_shadowing.py
+
+      # Without this the MinIO-backed retention tests SKIP, and a silent skip
+      # of a compliance test is indistinguishable from a pass.
+      - name: Create the MinIO buckets
+        run: |
+          curl -sSLo /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x /tmp/mc
+          /tmp/mc alias set ci http://localhost:9000 minioadmin minioadmin
+          /tmp/mc mb --ignore-existing ci/campusrental-media
+          /tmp/mc mb --ignore-existing ci/campusrental-documents
+          /tmp/mc anonymous set download ci/campusrental-media
+          /tmp/mc anonymous set none ci/campusrental-documents
 
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
