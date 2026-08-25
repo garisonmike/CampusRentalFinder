@@ -4,7 +4,7 @@
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — caretaker capabilities and student verification resolved
 **Amended:** 2026-08-25 — signup gating replaced by a policy enum with a lockout guard
-**Amended:** 2026-08-26 — enforcement point resolved: register-then-verify with a grace period
+**Amended:** 2026-08-25 — enforcement point resolved: register-then-verify with a grace period
 **Deciders:** Tech lead
 
 ## Context

@@ -4,8 +4,8 @@
 **Date:** 2026-08-23
 **Amended:** 2026-08-24 — claim-with-timeout adopted; minimum-stay enforcement settled
 **Amended:** 2026-08-25 — dispute queue bounded: application path, typed disputes, symmetric timeout
-**Amended:** 2026-08-26 — escalation reasons separated; correction-defeats-review closed; annotation derived
-**Amended:** 2026-08-27 — annotation batched per page; transitions table-driven; rating aggregates; cold start
+**Amended:** 2026-08-25 — escalation reasons separated; correction-defeats-review closed; annotation derived
+**Amended:** 2026-08-25 — annotation batched per page; transitions table-driven; rating aggregates; cold start
 **Deciders:** Tech lead
 
 ## Context

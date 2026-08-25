@@ -362,12 +362,23 @@ storage backend class. Never merge them.
 | 2 — identity | **Done.** `User` on `AbstractBaseUser`, the three profile models, relationship-based permissions, capabilities on `/auth/me/`, signup gating with a grace period |
 | 3 — properties | **Done.** `Property`, `Unit`, `PropertyCampusDistance`, `CaretakerAssignment`, `UnitPhoto`, the FilterSet |
 | 4 — storage and queue | **Done.** django-rq, MinIO, the two buckets, image variants, campus routing |
-| 5 — the trust property | Next. `Application`, `TenancyClaim`, `Tenancy`, `Review`, `ReviewResponse` |
-| 6 — verification | The two student paths and document retention |
+| 5 — the trust property | **Done.** `Application`, `TenancyClaim`, `Tenancy`, the dispute state machine, the two deadline jobs, `Review`, `ReviewResponse`, the three rating aggregates |
+| 6 — verification | Next. The two student paths and document retention |
 | 7 — cleanup | Remove the draft apps, rebuild the frontend pages |
 
 `CaretakerAssignment` landed with `Property`, because the foreign key to it is
 what defines the model.
+
+The rebuilt `Review` lives in a new **`ratings`** app, not in `reviews`, which
+still holds the draft until Phase 7. The draft's factory and contract tests are
+renamed `DraftReview*` so both suites run side by side until then. `ratings`
+also holds the three aggregate tables, so the name stays apt after the draft
+goes; renaming it to `reviews` later would be a migration for a cosmetic gain.
+
+Nothing in `config`, `universities`, `accounts`, `properties`, `tenancies` or
+`ratings` imports from `rentals` or `reviews`. The only coupling left is two
+`include()` lines in `config/urls.py`, so Phase 7 is a clean excision whenever
+it runs.
 
 ### Running the tests locally
 
