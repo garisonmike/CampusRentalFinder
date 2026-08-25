@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -60,9 +62,93 @@ class ClaimStatus(models.TextChoices):
 #: per unit.
 OPEN_CLAIM_STATUSES = (ClaimStatus.PENDING, ClaimStatus.DISPUTED, ClaimStatus.ESCALATED)
 
+#: Statuses in which a dispute is live, and therefore must carry a typed reason
+#: and an author.
+DISPUTED_CLAIM_STATUSES = (ClaimStatus.DISPUTED, ClaimStatus.ESCALATED)
+
 #: Statuses that end a claim, and therefore require a resolution timestamp.
 TERMINAL_CLAIM_STATUSES = (
     ClaimStatus.CONFIRMED,
     ClaimStatus.WITHDRAWN,
     ClaimStatus.EXPIRED,
 )
+
+
+class DisputeReason(models.TextChoices):
+    """Why a claim was disputed, as raised (ADR-004 §2).
+
+    Free text in ``dispute_note`` is additional context, never a substitute: an
+    untyped dispute cannot be routed, so it can only go to a human, and the
+    whole point of typing them is that most never reach one.
+
+    Never rewritten. This records what the disputer actually claimed; where the
+    dispute ends up is ``EscalationReason``.
+    """
+
+    DATES_INCORRECT = "dates_incorrect", _("The stay happened; the dates are wrong")
+    NEVER_TENANTED = "never_tenanted", _("This person never lived here")
+    DUPLICATE = "duplicate", _("Already covered by an existing tenancy")
+
+
+class EscalationReason(models.TextChoices):
+    """What an administrator has to decide (ADR-004 §2a).
+
+    Deliberately separate from :class:`DisputeReason`. An identity question and
+    a date question need completely different evidence, so collapsing them
+    makes the queue harder to work — which is the opposite of what typing
+    disputes is for. The admin queue sorts and filters on this.
+    """
+
+    COUNTER_UNRESOLVED = "counter_unresolved", _("Which set of dates is right")
+    CORRECTION_DEFEATS_REVIEW = (
+        "correction_defeats_review",
+        _("Whether a review-defeating correction is honest"),
+    )
+    IDENTITY_DISPUTED = "identity_disputed", _("Whether this person lived here at all")
+    DUPLICATE_UNMATCHED = "duplicate_unmatched", _("Whether an existing tenancy covers this")
+
+
+@dataclass(frozen=True)
+class DisputeTransition:
+    """The permitted onward paths for one dispute reason."""
+
+    #: Every escalation reason this dispute may arrive at. A dispute reason
+    #: with an empty tuple could be raised and never routed.
+    escalates_to: tuple[str, ...]
+
+    #: Whether the parties can settle it without an administrator.
+    can_resolve_between_parties: bool
+
+    #: Whether the platform can decide it from data alone.
+    auto_resolves: bool = False
+
+
+#: The single source of truth for dispute routing (ADR-004 §2c).
+#:
+#: ``dispute_reason`` and ``escalation_reason`` are two enums with a mapping
+#: between them. Left implicit, that mapping lives in whichever function happens
+#: to branch on it, and a new dispute reason with no escalation path becomes a
+#: dispute that can be **raised and never routed** — sitting in ``disputed`` for
+#: ever, which is exactly the indefinite block the timeout exists to remove.
+#:
+#: The state machine reads this table. Nothing else encodes a transition, the
+#: database constraint is generated from it, and raising a dispute with a reason
+#: absent from it fails at construction, so the unroutable state cannot be built.
+DISPUTE_TRANSITIONS: dict[str, DisputeTransition] = {
+    DisputeReason.DATES_INCORRECT: DisputeTransition(
+        escalates_to=(
+            EscalationReason.COUNTER_UNRESOLVED,
+            EscalationReason.CORRECTION_DEFEATS_REVIEW,
+        ),
+        can_resolve_between_parties=True,
+    ),
+    DisputeReason.NEVER_TENANTED: DisputeTransition(
+        escalates_to=(EscalationReason.IDENTITY_DISPUTED,),
+        can_resolve_between_parties=False,
+    ),
+    DisputeReason.DUPLICATE: DisputeTransition(
+        escalates_to=(EscalationReason.DUPLICATE_UNMATCHED,),
+        can_resolve_between_parties=False,
+        auto_resolves=True,
+    ),
+}

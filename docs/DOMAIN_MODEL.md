@@ -533,30 +533,42 @@ auto-confirms.
 | `escalated_at` | `DateTimeField` | null — entered the admin queue |
 | `escalation_reason` | `CharField(28)` | `counter_unresolved \| correction_defeats_review \| identity_disputed \| duplicate_unmatched` |
 | `escalation_deadline` | `DateTimeField` | null — `escalated_at + DISPUTE_RESOLUTION_WINDOW_DAYS` |
-| `resolved_by` | FK → `User` | `SET_NULL`, null — null when resolved by timeout |
+| `is_retrospective` | `BooleanField` | pre-platform history. **Analytics and the operations queue only** — never display, never weighting |
+| `resolved_by` | FK → `User` | `SET_NULL`, null — null when resolved by timeout or by the `duplicate` auto-resolution: neither has an author |
 | `resolved_at` | `DateTimeField` | null |
 
 **Constraints / indexes**
 
-- `UniqueConstraint(fields=["unit", "claimant"], condition=Q(status__in=["pending", "disputed", "escalated"]), name="one_open_claim_per_unit")`
-- `CheckConstraint` — `end_date` is null or `>= start_date`
+- `UniqueConstraint(fields=["unit", "claimant"], condition=Q(status__in=["pending", "disputed", "escalated"]), name="claim_one_open_per_unit_and_claimant")`
+- `CheckConstraint` — `end_date` is null or `>= start_date`, and the same for
+  the proposed and countered pairs
 - `CheckConstraint` — a `disputed` or `escalated` status requires a non-blank
-  `dispute_reason`; an untyped dispute cannot be routed
+  `dispute_reason`, a `disputed_by` and a `disputed_at`; an untyped or
+  unattributed dispute cannot be routed
 - `CheckConstraint` — `dispute_reason='dates_incorrect'` requires
   `proposed_start_date`
 - `CheckConstraint` — `counter_start_date` requires `proposed_start_date`; you
   cannot counter a correction that was not proposed
 - `CheckConstraint` — a terminal status requires `resolved_at`
+- `CheckConstraint` — an `escalated` status requires both an
+  `escalation_reason` and an `escalated_at`
 - `CheckConstraint` — `escalation_deadline` is non-null exactly when
-  `escalated_at` is
+  `escalated_at` is. A queue entry with no deadline is the indefinite block
+  again
+- `CheckConstraint` `claim_escalation_matches_its_dispute` — **generated from
+  `DISPUTE_TRANSITIONS`**, so the table is the only place a routing decision is
+  written down (ADR-004 §2c). A `never_tenanted` dispute physically cannot be
+  stored carrying `counter_unresolved`
 - `Index(fields=["status", "confirmation_deadline"])` — the auto-confirm job,
   and the overdue-claim alert
 - `Index(fields=["status", "escalation_deadline"])` — the dispute
   auto-resolution job, and the SLA alert. **Both alerts read the oldest row,
   not the count** (`docs/OPERATIONS.md`)
+- `Index(fields=["escalation_reason", "escalated_at"])` — the admin queue,
+  filtered by what has to be decided and worked oldest-first
 - `Index(fields=["claimant", "-created_at"])` — the per-user rate limit
-- `Index(fields=["disputed_by", "-disputed_at"])` — the per-landlord dispute
-  rate limit and the `dispute_rate` metric
+- `Index(fields=["is_retrospective"])`
+- `Index(fields=["disputed_by", "-disputed_at"])` — the `dispute_rate` metric
 
 **Dispute routing (ADR-004).** Only three cases reach an admin:
 

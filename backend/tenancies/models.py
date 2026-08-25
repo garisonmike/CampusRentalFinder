@@ -29,6 +29,8 @@ from config.tenancy import TenantScopedModel
 from properties.models import Unit
 
 from .constants import (
+    DISPUTE_TRANSITIONS,
+    DISPUTED_CLAIM_STATUSES,
     OPEN_APPLICATION_STATUSES,
     OPEN_CLAIM_STATUSES,
     TERMINAL_CLAIM_STATUSES,
@@ -36,6 +38,8 @@ from .constants import (
     ApplicationStatus,
     ClaimStatus,
     ConfirmationSource,
+    DisputeReason,
+    EscalationReason,
     TenancyStatus,
 )
 
@@ -272,6 +276,21 @@ class Tenancy(TenantScopedModel):
         return self.confirmation_source == ConfirmationSource.APPLICATION
 
 
+def _permitted_escalations_condition() -> Q:
+    """Build the escalation check constraint from ``DISPUTE_TRANSITIONS``.
+
+    Generated rather than written out, so the transition table stays the only
+    place a routing decision is recorded (ADR-004 section 2c). Adding a dispute
+    reason to the table and forgetting the constraint is not a mistake anyone
+    can make here, because there is nothing to forget.
+    """
+    condition = Q(escalation_reason="")
+    for reason, transition in DISPUTE_TRANSITIONS.items():
+        if transition.escalates_to:
+            condition |= Q(dispute_reason=reason, escalation_reason__in=transition.escalates_to)
+    return condition
+
+
 class TenancyClaim(TenantScopedModel):
     """A tenant asserting a stay the platform did not witness (ADR-004).
 
@@ -313,6 +332,79 @@ class TenancyClaim(TenantScopedModel):
         ),
     )
 
+    # -- The dispute, as raised (ADR-004 section 2) ------------------------
+    #
+    # dispute_reason is never rewritten. It records what the disputer actually
+    # claimed; where the dispute ended up is escalation_reason.
+    dispute_reason = models.CharField(
+        _("dispute reason"),
+        max_length=24,
+        choices=DisputeReason.choices,
+        blank=True,
+        help_text=_("Enumerated, because an untyped dispute can only be routed to a human."),
+    )
+    dispute_note = models.TextField(
+        _("dispute note"),
+        blank=True,
+        help_text=_("Additional context. Never a substitute for the enumerated reason."),
+    )
+    disputed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="raised_disputes",
+        null=True,
+        blank=True,
+    )
+    disputed_at = models.DateTimeField(_("disputed at"), null=True, blank=True)
+
+    # -- dates_incorrect: the correction exchange --------------------------
+    proposed_start_date = models.DateField(_("proposed start date"), null=True, blank=True)
+    proposed_end_date = models.DateField(_("proposed end date"), null=True, blank=True)
+
+    #: The tenant may counter exactly once. A counter the disputer does not
+    #: accept escalates as counter_unresolved.
+    counter_start_date = models.DateField(_("counter start date"), null=True, blank=True)
+    counter_end_date = models.DateField(_("counter end date"), null=True, blank=True)
+
+    #: Evidence, NOT a resolution (ADR-004 section 2b). When a correction would
+    #: drop the stay under the review minimum, the tenant's acceptance is
+    #: recorded and shown to the admin -- but it does not settle the dispute,
+    #: because the accepting party may not realise what they accepted.
+    tenant_accepted_correction_at = models.DateTimeField(
+        _("tenant accepted the correction at"), null=True, blank=True
+    )
+
+    # -- The escalation ----------------------------------------------------
+    escalation_reason = models.CharField(
+        _("escalation reason"),
+        max_length=26,
+        choices=EscalationReason.choices,
+        blank=True,
+        help_text=_("What the administrator has to decide. The queue sorts on this."),
+    )
+    escalated_at = models.DateTimeField(_("escalated at"), null=True, blank=True)
+    #: The disputer took it back. Load-bearing for ADR-004 section 3a: the
+    #: review annotation is derived at read time, so withdrawing a dispute
+    #: clears it -- which is the whole reason it is not a stored boolean.
+    dispute_withdrawn_at = models.DateTimeField(_("dispute withdrawn at"), null=True, blank=True)
+    escalation_deadline = models.DateTimeField(
+        _("escalation deadline"),
+        null=True,
+        blank=True,
+        help_text=_(
+            "The deadline binds the PLATFORM, not the tenant. Past it the claim "
+            "confirms in the tenant's favour (ADR-004)."
+        ),
+    )
+
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="resolved_claims",
+        null=True,
+        blank=True,
+        help_text=_("Null when the claim resolved by timeout: silence has no author."),
+    )
     resolved_at = models.DateTimeField(_("resolved at"), null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -331,6 +423,12 @@ class TenancyClaim(TenantScopedModel):
             # The per-claimant rate limit.
             models.Index(fields=["claimant", "-created_at"], name="claim_claimant_idx"),
             models.Index(fields=["is_retrospective"], name="claim_retrospective_idx"),
+            # The admin queue: filtered by what has to be decided, worked
+            # oldest-first, and swept by the symmetric-timeout job.
+            models.Index(fields=["escalation_reason", "escalated_at"], name="claim_queue_idx"),
+            models.Index(fields=["status", "escalation_deadline"], name="claim_escalation_sla_idx"),
+            # The dispute_rate metric (docs/OPERATIONS.md).
+            models.Index(fields=["disputed_by", "-disputed_at"], name="claim_disputer_idx"),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -347,6 +445,60 @@ class TenancyClaim(TenantScopedModel):
                 name="claim_terminal_status_has_a_resolution_time",
             ),
             models.CheckConstraint(condition=Q(monthly_rent_kes__gt=0), name="claim_rent_positive"),
+            # A dispute carries an enumerated reason and an author. Without
+            # both it cannot be routed, so it could only ever go to a human.
+            models.CheckConstraint(
+                condition=~Q(status__in=DISPUTED_CLAIM_STATUSES)
+                | (
+                    ~Q(dispute_reason="")
+                    & Q(disputed_by__isnull=False)
+                    & Q(disputed_at__isnull=False)
+                ),
+                name="claim_dispute_is_typed_and_attributed",
+            ),
+            # A dates_incorrect dispute must carry the corrected dates. A
+            # correction nobody stated is not something the tenant can accept.
+            models.CheckConstraint(
+                condition=~Q(dispute_reason=DisputeReason.DATES_INCORRECT)
+                | Q(proposed_start_date__isnull=False),
+                name="claim_correction_states_its_dates",
+            ),
+            models.CheckConstraint(
+                condition=Q(proposed_end_date__isnull=True)
+                | Q(proposed_end_date__gte=F("proposed_start_date")),
+                name="claim_proposed_end_after_start",
+            ),
+            models.CheckConstraint(
+                condition=Q(counter_end_date__isnull=True)
+                | Q(counter_end_date__gte=F("counter_start_date")),
+                name="claim_counter_end_after_start",
+            ),
+            # You cannot counter a correction that was not proposed.
+            models.CheckConstraint(
+                condition=Q(counter_start_date__isnull=True) | Q(proposed_start_date__isnull=False),
+                name="claim_counter_answers_a_correction",
+            ),
+            # The deadline exists exactly when the escalation does. A queue
+            # entry with no deadline is the indefinite block again.
+            models.CheckConstraint(
+                condition=Q(escalated_at__isnull=True, escalation_deadline__isnull=True)
+                | Q(escalated_at__isnull=False, escalation_deadline__isnull=False),
+                name="claim_escalation_has_a_deadline",
+            ),
+            # An escalated claim names what the admin has to decide.
+            models.CheckConstraint(
+                condition=~Q(status=ClaimStatus.ESCALATED)
+                | (~Q(escalation_reason="") & Q(escalated_at__isnull=False)),
+                name="claim_escalation_names_its_question",
+            ),
+            # Generated from DISPUTE_TRANSITIONS, so the table is the only
+            # place a transition is written down (ADR-004 section 2c). A new
+            # dispute reason with no escalation path cannot reach the queue,
+            # and a mismatched pair cannot be stored at all.
+            models.CheckConstraint(
+                condition=_permitted_escalations_condition(),
+                name="claim_escalation_matches_its_dispute",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -358,8 +510,15 @@ class TenancyClaim(TenantScopedModel):
     def was_disputed_at_any_point(self) -> bool:
         """Whether a dispute was ever raised, whatever its outcome.
 
-        Copied onto the resulting Tenancy as a fact. The dispute fields arrive
-        with the state machine in the next commit; until then no claim has been
-        disputed.
+        Copied onto the resulting Tenancy as a fact, and read by the review
+        annotation. Reads ``disputed_at`` rather than the current status,
+        because a claim that was disputed and then confirmed is no longer in a
+        disputed status but was still disputed.
         """
-        return self.status in (ClaimStatus.DISPUTED, ClaimStatus.ESCALATED)
+        return self.disputed_at is not None
+
+    def stay_days(self) -> int | None:
+        """Length of the claimed stay, or None while it is ongoing."""
+        if self.end_date is None:
+            return None
+        return (self.end_date - self.start_date).days
