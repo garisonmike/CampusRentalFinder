@@ -375,10 +375,31 @@ renamed `DraftReview*` so both suites run side by side until then. `ratings`
 also holds the three aggregate tables, so the name stays apt after the draft
 goes; renaming it to `reviews` later would be a migration for a cosmetic gain.
 
-Nothing in `config`, `universities`, `accounts`, `properties`, `tenancies` or
-`ratings` imports from `rentals` or `reviews`. The only coupling left is two
-`include()` lines in `config/urls.py`, so Phase 7 is a clean excision whenever
-it runs.
+### Phase 7: the draft-app excision, and the `ratings` rename
+
+No first-party module imports from `rentals` or `reviews` — that part holds.
+An earlier note here said the only coupling left was two `include()` lines in
+`config/urls.py`, which was wrong. The full inventory, counted rather than
+assumed:
+
+| Location | What |
+|---|---|
+| `config/urls.py` | 2 `include()` lines |
+| `config/settings/base.py` | 2 `LOCAL_APPS` entries |
+| `config/hosts.py` | **43** route classifications for the two draft URL trees |
+| `tests/test_architecture.py` | 7 `NOT_TENANT_SCOPED` entries, 1 `ours` set |
+| `tests/test_smoke.py` | 5 assertions naming draft apps and tables |
+| `tests/factories.py`, `tests/conftest.py` | `Rental*` and `DraftReview*` factories and fixtures |
+| `tests/test_api_contract.py` | the draft's entire contract suite |
+
+Still a clean excision — nothing has to be rewritten, only deleted — but it is
+a ~60-line deletion across seven files, not a two-line one.
+
+**Phase 7 also renames `ratings` to `reviews`, in the same commit that deletes
+the draft.** There is no production data, so the rename costs a regenerated
+migration and an import sweep, and it never gets cheaper than that. `Review`
+living permanently in an app called `ratings` is a papercut every future reader
+pays. The three aggregate tables move with it.
 
 ### Running the tests locally
 
