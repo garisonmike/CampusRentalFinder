@@ -575,7 +575,7 @@ auto-confirms.
 | Reason | Path |
 |---|---|
 | `dates_incorrect` | Disputer proposes dates → tenant accepts (confirms, **no admin**) or counters once → an unaccepted counter escalates as `counter_unresolved`. **A correction that would drop the stay under the review minimum cannot auto-resolve at all**, even with the tenant's acceptance: it escalates as `correction_defeats_review` (ADR-004) |
-| `duplicate` | Auto-resolves if a confirmed overlapping tenancy exists for the same unit and user; otherwise escalates |
+| `duplicate` | Auto-resolves if a confirmed overlapping tenancy exists for the same unit and user, whatever its status; otherwise escalates |
 | `never_tenanted` | Escalates |
 
 **Symmetric timeout.** An escalated claim past `escalation_deadline`
@@ -614,10 +614,16 @@ The evidence that a stay happened. Nothing else can vouch for a review.
 - `CheckConstraint(condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")), name="tenancy_end_after_start")`
 - `UniqueConstraint(fields=["unit", "tenant", "start_date"], name="tenancy_unique_per_unit_tenant_start")`
 - **`ExclusionConstraint`** over `(unit =, tenant =, daterange(start_date,
-  coalesce(end_date, 'infinity'), '[]') &&)` where `status='active'`, named
-  `tenancy_no_overlapping_active_stay`. Requires `btree_gist`. A serializer
-  cannot see a concurrent insert; this can. It is also the exact predicate the
-  `duplicate` dispute auto-resolution queries.
+  coalesce(end_date, 'infinity'), '[]') &&)`, named
+  `tenancy_no_overlapping_stay`. Requires `btree_gist`. A serializer cannot see
+  a concurrent insert; this can. It is also the exact predicate the `duplicate`
+  dispute auto-resolution queries, and the two must not diverge.
+
+  **No status condition, deliberately.** It carried `WHERE status='active'`
+  until 2026-08-25, which switched the protection off exactly when a stay
+  ended — and ended stays are what retrospective seeding creates. See ADR-004
+  for the full reasoning; the short version is that every row here is already a
+  confirmed stay, so there is no provisional state a condition protects.
 
   Scoped per unit **and per tenant**. `Unit` is a pool model, so one row can be
   forty identical bedsitters; a per-unit-only exclusion would cap the whole

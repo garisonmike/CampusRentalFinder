@@ -238,9 +238,7 @@ class TestDuplicate:
         assert claim.status == ClaimStatus.ESCALATED
         assert claim.escalation_reason == EscalationReason.DUPLICATE_UNMATCHED
 
-    def test_an_ended_tenancy_does_not_make_a_claim_a_duplicate(
-        self, unit_factory, tenant, landlord
-    ):
+    def test_an_ended_tenancy_still_makes_a_claim_a_duplicate(self, unit_factory, tenant, landlord):
         unit = unit_factory()
         start = dt.date.today() - dt.timedelta(days=300)
         first = create_claim(
@@ -263,7 +261,14 @@ class TestDuplicate:
         raise_dispute(second, reason=DisputeReason.DUPLICATE, disputed_by=landlord)
         second.refresh_from_db()
 
-        assert second.status == ClaimStatus.ESCALATED
+        # This test used to assert ESCALATED, back when both the exclusion
+        # constraint and this predicate filtered on status='active'. The pair
+        # were consistent and both wrong: an administrator would have been
+        # handed a plainly duplicate stay under the label "no confirmed
+        # overlapping tenancy exists", which is the one thing the typed-dispute
+        # routing is supposed to prevent.
+        assert second.status == ClaimStatus.WITHDRAWN
+        assert second.escalation_reason == ""
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@
 **Amended:** 2026-08-25 — dispute queue bounded: application path, typed disputes, symmetric timeout
 **Amended:** 2026-08-25 — escalation reasons separated; correction-defeats-review closed; annotation derived
 **Amended:** 2026-08-25 — annotation batched per page; transitions table-driven; rating aggregates; cold start
+**Amended:** 2026-08-25 — overlap exclusion widened to every status; the active-only condition was a seeding hole
 **Deciders:** Tech lead
 
 ## Context
@@ -122,7 +123,7 @@ class Meta:
             name="tenancy_unique_per_unit_tenant_start",
         ),
         ExclusionConstraint(
-            name="tenancy_no_overlapping_active_stay",
+            name="tenancy_no_overlapping_stay",
             expressions=[
                 ("unit", RangeOperators.EQUAL),
                 ("tenant", RangeOperators.EQUAL),
@@ -131,13 +132,33 @@ class Meta:
                     RangeOperators.OVERLAPS,
                 ),
             ],
-            condition=Q(status="active"),
+            # No condition. See above.
         ),
     ]
 ```
 
 The exclusion constraint needs the `btree_gist` extension, added by a migration
 with `django.contrib.postgres.operations.BtreeGistExtension`.
+
+**The exclusion is unconditional.** It applied only to `status='active'` in an
+earlier version, and that was a hole. The reasoning behind the condition —
+"history should not block a correction or a re-entry" — sounds right and is the
+trap, so it is recorded here to stop a future reader rediscovering it:
+
+> Every `Tenancy` row is already a **confirmed** stay. A rejected or withdrawn
+> claim produces no row at all, so there is no provisional state the condition
+> was protecting. What it actually did was switch the protection off the moment
+> a stay ended — and **ended stays are exactly what retrospective seeding
+> creates**. One student could claim Jan–Jun and Feb–Aug at the same unit, each
+> auto-confirming on landlord silence, and because `Review` is `OneToOne` to
+> `Tenancy` that is two reviews of one stay. The unit rating, `review_count`
+> and the visible review list all inflate. Only the property aggregate
+> survives, because it dedupes per `(property, tenant)`.
+
+Non-overlapping repeat stays stay legal: a student returning to the same block
+in a later year has a genuinely separate experience and a genuine second
+review. If a void or cancelled status is ever added to `TenancyStatus`,
+excluding it here is a deliberate argued edit, not a tidy-up.
 
 **The exclusion is scoped per unit *and per tenant*, not per unit alone.**
 Earlier drafts of this ADR said "per unit", which was written before `Unit`
@@ -263,7 +284,11 @@ that the disputer does not accept escalates with
 `escalation_reason = 'counter_unresolved'`.
 
 **`duplicate`** — auto-resolves if a confirmed tenancy already exists that
-overlaps the claimed range for the same unit and the same user. That is a
+overlaps the claimed range for the same unit and the same user, **whatever its
+status**. This predicate and the exclusion constraint must stay identical: when
+both filtered on `status='active'`, a duplicate claim against an ended stay was
+reported to an administrator as "no confirmed overlapping tenancy exists" —
+handing them a plainly duplicate stay under a label saying it was not one. That is a
 database query, not a judgement call, and it is the same predicate the
 `ExclusionConstraint` already enforces. If no such tenancy exists, the claim is
 not in fact a duplicate and the dispute escalates.

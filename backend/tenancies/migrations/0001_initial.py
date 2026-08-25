@@ -234,7 +234,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='tenancy',
-            constraint=django.contrib.postgres.constraints.ExclusionConstraint(condition=models.Q(('status', 'active')), expressions=[('unit', '='), ('tenant', '='), (tenancies.models.TenancyDateRange('start_date', 'end_date'), '&&')], name='tenancy_no_overlapping_active_stay'),
+            constraint=django.contrib.postgres.constraints.ExclusionConstraint(expressions=[('unit', '='), ('tenant', '='), (tenancies.models.TenancyDateRange('start_date', 'end_date'), '&&')], name='tenancy_no_overlapping_stay'),
         ),
         migrations.AddConstraint(
             model_name='tenancy',

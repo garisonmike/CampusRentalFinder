@@ -304,8 +304,14 @@ def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
     """The predicate behind a ``duplicate`` dispute.
 
     Deliberately the same predicate the exclusion constraint enforces: a
-    confirmed active stay for this unit and this claimant whose range overlaps
-    the claimed one. A database query, not a judgement call.
+    confirmed stay for this unit and this claimant whose range overlaps the
+    claimed one. A database query, not a judgement call.
+
+    Status-independent, exactly like the constraint. When this filtered on
+    ``status='active'`` and the constraint did too, a duplicate claim against
+    an ended stay was reported as "not in fact a duplicate" and escalated to an
+    administrator -- who would have found a plainly duplicate stay the system
+    had just told them was not one.
     """
     overlapping = Q(start_date__lte=claim.end_date or dt.date.max) & (
         Q(end_date__isnull=True) | Q(end_date__gte=claim.start_date)
@@ -315,7 +321,6 @@ def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
             overlapping,
             unit=claim.unit,
             tenant=claim.claimant,
-            status=TenancyStatus.ACTIVE,
         )
         .exclude(claim=claim)
         .first()

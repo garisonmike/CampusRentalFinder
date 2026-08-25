@@ -232,15 +232,141 @@ class TestOverlapExclusion:
         with pytest.raises(IntegrityError), transaction.atomic():
             confirm_claim(later, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
 
-    def test_an_ended_tenancy_does_not_block(self, unit_factory, tenant, landlord):
-        """The exclusion is conditioned on status='active'.
+    def test_an_ended_tenancy_still_blocks(self, unit_factory, tenant, landlord):
+        """The exclusion is UNCONDITIONAL, and this test used to assert the
+        opposite.
 
-        An ended stay is history, and history should not block a correction or
-        a re-entry.
+        The old version read "an ended stay is history, and history should not
+        block a correction or a re-entry", which sounds reasonable and is the
+        vulnerability. Ended stays are exactly what retrospective seeding
+        creates, so a status='active' condition switched the protection off for
+        precisely the rows that needed it.
         """
         unit = unit_factory()
         first = self.confirmed(unit, tenant, landlord, start_offset=400, days=200)
         Tenancy.all_objects.filter(pk=first.pk).update(status=TenancyStatus.ENDED)
+
+        overlapping = a_stay(unit, tenant, start_offset=300, days=200)
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            confirm_claim(overlapping, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+    def test_the_seeding_attack_is_refused_by_the_database(self, unit_factory, tenant, landlord):
+        """Jan-Jun and Feb-Aug, same tenant, same unit, both retrospective.
+
+        The launch-seeding path is the one place a student supplies both ends
+        of a historical stay, so it is the one place overlapping claims are
+        cheap to manufacture. Each would auto-confirm on landlord silence, and
+        Review is OneToOne to Tenancy -- so two overlapping tenancies are two
+        reviews of a single stay, inflating the unit rating, the review count
+        and the visible review list. Only the property aggregate would survive,
+        because it dedupes per (property, tenant).
+
+        Refused in the schema, not by a serializer: the seeding path may be run
+        by a management command or a data import that never touches one.
+        """
+        unit = unit_factory()
+        january = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2024, 1, 1),
+            end_date=dt.date(2024, 6, 30),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+        confirm_claim(january, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+        february = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2024, 2, 1),
+            end_date=dt.date(2024, 8, 31),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            confirm_claim(february, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+        assert Tenancy.all_objects.filter(unit=unit, tenant=tenant).count() == 1
+
+    def test_the_seeding_attack_is_refused_after_the_stay_is_marked_ended(
+        self, unit_factory, tenant, landlord
+    ):
+        """The same attack with the first stay ENDED.
+
+        This is the form that actually worked before the fix. Nothing in
+        production code sets ENDED yet, which is the only reason the plain
+        version above was already refused -- confirm_claim marks every stay
+        ACTIVE regardless of its end date. The first lifecycle job to mark past
+        stays ended would have armed it.
+        """
+        unit = unit_factory()
+        january = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2024, 1, 1),
+            end_date=dt.date(2024, 6, 30),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+        first = confirm_claim(january, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+        Tenancy.all_objects.filter(pk=first.pk).update(status=TenancyStatus.ENDED)
+
+        february = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2024, 2, 1),
+            end_date=dt.date(2024, 8, 31),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            confirm_claim(february, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+    def test_a_non_overlapping_return_in_a_later_year_is_still_legal(
+        self, unit_factory, tenant, landlord
+    ):
+        """A student returning to the same block a year later is a real case
+        and produces a legitimate second review. The fix must not cost this."""
+        unit = unit_factory()
+        first = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2023, 1, 1),
+            end_date=dt.date(2023, 6, 30),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+        confirm_claim(first, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+        later = create_claim(
+            unit=unit,
+            claimant=tenant,
+            start_date=dt.date(2024, 9, 1),
+            end_date=dt.date(2025, 6, 30),
+            monthly_rent_kes=Decimal("9500.00"),
+            is_retrospective=True,
+        )
+        second = confirm_claim(later, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
+
+        assert second.pk is not None
+        assert Tenancy.all_objects.filter(unit=unit, tenant=tenant).count() == 2
+
+    def test_a_rejected_claim_blocks_nothing(self, unit_factory, tenant, landlord):
+        """A withdrawn or rejected claim produces no Tenancy at all, so there
+        is no row for the constraint to consider. Asserted rather than assumed,
+        because "every row is a confirmed stay" is the premise that makes the
+        unconditional exclusion safe.
+        """
+        unit = unit_factory()
+        rejected = a_stay(unit, tenant, start_offset=400, days=200)
+        rejected.status = ClaimStatus.WITHDRAWN
+        rejected.resolved_at = timezone.now()
+        rejected.save(update_fields=["status", "resolved_at", "updated_at"])
+
+        assert Tenancy.all_objects.filter(unit=unit, tenant=tenant).count() == 0
 
         overlapping = a_stay(unit, tenant, start_offset=300, days=200)
         confirmed = confirm_claim(

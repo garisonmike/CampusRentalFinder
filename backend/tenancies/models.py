@@ -245,14 +245,39 @@ class Tenancy(TenantScopedModel):
             # exclusion would let exactly one student occupy the whole block.
             # Vacancy is counted by vacant_count, not by the absence of a
             # tenancy row.
+            #
+            # UNCONDITIONAL, and it must stay that way. An earlier version
+            # carried condition=Q(status="active"), on the reasoning that
+            # history should not block a correction or a re-entry. That
+            # reasoning is wrong, and the way it is wrong is worth spelling
+            # out, because it is the reasoning a future reader will rediscover:
+            #
+            #   Every row here is already a CONFIRMED stay. A rejected or
+            #   withdrawn claim produces no Tenancy at all, so there is no
+            #   "provisional" row that a narrow condition protects against.
+            #   What the condition actually did was make the constraint stop
+            #   applying the moment a stay ended -- and ended stays are exactly
+            #   what the retrospective seeding path creates. One student could
+            #   then claim Jan-Jun and Feb-Aug at the same unit, each claim
+            #   auto-confirming on landlord silence, and because Review is
+            #   OneToOne to Tenancy that is two reviews of one stay. Unit
+            #   rating, review_count and the visible review list all inflate;
+            #   only the property aggregate survives, because it dedupes per
+            #   (property, tenant).
+            #
+            # Non-overlapping repeat stays remain legal: a student returning to
+            # the same block in a later year has a genuinely separate
+            # experience, and a non-overlapping daterange does not trip this.
+            #
+            # If a void/cancelled status is ever added to TenancyStatus,
+            # excluding it here is a deliberate argued edit, not a tidy-up.
             ExclusionConstraint(
-                name="tenancy_no_overlapping_active_stay",
+                name="tenancy_no_overlapping_stay",
                 expressions=[
                     ("unit", RangeOperators.EQUAL),
                     ("tenant", RangeOperators.EQUAL),
                     (TenancyDateRange("start_date", "end_date"), RangeOperators.OVERLAPS),
                 ],
-                condition=Q(status=TenancyStatus.ACTIVE),
             ),
             models.CheckConstraint(
                 condition=(
