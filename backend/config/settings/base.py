@@ -371,6 +371,32 @@ EMAIL_VERIFICATION_MAX_PER_ADDRESS = config(
     "EMAIL_VERIFICATION_MAX_PER_ADDRESS", default=3, cast=int
 )
 
+# Manual ID verification (ADR-003). Every default here takes the option that
+# holds less data for less time -- this is Data Protection Act 2019 territory,
+# not a preference.
+VERIFICATION_MAX_DOCUMENT_BYTES = config(
+    "VERIFICATION_MAX_DOCUMENT_BYTES", default=5 * 1024 * 1024, cast=int
+)
+
+# Rejection is not terminal -- a blurry photo is the common case -- but an
+# uncapped retry loop is an uncapped upload channel for identity documents.
+VERIFICATION_MAX_SUBMISSIONS = config("VERIFICATION_MAX_SUBMISSIONS", default=3, cast=int)
+
+# Minutes, not hours. A signed document URL is a bearer capability: whoever
+# holds it can read a national ID. It is generated per reviewer request and
+# never stored.
+VERIFICATION_URL_EXPIRY_SECONDS = config("VERIFICATION_URL_EXPIRY_SECONDS", default=300, cast=int)
+
+# Two INDEPENDENT retention deadlines (ADR-003, docs/OPERATIONS.md). The first
+# alone would let an unreviewed document live for ever, and an unworked queue
+# is the likeliest real-world case.
+VERIFICATION_DECISION_RETENTION_DAYS = config(
+    "VERIFICATION_DECISION_RETENTION_DAYS", default=7, cast=int
+)
+VERIFICATION_ABSOLUTE_RETENTION_DAYS = config(
+    "VERIFICATION_ABSOLUTE_RETENTION_DAYS", default=30, cast=int
+)
+
 # The dispute annotation on a review is DERIVED, not stored (ADR-004 3a), so
 # these are policy knobs rather than a migration over live reviews.
 #

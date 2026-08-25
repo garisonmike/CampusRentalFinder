@@ -448,4 +448,9 @@ class CaretakerAssignment(TenantScopedModel):
 # Django discovers models through `models`. EmailVerificationToken lives beside
 # the logic that issues and consumes it, because reading either without the
 # other is how single-use tokens quietly stop being single-use.
+from .documents import (  # noqa: E402,F401
+    DocumentAccessLog,
+    VerificationDocument,
+    VerificationRequest,
+)
 from .verification import EmailVerificationToken  # noqa: E402,F401

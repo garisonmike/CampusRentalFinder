@@ -353,6 +353,23 @@ NOT_TENANT_SCOPED: dict[str, str] = {
     # A landlord near two campuses serves both universities, which is the whole
     # reason ADR-002 exists. Scoping the profile would contradict it.
     "accounts.LandlordProfile": "A landlord may own property serving several universities.",
+    # Reached only through VerificationRequest, which IS scoped. Scoping the
+    # document too would mean the retention job -- which must see every
+    # university's overdue documents to delete them -- had to opt out of the
+    # protection, and a job that opts out is a job that can be made to opt out
+    # of the wrong thing.
+    "accounts.VerificationDocument": (
+        "Reached through the scoped VerificationRequest; the retention job "
+        "must sweep every tenant's overdue documents."
+    ),
+    # The audit trail over the above. It must be readable when answering "who
+    # looked at this student's ID", which is a question asked by a regulator
+    # rather than by a university, and often after the tenant relationship has
+    # ended entirely.
+    "accounts.DocumentAccessLog": (
+        "A regulator-facing audit trail, not tenant data. Append-only, and it "
+        "outlives both the document and the tenancy."
+    ),
     # Reached only by its own secret hash, never listed, and the profile it
     # points at carries the tenant -- so a scoped manager would be ceremony
     # around a table nobody queries by university. The per-address rate limit

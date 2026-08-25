@@ -18,6 +18,7 @@ at startup that they really are separate.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.core.checks import Error, register
 from django.core.files.storage import InMemoryStorage, storages
 
@@ -45,9 +46,10 @@ class PrivateDocumentStorage(S3Storage if S3Storage else InMemoryStorage):  # ty
     """
 
     querystring_auth = True
-    #: Five minutes. Long enough to open, short enough that a leaked URL in a
-    #: log or a referrer header is worth little.
-    querystring_expire = 300
+    #: Minutes, not hours. Long enough to open, short enough that a leaked URL
+    #: in a log or a referrer header is worth little. Read from settings so the
+    #: expiry is one knob rather than two that can disagree.
+    querystring_expire = settings.VERIFICATION_URL_EXPIRY_SECONDS
     file_overwrite = False
     default_acl = None
 
