@@ -30,6 +30,7 @@ from properties.constants import (
 )
 from properties.distances import bounding_box, haversine_km, straight_line_km
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
+from properties.services import PropertyNotPublishableError, publish
 
 pytestmark = pytest.mark.django_db
 
@@ -585,3 +586,67 @@ class TestDistanceNeedsCoordinates:
         unpinned = property_factory(latitude=None, longitude=None)
 
         assert unpinned not in Property.objects.for_tenant(university)
+
+
+class TestPublicationGate:
+    """A published property that no tenant can reach is a silent failure.
+
+    It looks like low demand rather than a bug, which is why the gate names the
+    cause instead of letting the database report a null column later.
+    """
+
+    def test_an_unpinned_property_cannot_be_published(
+        self, draft_property_factory, university, campus_factory
+    ):
+        unpinned = draft_property_factory(latitude=None, longitude=None)
+
+        with pytest.raises(PropertyNotPublishableError) as caught:
+            publish(unpinned)
+
+        assert "latitude" in caught.value.message_dict
+        assert "campus" in str(caught.value).lower()
+
+    def test_a_property_with_no_campus_cannot_be_published(self, draft_property_factory):
+        orphan = draft_property_factory()
+
+        with pytest.raises(PropertyNotPublishableError) as caught:
+            publish(orphan)
+
+        assert "campus_distances" in caught.value.message_dict
+
+    def test_a_pinned_and_joined_property_publishes(
+        self, draft_property_factory, university, campus_factory, campus_distance_factory
+    ):
+        prop = draft_property_factory()
+        campus_distance_factory(
+            property=prop, university=university, campus=campus_factory(university=university)
+        )
+
+        publish(prop)
+        prop.refresh_from_db()
+
+        assert prop.status == PropertyStatus.PUBLISHED
+        assert prop.published_at is not None
+
+    def test_publishing_makes_it_visible_to_the_tenant(
+        self, draft_property_factory, university, campus_factory, campus_distance_factory
+    ):
+        """The whole point of the gate: published means reachable."""
+        prop = draft_property_factory()
+        campus_distance_factory(
+            property=prop, university=university, campus=campus_factory(university=university)
+        )
+        publish(prop)
+
+        assert prop in Property.objects.for_tenant(university)
+
+    def test_publishing_twice_keeps_the_original_timestamp(
+        self, draft_property_factory, university, campus_factory, campus_distance_factory
+    ):
+        prop = draft_property_factory()
+        campus_distance_factory(
+            property=prop, university=university, campus=campus_factory(university=university)
+        )
+        first = publish(prop).published_at
+
+        assert publish(prop).published_at == first

@@ -361,8 +361,19 @@ NOT_TENANT_SCOPED: dict[str, str] = {
     "reviews.ReviewReport": "Pre-rewrite draft model.",
 }
 
+
 #: App labels whose models are ours to classify.
-LOCAL_APP_LABELS = frozenset({"accounts", "rentals", "reviews", "universities"})
+#:
+#: Derived from settings rather than hard-coded: the hand-written list silently
+#: stopped covering `properties` when that app was added, so the scoping walk
+#: reported success on models it had never looked at.
+def _local_app_labels() -> frozenset[str]:
+    from django.conf import settings
+
+    return frozenset(app.rsplit(".", 1)[-1] for app in settings.LOCAL_APPS)
+
+
+LOCAL_APP_LABELS = _local_app_labels()
 
 
 def local_models():
@@ -439,7 +450,116 @@ def test_no_viewset_exposes_a_tenant_model_through_the_default_manager() -> None
 
 
 # ---------------------------------------------------------------------------
-# 5. The header fallback cannot exist in production
+# 5. A `property` field and the @property decorator cannot coexist
+# ---------------------------------------------------------------------------
+
+
+def model_class_nodes() -> list[tuple[Path, ast.ClassDef]]:
+    """Every class defined in a models.py under an app we own."""
+    found: list[tuple[Path, ast.ClassDef]] = []
+
+    for path in python_sources():
+        if path.name != "models.py":
+            continue
+        if path.parent.name not in LOCAL_APP_LABELS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                found.append((path, node))
+
+    return found
+
+
+def _declares_property_field(node: ast.ClassDef) -> bool:
+    """Whether the class body assigns a model field named ``property``."""
+    for statement in node.body:
+        targets = []
+        if isinstance(statement, ast.Assign):
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id == "property":
+                return True
+
+    return False
+
+
+def _uses_property_decorator(node: ast.ClassDef) -> list[str]:
+    """Names of methods in the class body decorated with a bare ``@property``."""
+    offenders = []
+
+    for statement in node.body:
+        if not isinstance(statement, ast.FunctionDef):
+            continue
+        for decorator in statement.decorator_list:
+            if isinstance(decorator, ast.Name) and decorator.id == "property":
+                offenders.append(statement.name)
+
+    return offenders
+
+
+def test_a_model_with_a_property_field_never_uses_the_property_decorator() -> None:
+    """``property = ForeignKey(...)`` shadows the builtin inside the class body.
+
+    ``@property`` further down then resolves to a ForeignKey instance and the
+    module raises ``TypeError: 'ForeignKey' object is not callable`` at import
+    — before any test runs, so the failure is a stack trace at collection
+    rather than a readable assertion.
+
+    ``Unit`` hit this first (see properties/models.py). Anything on such a model
+    that would naturally be a property has to be a method instead.
+    """
+    offenders: list[str] = []
+
+    for path, node in model_class_nodes():
+        if not _declares_property_field(node):
+            continue
+        for method in _uses_property_decorator(node):
+            offenders.append(
+                f"{path.relative_to(BACKEND_ROOT).as_posix()}: {node.name}.{method} uses @property"
+            )
+
+    assert not offenders, (
+        "These models declare a field named `property` and also use the "
+        "@property decorator, which resolves to that field:\n"
+        + "\n".join(f"  {entry}" for entry in offenders)
+        + "\n\nMake it a method. See Unit.is_available in properties/models.py "
+        "for the precedent and the comment explaining why."
+    )
+
+
+def test_the_shadowing_check_can_actually_see_a_violation() -> None:
+    """Guards against the check passing because it parses nothing.
+
+    A structural test that silently matches zero classes is worse than no test:
+    it reports success for a rule it never applied.
+    """
+    source = """
+class Thing:
+    property = models.ForeignKey("x", on_delete=models.CASCADE)
+
+    @property
+    def broken(self):
+        return True
+"""
+    node = next(entry for entry in ast.walk(ast.parse(source)) if isinstance(entry, ast.ClassDef))
+
+    assert _declares_property_field(node) is True
+    assert _uses_property_decorator(node) == ["broken"]
+
+
+def test_the_shadowing_check_examines_real_models() -> None:
+    """And that it is looking at our actual models, not an empty list."""
+    names = {node.name for _path, node in model_class_nodes()}
+
+    assert {"Property", "Unit", "User", "University"} <= names
+
+
+# ---------------------------------------------------------------------------
+# 6. The header fallback cannot exist in production
 # ---------------------------------------------------------------------------
 
 
