@@ -30,6 +30,7 @@ from tests.factories import (
     ReviewFactory,
     StaffFactory,
     StudentProfileFactory,
+    TenancyClaimFactory,
     TenantFactory,
     UnitFactory,
     UnitPhotoFactory,
@@ -217,6 +218,11 @@ def caretaker_assignment_factory(db):
 @pytest.fixture
 def application_factory(db):
     return ApplicationFactory
+
+
+@pytest.fixture
+def tenancy_claim_factory(db):
+    return TenancyClaimFactory
 
 
 @pytest.fixture

@@ -600,11 +600,18 @@ The evidence that a stay happened. Nothing else can vouch for a review.
 **Constraints / indexes**
 
 - `CheckConstraint(condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")), name="tenancy_end_after_start")`
-- `UniqueConstraint(fields=["unit", "tenant", "start_date"], name="uniq_tenancy_per_unit_tenant_start")`
-- **`ExclusionConstraint`** over `(unit =, daterange(start_date, end_date) &&)`
-  where `status='active'`, named `no_overlapping_confirmed_tenancy`. Requires
-  `btree_gist`. A serializer cannot see a concurrent insert; this can. It is
-  also the exact predicate the `duplicate` dispute auto-resolution queries.
+- `UniqueConstraint(fields=["unit", "tenant", "start_date"], name="tenancy_unique_per_unit_tenant_start")`
+- **`ExclusionConstraint`** over `(unit =, tenant =, daterange(start_date,
+  coalesce(end_date, 'infinity'), '[]') &&)` where `status='active'`, named
+  `tenancy_no_overlapping_active_stay`. Requires `btree_gist`. A serializer
+  cannot see a concurrent insert; this can. It is also the exact predicate the
+  `duplicate` dispute auto-resolution queries.
+
+  Scoped per unit **and per tenant**. `Unit` is a pool model, so one row can be
+  forty identical bedsitters; a per-unit-only exclusion would cap the whole
+  block at one active tenancy. Vacancy comes from `vacant_count`, never from
+  the absence of a tenancy row. `end_date IS NULL` coalesces to infinity, so an
+  ongoing stay overlaps everything after it.
 - `CheckConstraint` — `confirmation_source='application'` requires a non-null
   `application` and a null `claim`; any other source requires a non-null `claim`
   and a null `application`. The two paths cannot blur.

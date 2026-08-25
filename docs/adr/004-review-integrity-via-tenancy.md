@@ -93,7 +93,7 @@ The five rules, and where each is enforced:
 | A review must reference a tenancy | `NOT NULL` FK — schema |
 | One review per tenancy | `OneToOneField` → `UNIQUE` — schema |
 | Tenancy dates are ordered | `CheckConstraint` — schema |
-| No overlapping confirmed tenancy per unit | `ExclusionConstraint` — schema |
+| No overlapping confirmed tenancy per unit **per tenant** | `ExclusionConstraint` — schema |
 | One open claim per user per unit | partial `UniqueConstraint` — schema |
 | A witnessed tenancy has an application and no claim | `CheckConstraint` — schema |
 | A disputed claim carries an enumerated reason | `CheckConstraint` — schema |
@@ -119,14 +119,15 @@ class Meta:
         ),
         models.UniqueConstraint(
             fields=["unit", "tenant", "start_date"],
-            name="uniq_tenancy_per_unit_tenant_start",
+            name="tenancy_unique_per_unit_tenant_start",
         ),
         ExclusionConstraint(
-            name="no_overlapping_confirmed_tenancy",
+            name="tenancy_no_overlapping_active_stay",
             expressions=[
                 ("unit", RangeOperators.EQUAL),
+                ("tenant", RangeOperators.EQUAL),
                 (
-                    DateRange("start_date", "end_date", RangeBoundary()),
+                    TenancyDateRange("start_date", "end_date"),
                     RangeOperators.OVERLAPS,
                 ),
             ],
@@ -137,6 +138,23 @@ class Meta:
 
 The exclusion constraint needs the `btree_gist` extension, added by a migration
 with `django.contrib.postgres.operations.BtreeGistExtension`.
+
+**The exclusion is scoped per unit *and per tenant*, not per unit alone.**
+Earlier drafts of this ADR said "per unit", which was written before `Unit`
+became a pool model. A `Unit` row can stand for many physically identical
+rooms — forty bedsitters in a hostel block are one row with `total_count=40` —
+so excluding on `(unit, daterange)` would have permitted exactly one active
+tenancy in the entire block and rejected every subsequent student as an
+overlap. Vacancy is counted by `Unit.vacant_count`; it is not inferred from the
+absence of a tenancy row. What the constraint actually forbids is one person
+holding the same unit twice over overlapping dates, which is the fabrication we
+care about.
+
+`end_date` is nullable and means "still living there", so the range is built
+with `daterange(start_date, coalesce(end_date, 'infinity'), '[]')`. An ongoing
+stay therefore overlaps everything after it, and the bounds are inclusive
+because a tenancy that ends on the 30th and another that starts on the 30th are
+the same day in the same room.
 
 and on `Review`:
 
@@ -183,10 +201,11 @@ any single actor manufacture a reviewer (see ADR-003).
 - **One open claim per user per unit**, as a partial unique constraint.
 - **A per-user rate limit on claim creation.**
 - **Claims whose date range overlaps an existing confirmed tenancy for the same
-  unit are rejected at the database level**, using a PostgreSQL
-  `ExclusionConstraint` over `(unit, daterange(start_date, end_date))` with the
-  `btree_gist` extension. This is enforced in the schema rather than in a
-  serializer because a serializer cannot see a concurrent insert.
+  unit *and the same claimant* are rejected at the database level**, using a
+  PostgreSQL `ExclusionConstraint` over `(unit, tenant, daterange(start_date,
+  end_date))` with the `btree_gist` extension. This is enforced in the schema
+  rather than in a serializer because a serializer cannot see a concurrent
+  insert. See the constraint table above for why the tenant is part of the key.
 
 ### Bounding the dispute queue
 

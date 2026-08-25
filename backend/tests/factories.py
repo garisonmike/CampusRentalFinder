@@ -35,8 +35,8 @@ from properties.constants import (
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
 from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
 from reviews.models import Review
-from tenancies.constants import ApplicationStatus
-from tenancies.models import Application
+from tenancies.constants import ApplicationStatus, ClaimStatus
+from tenancies.models import Application, TenancyClaim
 from universities.constants import VerificationMethod, VerificationStatus
 from universities.models import Campus, University
 
@@ -304,6 +304,22 @@ class ApplicationFactory(TenantScopedFactory):
     move_in_date = factory.LazyFunction(lambda: dt.date.today() + dt.timedelta(days=14))
     intended_months = 8
     message = "Is the bedsitter still vacant?"
+
+
+class TenancyClaimFactory(TenantScopedFactory):
+    """A claim for a stay the platform did not witness (ADR-004)."""
+
+    class Meta:
+        model = TenancyClaim
+
+    unit = factory.SubFactory(UnitFactory)
+    claimant = factory.SubFactory(UserFactory)
+    start_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=200))
+    end_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=20))
+    monthly_rent_kes = Decimal("9500.00")
+    status = ClaimStatus.PENDING
+    is_retrospective = False
+    confirmation_deadline = factory.LazyFunction(lambda: timezone.now() + dt.timedelta(days=7))
 
 
 class CaretakerAssignmentFactory(TenantScopedFactory):

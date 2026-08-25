@@ -318,6 +318,39 @@ RQ_QUEUES = {
 RQ_SHOW_ADMIN_LINK = True
 
 # --------------------------------------------------------------------------
+# Tenancy and reviews (ADR-004)
+# --------------------------------------------------------------------------
+
+# How long a landlord or caretaker has to confirm or dispute a claim before
+# silence auto-confirms it. Landlord silence is a signal, not a veto.
+TENANCY_CONFIRMATION_WINDOW_DAYS = config(
+    "TENANCY_CONFIRMATION_WINDOW_DAYS", default=7, cast=int
+)
+
+# How long WE have to resolve an escalated dispute before it auto-resolves in
+# the tenant's favour. This deadline binds the platform: an indefinite block
+# would turn our backlog into a landlord veto by proxy.
+DISPUTE_RESOLUTION_WINDOW_DAYS = config(
+    "DISPUTE_RESOLUTION_WINDOW_DAYS", default=14, cast=int
+)
+
+# Minimum stay before a tenancy can be reviewed. Policy, not an invariant, so
+# it lives here rather than in a constraint -- and it cannot be one anyway,
+# because an ongoing stay is measured against today.
+REVIEW_MINIMUM_STAY_DAYS = config("REVIEW_MINIMUM_STAY_DAYS", default=30, cast=int)
+
+# How long a review stays editable before it freezes.
+REVIEW_EDIT_WINDOW_DAYS = config("REVIEW_EDIT_WINDOW_DAYS", default=14, cast=int)
+
+# Per-landlord cap on disputes raised in a rolling 30 days.
+MAX_DISPUTES_PER_LANDLORD_PER_MONTH = config(
+    "MAX_DISPUTES_PER_LANDLORD_PER_MONTH", default=20, cast=int
+)
+
+# Per-claimant cap on claims raised in a rolling 30 days.
+MAX_CLAIMS_PER_USER_PER_MONTH = config("MAX_CLAIMS_PER_USER_PER_MONTH", default=10, cast=int)
+
+# --------------------------------------------------------------------------
 # Routing (ADR-002)
 # --------------------------------------------------------------------------
 

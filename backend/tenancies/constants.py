@@ -43,3 +43,26 @@ UNATTRIBUTED_SOURCES = (ConfirmationSource.AUTO, ConfirmationSource.DISPUTE_TIME
 class TenancyStatus(models.TextChoices):
     ACTIVE = "active", _("Active")
     ENDED = "ended", _("Ended")
+
+
+class ClaimStatus(models.TextChoices):
+    """Where a TenancyClaim stands (ADR-004)."""
+
+    PENDING = "pending", _("Awaiting confirmation")
+    CONFIRMED = "confirmed", _("Confirmed")
+    DISPUTED = "disputed", _("Disputed between the parties")
+    ESCALATED = "escalated", _("Escalated to platform admins")
+    WITHDRAWN = "withdrawn", _("Withdrawn by the claimant")
+    EXPIRED = "expired", _("Expired")
+
+
+#: Statuses in which a claim is still live, so only one may exist per claimant
+#: per unit.
+OPEN_CLAIM_STATUSES = (ClaimStatus.PENDING, ClaimStatus.DISPUTED, ClaimStatus.ESCALATED)
+
+#: Statuses that end a claim, and therefore require a resolution timestamp.
+TERMINAL_CLAIM_STATUSES = (
+    ClaimStatus.CONFIRMED,
+    ClaimStatus.WITHDRAWN,
+    ClaimStatus.EXPIRED,
+)
