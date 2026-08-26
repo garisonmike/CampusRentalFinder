@@ -1,7 +1,7 @@
 """
 Aggregate jobs (ADR-004, docs/OPERATIONS.md §3b).
 
-Both entry points call `ratings.recompute`. Nothing here reimplements an
+Both entry points call `reviews.recompute`. Nothing here reimplements an
 average.
 """
 

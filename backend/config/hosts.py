@@ -77,12 +77,6 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     # Function-based, GET-only, AllowAny. These are the only routes today that
     # can honestly be served from the neutral host: a DRF router route cannot,
     # because one URL name covers both the safe and the unsafe methods.
-    "rentals:featured-rentals": HostClass.PUBLIC_CANONICAL,
-    "rentals:recent-rentals": HostClass.PUBLIC_CANONICAL,
-    "reviews:rental-reviews": HostClass.PUBLIC_CANONICAL,
-    "reviews:rental-review-statistics": HostClass.PUBLIC_CANONICAL,
-    "reviews:recent-reviews": HostClass.PUBLIC_CANONICAL,
-    "reviews:top-rated-reviews": HostClass.PUBLIC_CANONICAL,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The
@@ -104,42 +98,7 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "accounts:admin-users-detail": HostClass.TENANT_SCOPED,
     "accounts:admin-users-toggle-active": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: rentals (pre-rewrite draft app) --------------------
-    "rentals:api-root": HostClass.TENANT_SCOPED,
-    "rentals:rentals-list": HostClass.TENANT_SCOPED,
-    "rentals:rentals-detail": HostClass.TENANT_SCOPED,
-    "rentals:rentals-favorites": HostClass.TENANT_SCOPED,
-    "rentals:rentals-my-properties": HostClass.TENANT_SCOPED,
-    "rentals:rentals-toggle-favorite": HostClass.TENANT_SCOPED,
-    "rentals:rentals-inquiries": HostClass.TENANT_SCOPED,
-    "rentals:rental-images-list": HostClass.TENANT_SCOPED,
-    "rentals:rental-images-detail": HostClass.TENANT_SCOPED,
-    "rentals:rental-images-set-primary": HostClass.TENANT_SCOPED,
-    "rentals:rental-inquiries-list": HostClass.TENANT_SCOPED,
-    "rentals:rental-inquiries-detail": HostClass.TENANT_SCOPED,
-    "rentals:rental-inquiries-reply": HostClass.TENANT_SCOPED,
-    "rentals:rental-statistics": HostClass.TENANT_SCOPED,
-    "rentals:admin-rentals-list": HostClass.TENANT_SCOPED,
-    "rentals:admin-rentals-detail": HostClass.TENANT_SCOPED,
-    "rentals:admin-rentals-toggle-featured": HostClass.TENANT_SCOPED,
-    "rentals:admin-rentals-update-status": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: reviews (pre-rewrite draft app) --------------------
-    "reviews:api-root": HostClass.TENANT_SCOPED,
-    "reviews:reviews-list": HostClass.TENANT_SCOPED,
-    "reviews:reviews-detail": HostClass.TENANT_SCOPED,
-    "reviews:reviews-report": HostClass.TENANT_SCOPED,
-    "reviews:reviews-vote-helpfulness": HostClass.TENANT_SCOPED,
-    "reviews:reviews-my-reviews": HostClass.TENANT_SCOPED,
-    "reviews:landlord-response": HostClass.TENANT_SCOPED,
-    "reviews:review-statistics": HostClass.TENANT_SCOPED,
-    "reviews:admin-reviews-list": HostClass.TENANT_SCOPED,
-    "reviews:admin-reviews-detail": HostClass.TENANT_SCOPED,
-    "reviews:admin-reviews-toggle-approval": HostClass.TENANT_SCOPED,
-    "reviews:admin-reviews-toggle-verification": HostClass.TENANT_SCOPED,
-    "reviews:admin-reviews-add-moderation-notes": HostClass.TENANT_SCOPED,
-    "reviews:admin-reports-list": HostClass.TENANT_SCOPED,
-    "reviews:admin-reports-detail": HostClass.TENANT_SCOPED,
-    "reviews:admin-reports-resolve": HostClass.TENANT_SCOPED,
-    "reviews:admin-reports-dismiss": HostClass.TENANT_SCOPED,
 }
 
 

@@ -22,9 +22,9 @@ from django.test import override_settings
 from django.utils import timezone
 
 from config.tenancy import TenantScopeError
-from ratings.constants import CATEGORY_RATING_FIELDS, DisputeAnnotation
-from ratings.models import Review, ReviewResponse
-from ratings.services import (
+from reviews.constants import CATEGORY_RATING_FIELDS, DisputeAnnotation
+from reviews.models import Review, ReviewResponse
+from reviews.services import (
     ReviewFrozenError,
     TenancyNotReviewableError,
     assert_tenancy_is_reviewable,

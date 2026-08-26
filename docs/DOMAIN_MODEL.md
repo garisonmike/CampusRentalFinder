@@ -709,7 +709,7 @@ every other invariant here is a database constraint.
 
 ### Rating aggregates (ADR-004)
 
-Three caches over `Review`, in `ratings/aggregates.py`. Chosen over a
+Three caches over `Review`, in `reviews/aggregates.py`. Chosen over a
 denormalised `Review.property_id` because both are denormalisation and the
 difference is how they fail: a duplicated FK that drifts is silent corruption
 with no way to tell which value is right; a stale cached number is found by the

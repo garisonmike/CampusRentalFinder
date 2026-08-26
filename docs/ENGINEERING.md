@@ -363,43 +363,34 @@ storage backend class. Never merge them.
 | 3 — properties | **Done.** `Property`, `Unit`, `PropertyCampusDistance`, `CaretakerAssignment`, `UnitPhoto`, the FilterSet |
 | 4 — storage and queue | **Done.** django-rq, MinIO, the two buckets, image variants, campus routing |
 | 5 — the trust property | **Done.** `Application`, `TenancyClaim`, `Tenancy`, the dispute state machine, the two deadline jobs, `Review`, `ReviewResponse`, the three rating aggregates |
-| 6 — verification | Next. The two student paths and document retention |
-| 7 — cleanup | Remove the draft apps, rebuild the frontend pages |
+| 6 — verification | **Done.** Both student paths, the access log, retention with verified deletes, the enforcement point, subject access and erasure |
+| 7 — cleanup (backend) | **Done.** `SavedProperty`, `Inquiry`, the draft apps deleted, `ratings` renamed to `reviews` |
+| 7 — cleanup (frontend) | Next. The API layer, then the pages |
 
 `CaretakerAssignment` landed with `Property`, because the foreign key to it is
 what defines the model.
 
-The rebuilt `Review` lives in a new **`ratings`** app, not in `reviews`, which
-still holds the draft until Phase 7. The draft's factory and contract tests are
-renamed `DraftReview*` so both suites run side by side until then. `ratings`
-also holds the three aggregate tables, so the name stays apt after the draft
-goes; renaming it to `reviews` later would be a migration for a cosmetic gain.
+### The draft apps are gone
 
-### Phase 7: the draft-app excision, and the `ratings` rename
+`rentals` and `reviews` were deleted and `ratings` was renamed to `reviews` in
+one commit. The rename had to travel with the deletion: a rename split from the
+deletion cannot be green, because both apps would claim the same label.
 
-No first-party module imports from `rentals` or `reviews` — that part holds.
-An earlier note here said the only coupling left was two `include()` lines in
-`config/urls.py`, which was wrong. The full inventory, counted rather than
-assumed:
+The API surface shrank by **39 paths**, every one of them under
+`/api/v1/rentals/` or `/api/v1/reviews/`, with nothing added. That was verified
+against a schema captured before the deletion, not assumed.
 
-| Location | What |
-|---|---|
-| `config/urls.py` | 2 `include()` lines |
-| `config/settings/base.py` | 2 `LOCAL_APPS` entries |
-| `config/hosts.py` | **43** route classifications for the two draft URL trees |
-| `tests/test_architecture.py` | 7 `NOT_TENANT_SCOPED` entries, 1 `ours` set |
-| `tests/test_smoke.py` | 5 assertions naming draft apps and tables |
-| `tests/factories.py`, `tests/conftest.py` | `Rental*` and `DraftReview*` factories and fixtures |
-| `tests/test_api_contract.py` | the draft's entire contract suite |
+**What that leaves is worth stating plainly: the backend has almost no HTTP
+API.** Thirteen auth paths and `/api/v1/tenant/config/`. Everything built in
+phases 3 to 7 — properties, units, tenancies, claims, disputes, reviews,
+aggregates, verification, saved properties, inquiries — exists as models,
+services and jobs with **no views, serializers or routes**. The frontend round
+is where that gets built, and it is a larger job than "wire up the screens".
 
-Still a clean excision — nothing has to be rewritten, only deleted — but it is
-a ~60-line deletion across seven files, not a two-line one.
-
-**Phase 7 also renames `ratings` to `reviews`, in the same commit that deletes
-the draft.** There is no production data, so the rename costs a regenerated
-migration and an import sweep, and it never gets cheaper than that. `Review`
-living permanently in an app called `ratings` is a papercut every future reader
-pays. The three aggregate tables move with it.
+A direct consequence: **there are now zero `PUBLIC_CANONICAL` routes.** Every
+public route in the codebase belonged to a draft app, so ADR-001's neutral host
+currently has no content. The classification machinery is intact and still
+tested; it simply has nothing public to classify yet.
 
 ### Running the tests locally
 
@@ -454,7 +445,7 @@ It cannot be a pytest test:
 > with exactly the stack trace the rule exists to replace.
 
 So it is pure AST, imports nothing, scans every first-party file rather than
-only those named `models.py` (which missed `ratings/aggregates.py`), and prints
+only those named `models.py` (which missed `reviews/aggregates.py`), and prints
 the file, class and method. `test_architecture.py` asserts it is wired up and
 that the detector fires against a synthetic file.
 

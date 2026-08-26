@@ -161,7 +161,7 @@ def _application_export(user: User) -> list[dict[str, Any]]:
 
 
 def _review_export(user: User) -> list[dict[str, Any]]:
-    from ratings.models import Review
+    from reviews.models import Review
 
     return [
         {
@@ -251,7 +251,7 @@ def erase_personal_data(user: User, *, now: dt.datetime | None = None) -> Erasur
     cascade into `StudentProfile` and be refused by `PROTECT` on `Tenancy`
     anyway; keeping it is what lets the tombstone exist at all.
     """
-    from ratings.models import Review
+    from reviews.models import Review
     from tenancies.models import Tenancy, TenancyClaim
 
     now = now or timezone.now()
@@ -434,7 +434,7 @@ def erase_landlord_data(
     """
     from properties.constants import PropertyStatus
     from properties.models import Property, Unit
-    from ratings.models import Review
+    from reviews.models import Review
 
     now = now or timezone.now()
 

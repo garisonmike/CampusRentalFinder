@@ -193,7 +193,7 @@ the sweep to sample it:
 manage.py recompute_ratings --property <id>
 ```
 
-The command and the job call the same functions in `ratings/recompute.py`. Do
+The command and the job call the same functions in `reviews/recompute.py`. Do
 not add a second averaging implementation anywhere: the rebuild and the
 incremental update would drift, and only one of them would be right with no way
 to tell which from the outside.

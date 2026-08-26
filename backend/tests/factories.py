@@ -33,9 +33,7 @@ from properties.constants import (
     PropertyType,
 )
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
-from ratings.models import Review
-from rentals.models import Rental, RentalFavorite, RentalImage, RentalInquiry
-from reviews.models import Review as DraftReview
+from reviews.models import Review
 from tenancies.constants import (
     ApplicationStatus,
     ClaimStatus,
@@ -379,69 +377,3 @@ class CaretakerAssignmentFactory(TenantScopedFactory):
         ]
     )
     is_active = True
-
-
-class RentalFactory(DjangoModelFactory):
-    class Meta:
-        model = Rental
-
-    title = factory.Sequence(lambda n: f"Bedsitter near campus #{n}")
-    description = factory.Faker("paragraph", nb_sentences=4)
-    property_type = "studio"
-    landlord = factory.SubFactory(LandlordFactory)
-    price = Decimal("12000.00")
-    security_deposit = Decimal("12000.00")
-    address = factory.Faker("street_address")
-    city = "Nairobi"
-    state = "Nairobi County"
-    zip_code = "00100"
-    country = "Kenya"
-    latitude = -1.286389
-    longitude = 36.817223
-    bedrooms = 1
-    bathrooms = 1
-    square_footage = 300
-    available_from = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=1))
-    status = "available"
-
-
-class RentalImageFactory(DjangoModelFactory):
-    class Meta:
-        model = RentalImage
-
-    rental = factory.SubFactory(RentalFactory)
-    image = factory.django.ImageField(filename="unit.jpg", width=64, height=64)
-    caption = "Front view"
-    is_primary = True
-    order = 0
-
-
-class RentalFavoriteFactory(DjangoModelFactory):
-    class Meta:
-        model = RentalFavorite
-
-    user = factory.SubFactory(TenantFactory)
-    rental = factory.SubFactory(RentalFactory)
-
-
-class RentalInquiryFactory(DjangoModelFactory):
-    class Meta:
-        model = RentalInquiry
-
-    rental = factory.SubFactory(RentalFactory)
-    tenant = factory.SubFactory(TenantFactory)
-    message = factory.Faker("sentence")
-    status = "new"
-
-
-class DraftReviewFactory(DjangoModelFactory):
-    """The pre-rewrite Review. Removed in Phase 7 with the rest of `reviews`."""
-
-    class Meta:
-        model = DraftReview
-
-    rental = factory.SubFactory(RentalFactory)
-    tenant = factory.SubFactory(TenantFactory)
-    rating = 4
-    comment = factory.Faker("paragraph", nb_sentences=3)
-    is_approved = True

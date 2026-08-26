@@ -28,9 +28,9 @@ from accounts.privacy import (
     is_tombstoned,
     landlord_erasure_blockers,
 )
-from ratings.models import Review
-from ratings.recompute import recompute_unit
-from ratings.services import create_review
+from reviews.models import Review
+from reviews.recompute import recompute_unit
+from reviews.services import create_review
 from tenancies.models import Tenancy, TenancyClaim
 from tenancies.services import confirm_claim, create_claim
 
@@ -797,8 +797,8 @@ class TestLandlordErasure:
     def test_the_landlord_aggregate_survives_under_the_tombstone(
         self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
     ):
-        from ratings.aggregates import LandlordRatingAggregate
-        from ratings.recompute import recompute_landlord
+        from reviews.aggregates import LandlordRatingAggregate
+        from reviews.recompute import recompute_landlord
 
         user, _prop, _unit, _review = self.a_landlord_with_a_block(
             landlord_profile, property_factory, unit_factory, tenancy_factory, tenant

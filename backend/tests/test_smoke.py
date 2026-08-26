@@ -42,12 +42,19 @@ def test_django_checks_pass() -> None:
 
 def test_all_local_apps_are_installed() -> None:
     installed = {config.name for config in apps.get_app_configs()}
-    assert {"accounts", "rentals", "reviews"} <= installed
+    assert {
+        "universities",
+        "accounts",
+        "properties",
+        "tenancies",
+        "reviews",
+        "engagement",
+    } <= installed
 
 
 def test_every_app_declares_an_explicit_appconfig() -> None:
     """Each local app ships its own AppConfig rather than the Django default."""
-    for label in ("accounts", "rentals", "reviews"):
+    for label in ("universities", "accounts", "properties", "tenancies", "reviews", "engagement"):
         config = apps.get_app_config(label)
         assert type(config).__module__ == f"{label}.apps", (
             f"{label} is using Django's default AppConfig"
@@ -72,8 +79,9 @@ def test_migrations_apply_to_an_empty_database(django_db_setup) -> None:
 
     tables = set(connection.introspection.table_names())
     assert "accounts_user" in tables
-    assert "rentals_rental" in tables
     assert "reviews_review" in tables
+    assert "tenancies_tenancy" in tables
+    assert "engagement_inquiry" in tables
 
 
 @pytest.mark.django_db
@@ -107,7 +115,7 @@ def test_openapi_schema_generates() -> None:
     assert schema["paths"], "schema generated no paths"
     # A few paths the frontend depends on must be present.
     assert "/api/v1/auth/login/" in schema["paths"]
-    assert "/api/v1/rentals/properties/" in schema["paths"]
+    assert "/api/v1/tenant/config/" in schema["paths"]
 
 
 @pytest.mark.django_db

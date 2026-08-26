@@ -33,8 +33,8 @@ from accounts.gating import (
     profile_is_gated,
     registration_gating_snapshot,
 )
-from ratings.services import VerificationRequiredError as ReviewGated
-from ratings.services import create_review
+from reviews.services import VerificationRequiredError as ReviewGated
+from reviews.services import create_review
 from tenancies.services import VerificationRequiredError as ClaimGated
 from tenancies.services import create_claim
 from universities.constants import SignupPolicy, VerificationStatus

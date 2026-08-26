@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
-from ratings.recompute import (
+from reviews.recompute import (
     recompute_all,
     recompute_landlord,
     recompute_property,

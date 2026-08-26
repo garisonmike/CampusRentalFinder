@@ -20,14 +20,12 @@ from tests.factories import (
     CampusFactory,
     CaretakerAssignmentFactory,
     DraftPropertyFactory,
-    DraftReviewFactory,
     LandlordFactory,
     LandlordProfileFactory,
     PlatformAdminFactory,
     PropertyCampusDistanceFactory,
     PropertyFactory,
     ReadyUnitPhotoFactory,
-    RentalFactory,
     ReviewFactory,
     StaffFactory,
     StudentProfileFactory,
@@ -251,11 +249,6 @@ def review_factory(db):
 
 
 @pytest.fixture
-def draft_review_factory(db):
-    return DraftReviewFactory
-
-
-@pytest.fixture
 def unit_photo_factory(db):
     return UnitPhotoFactory
 
@@ -281,13 +274,3 @@ def campus_property(db, university, campus_factory, property_factory):
 # ---------------------------------------------------------------------------
 # Domain objects
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def rental(db, landlord) -> RentalFactory:
-    return RentalFactory(landlord=landlord)
-
-
-@pytest.fixture
-def review(db, rental, tenant) -> DraftReviewFactory:
-    return DraftReviewFactory(rental=rental, tenant=tenant)

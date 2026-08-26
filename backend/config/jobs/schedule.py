@@ -61,7 +61,7 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
-        func="ratings.jobs.reconcile_rating_aggregates",
+        func="reviews.jobs.reconcile_rating_aggregates",
         cron="0 3 * * *",
         queue="default",
         on_failure=(

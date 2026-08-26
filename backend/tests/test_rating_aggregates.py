@@ -19,13 +19,13 @@ from decimal import Decimal
 import pytest
 from django.core.management import call_command
 
-from ratings.aggregates import (
+from reviews.aggregates import (
     LandlordRatingAggregate,
     PropertyRatingAggregate,
     UnitRatingAggregate,
 )
-from ratings.jobs import reconcile_rating_aggregates, refresh_aggregates_for_review
-from ratings.recompute import (
+from reviews.jobs import reconcile_rating_aggregates, refresh_aggregates_for_review
+from reviews.recompute import (
     recompute_all,
     recompute_landlord,
     recompute_property,
@@ -35,7 +35,7 @@ from ratings.recompute import (
     summarise_property,
     summarise_unit,
 )
-from ratings.services import create_review
+from reviews.services import create_review
 
 pytestmark = pytest.mark.django_db
 

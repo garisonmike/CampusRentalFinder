@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print("Make it a method, or rename the field. See Unit.is_available in")
     print("properties/models.py and PropertyRatingAggregate.property_reviewed")
-    print("in ratings/aggregates.py for both fixes.")
+    print("in reviews/aggregates.py for both fixes.")
     return 1
 
 

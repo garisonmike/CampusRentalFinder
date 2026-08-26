@@ -60,10 +60,8 @@ LOCAL_APPS = [
     "accounts",
     "properties",
     "tenancies",
-    "ratings",
-    "engagement",
-    "rentals",
     "reviews",
+    "engagement",
 ]
 
 # The project package itself, so its cross-app management commands are
