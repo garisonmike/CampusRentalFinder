@@ -392,6 +392,27 @@ public route in the codebase belonged to a draft app, so ADR-001's neutral host
 currently has no content. The classification machinery is intact and still
 tested; it simply has nothing public to classify yet.
 
+### The coverage floor is a ratchet
+
+`--cov-fail-under=88`, raised from 70 when Phase 7 landed. **Deleting tested
+code must never be allowed to lower it**: a floor that falls when code is
+removed runs backwards, and it would let a future deletion of well-covered code
+quietly buy slack for poorly-covered code.
+
+Two things were wrong with it until 2026-08-26, and both are worth knowing:
+
+- **The measured set excluded half the codebase.** `[tool.coverage.run] source`
+  named `accounts`, `config`, `rentals` and `reviews`, so `properties`,
+  `tenancies`, `universities` and `engagement` were never counted. Every
+  coverage figure reported before that date was taken over roughly half the
+  code, and the number looked healthy throughout. Fixing it moved the figure
+  **up**, from 84.73% to 88.59% — the unmeasured apps were better covered than
+  the measured ones.
+- **The list existed twice**, once as `source` and once as `--cov=<name>` flags
+  in `addopts`, and the two copies had drifted. There is now one list, and
+  `test_architecture.py::test_coverage_measures_every_first_party_package`
+  fails if an app is added without being added to it.
+
 ### Running the tests locally
 
 The suite needs PostgreSQL **and** Redis: django-rq holds a broker connection

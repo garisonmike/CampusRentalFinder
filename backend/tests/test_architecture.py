@@ -695,3 +695,31 @@ def test_scoping_detection_sees_a_manager_declared_in_the_class_body() -> None:
     assert "objects" not in inherits_it.__dict__
     assert is_tenant_scoped(declares_its_own) is True
     assert is_tenant_scoped(inherits_it) is True
+
+
+def test_coverage_measures_every_first_party_package() -> None:
+    """The `--cov` list must not silently exclude an app.
+
+    It listed `accounts`, `config`, `rentals` and `reviews` for six phases,
+    which meant `properties`, `tenancies`, `universities` and `engagement` were
+    never measured -- every coverage figure before 2026-08-26 was taken over
+    roughly half the codebase, and the number looked healthy the whole time.
+
+    A hand-maintained list that must be updated when an app is added is a
+    ratchet with a hole in it, so this closes the hole rather than trusting the
+    next person to remember.
+    """
+    import tomllib
+
+    config = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text())
+    measured = set(config["tool"]["coverage"]["run"]["source"])
+
+    # `tools` holds the shadowing checker; it is first-party code with tests.
+    expected = set(LOCAL_APP_LABELS) | {"tools"}
+    missing = sorted(expected - measured)
+
+    assert not missing, (
+        "These first-party packages are not measured by coverage:\n"
+        + "\n".join(f"  {name}" for name in missing)
+        + "\n\nAdd them to the --cov list in pyproject.toml."
+    )

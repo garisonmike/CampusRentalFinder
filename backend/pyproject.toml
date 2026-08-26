@@ -92,13 +92,13 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-ra",
-    "--cov=accounts",
-    "--cov=config",
-    "--cov=rentals",
-    "--cov=reviews",
+    # Bare --cov: the packages come from [tool.coverage.run] source, so the
+    # list lives in exactly one place. It used to be duplicated here as
+    # --cov=<name> flags, and the two copies had drifted apart.
+    "--cov",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=xml",
-    "--cov-fail-under=70",
+    "--cov-fail-under=88",
 ]
 markers = [
     "smoke: minimal checks that the project boots and its plumbing works",
@@ -118,7 +118,23 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = ["accounts", "config", "rentals", "reviews"]
+# EVERY first-party package, and the only place this list exists.
+#
+# It was accounts/config/rentals/reviews for six phases, which silently
+# excluded properties, tenancies, universities and engagement -- so every
+# coverage figure before 2026-08-26 was measured over roughly half the
+# codebase, and the number looked healthy throughout. An architecture test now
+# asserts this list covers every first-party app.
+source = [
+    "accounts",
+    "config",
+    "engagement",
+    "properties",
+    "reviews",
+    "tenancies",
+    "tools",
+    "universities",
+]
 omit = [
     "*/migrations/*",
     "*/tests/*",
@@ -129,9 +145,13 @@ omit = [
 ]
 
 [tool.coverage.report]
-# 70 is a deliberately low floor for the current draft. Raise it as the
-# schema rewrite lands with its own tests.
-fail_under = 70
+# A ratchet. Raised from 70 to 88 on 2026-08-26, when deleting the draft apps
+# and fixing the --cov list moved the measured figure to 88.59%.
+#
+# Deleting tested code must never let this drop: a floor that falls when code
+# is removed is a ratchet running backwards, and it would let a future deletion
+# of well-tested code quietly buy slack for poorly-tested code.
+fail_under = 88
 show_missing = true
 skip_covered = true
 exclude_lines = [
