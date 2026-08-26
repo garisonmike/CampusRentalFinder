@@ -61,6 +61,7 @@ LOCAL_APPS = [
     "properties",
     "tenancies",
     "ratings",
+    "engagement",
     "rentals",
     "reviews",
 ]
@@ -370,6 +371,23 @@ EMAIL_VERIFICATION_MAX_PER_USER = config("EMAIL_VERIFICATION_MAX_PER_USER", defa
 EMAIL_VERIFICATION_MAX_PER_ADDRESS = config(
     "EMAIL_VERIFICATION_MAX_PER_ADDRESS", default=3, cast=int
 )
+
+# --------------------------------------------------------------------------
+# Inquiries
+# --------------------------------------------------------------------------
+
+# An inquiry is an unsolicited message to a stranger, so the limits are part of
+# the feature rather than a later hardening pass. Per user AND per unit,
+# independently: per user alone lets one account hammer a single landlord, per
+# unit alone lets one account paper every listing in a town.
+INQUIRY_RATE_WINDOW_HOURS = config("INQUIRY_RATE_WINDOW_HOURS", default=24, cast=int)
+INQUIRY_MAX_PER_USER = config("INQUIRY_MAX_PER_USER", default=10, cast=int)
+INQUIRY_MAX_PER_UNIT = config("INQUIRY_MAX_PER_UNIT", default=2, cast=int)
+
+# After this, an unanswered inquiry is marked expired -- so "the landlord never
+# replied" is a fact the student can see, rather than a screen indistinguishable
+# from one still waiting.
+INQUIRY_EXPIRY_DAYS = config("INQUIRY_EXPIRY_DAYS", default=14, cast=int)
 
 # Manual ID verification (ADR-003). Every default here takes the option that
 # holds less data for less time -- this is Data Protection Act 2019 territory,

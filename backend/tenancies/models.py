@@ -93,6 +93,21 @@ class Application(TenantScopedModel):
         choices=ApplicationStatus.choices,
         default=ApplicationStatus.SUBMITTED,
     )
+    #: The inquiry this application grew out of, when there was one.
+    #:
+    #: Optional, and SET_NULL: an application is valid whether or not a
+    #: question preceded it. What this buys is a traceable on-platform path --
+    #: inquiry, application, acceptance, confirmed tenancy, review -- which is
+    #: exactly the route ADR-004 section 1.1 wants to be the DEFAULT one,
+    #: because every conversation that leaves the platform early comes back
+    #: later as a claim.
+    inquiry = models.ForeignKey(
+        "engagement.Inquiry",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="applications",
+    )
     move_in_date = models.DateField(_("requested move-in date"))
     intended_months = models.PositiveSmallIntegerField(_("intended stay (months)"))
     message = models.TextField(_("message"), blank=True)
