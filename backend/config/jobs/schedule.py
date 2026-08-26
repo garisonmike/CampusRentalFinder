@@ -71,6 +71,16 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="engagement.services.expire_stale_inquiries",
+        cron="0 4 * * *",
+        queue="default",
+        on_failure=(
+            "Unanswered inquiries sit in `sent` for ever, so a student cannot "
+            "tell 'the landlord has not replied yet' from 'the landlord will "
+            "never reply'. The screen looks identical either way."
+        ),
+    ),
+    ScheduledJob(
         func="properties.jobs.route_stale_distances",
         cron="*/15 * * * *",
         queue="default",

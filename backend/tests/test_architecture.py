@@ -723,3 +723,44 @@ def test_coverage_measures_every_first_party_package() -> None:
         + "\n".join(f"  {name}" for name in missing)
         + "\n\nAdd them to the --cov list in pyproject.toml."
     )
+
+
+def test_every_recurring_job_is_actually_scheduled() -> None:
+    """A sweep nobody calls is a function, not a job.
+
+    `expire_stale_inquiries` was written, tested, documented in its own
+    docstring, and scheduled by nothing -- the existing scheduled-job tests all
+    ran in the other direction, checking that entries in SCHEDULE are real
+    rather than that real sweeps are in SCHEDULE.
+
+    Any module-level callable whose name starts with `sweep_`, `reconcile_` or
+    `expire_` is a recurring job by convention and must appear in the table.
+    """
+    from config.jobs.schedule import SCHEDULE
+
+    scheduled = {job.func for job in SCHEDULE}
+    prefixes = ("sweep_", "reconcile_", "expire_")
+    unscheduled: list[str] = []
+
+    for label in sorted(LOCAL_APP_LABELS):
+        for module_name in ("jobs", "services", "retention"):
+            try:
+                module = importlib.import_module(f"{label}.{module_name}")
+            except ModuleNotFoundError:
+                continue
+            for name in dir(module):
+                if not name.startswith(prefixes):
+                    continue
+                attr = getattr(module, name)
+                if not callable(attr) or getattr(attr, "__module__", "") != module.__name__:
+                    continue
+                dotted = f"{label}.{module_name}.{name}"
+                if dotted not in scheduled:
+                    unscheduled.append(dotted)
+
+    assert not unscheduled, (
+        "These look like recurring jobs but nothing schedules them:\n"
+        + "\n".join(f"  {name}" for name in unscheduled)
+        + "\n\nAdd them to config/jobs/schedule.py, or rename them if they are "
+        "not recurring jobs."
+    )

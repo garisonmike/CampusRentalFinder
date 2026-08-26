@@ -202,6 +202,26 @@ Drift is logged at ERROR as `rating_aggregate_drift`, one line per disagreeing
 field, carrying both the stored and the computed value. Alert on any
 occurrence.
 
+### 3c. Inquiry expiry
+
+| | |
+|---|---|
+| **Schedule** | Daily, 04:00 |
+| **Does** | Marks inquiries `expired` once `INQUIRY_EXPIRY_DAYS` (14) passes with no reply |
+| **Guarantees** | That "the landlord never replied" is visible to the student as a fact |
+
+**Symptom if it stops:** unanswered inquiries stay `sent` indefinitely, and a
+student cannot tell *"the landlord has not replied yet"* from *"the landlord
+will never reply"* — the screen is identical either way. They wait on a
+listing they should have moved on from, which is a worse outcome than a plain
+refusal.
+
+It also silently holds the one-open-inquiry-per-unit slot, so the student
+cannot ask again about the same unit even months later.
+
+**Time to visible:** never, without the alert. Nobody complains about a message
+that was merely ignored.
+
 ### 4. Image variant generation
 
 | | |
