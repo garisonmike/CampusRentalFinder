@@ -34,7 +34,13 @@ class TenancyAdmin(admin.ModelAdmin):
         "status",
         "was_disputed",
     )
-    list_filter = ("confirmation_source", "status", "was_disputed", "start_date")
+    list_filter = (
+        "confirmation_source",
+        "status",
+        "was_disputed",
+        "terminated_early",
+        "start_date",
+    )
     search_fields = ("tenant__email", "unit__label", "unit__property__name")
     ordering = ("-start_date",)
     date_hierarchy = "start_date"

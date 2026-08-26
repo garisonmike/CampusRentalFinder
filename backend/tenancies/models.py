@@ -17,6 +17,7 @@ converge:
 from __future__ import annotations
 
 import datetime as dt
+from typing import ClassVar
 
 from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import RangeOperators
@@ -25,12 +26,17 @@ from django.db.models import F, Func, Q, Value
 from django.utils.translation import gettext_lazy as _
 
 from accounts.models import User
-from config.tenancy import TenantScopedModel
+from config.tenancy import (
+    TenantScopedManager,
+    TenantScopedModel,
+    TenantScopedQuerySet,
+)
 from properties.models import Unit
 
 from .constants import (
     DISPUTE_TRANSITIONS,
     DISPUTED_CLAIM_STATUSES,
+    LIVE_TENANCY_STATUSES,
     OPEN_APPLICATION_STATUSES,
     OPEN_CLAIM_STATUSES,
     TERMINAL_CLAIM_STATUSES,
@@ -139,6 +145,82 @@ class Application(TenantScopedModel):
         return self.status in OPEN_APPLICATION_STATUSES
 
 
+class TenancyQuerySet(TenantScopedQuerySet):
+    """Currency is DERIVED here, never stored (ADR-004).
+
+    A lifecycle status that depends on the passage of time cannot be stored
+    correctly. It needs a job to stay true, and when the job stops the data
+    lies silently -- no error, no alert, just every historical stay quietly
+    reporting itself as running.
+
+    So there is no ``active`` and no ``ended``. These three methods answer the
+    question from ``start_date``, ``end_date`` and today, which is the only
+    place the answer has ever actually lived.
+    """
+
+    def live(self) -> TenancyQuerySet:
+        """Tenancies that record a real stay.
+
+        Excludes the voided ones. A withdrawn tenancy is not a stay that
+        happened at some other time; it is a stay that did not happen, so it is
+        neither current nor past.
+        """
+        return self.filter(status__in=LIVE_TENANCY_STATUSES)
+
+    def current(self, *, today: dt.date | None = None) -> TenancyQuerySet:
+        """Running right now.
+
+        **A null ``end_date`` is open-ended and running**, not historical. A
+        tenancy with no agreed end is a real arrangement -- most Kenyan student
+        lets are month-to-month with no written end -- and coalescing it to
+        anything else silently reclassifies them all.
+        """
+        today = today or dt.date.today()
+        return self.live().filter(
+            Q(start_date__lte=today) & (Q(end_date__isnull=True) | Q(end_date__gte=today))
+        )
+
+    def past(self, *, today: dt.date | None = None) -> TenancyQuerySet:
+        """Over. Requires an end date that has passed."""
+        today = today or dt.date.today()
+        return self.live().filter(end_date__isnull=False, end_date__lt=today)
+
+    def upcoming(self, *, today: dt.date | None = None) -> TenancyQuerySet:
+        """Agreed but not started."""
+        today = today or dt.date.today()
+        return self.live().filter(start_date__gt=today)
+
+    def overlapping(self, start_date: dt.date, end_date: dt.date | None) -> TenancyQuerySet:
+        """Tenancies whose range overlaps the given one.
+
+        The same predicate the exclusion constraint enforces, expressed once so
+        the duplicate-dispute auto-resolution and the constraint cannot drift.
+        Status-independent by design: an ended stay is still a duplicate of an
+        overlapping claim.
+        """
+        return self.filter(
+            Q(start_date__lte=end_date or dt.date.max)
+            & (Q(end_date__isnull=True) | Q(end_date__gte=start_date))
+        )
+
+
+#: Scoped, and carrying the currency predicates.
+#:
+#: Built from `TenantScopedManager` rather than beside it, so there is one
+#: implementation of the unqualified-query refusal. A parallel manager that
+#: reimplemented `get_queryset` would also have failed `is_tenant_scoped()`,
+#: which is an isinstance check -- so the architecture walk would have reported
+#: Tenancy as unscoped, which is exactly what it did until this was fixed.
+class TenancyManager(TenantScopedManager.from_queryset(TenancyQuerySet)):  # type: ignore[misc]
+    """`objects`: scoped, and carrying the currency predicates."""
+
+
+class UnscopedTenancyManager(TenancyManager):
+    """`all_objects`: unfiltered, for Django internals and scheduled jobs."""
+
+    strict = False
+
+
 class Tenancy(TenantScopedModel):
     """The evidence that a stay happened.
 
@@ -193,8 +275,25 @@ class Tenancy(TenantScopedModel):
     end_date = models.DateField(_("end date"), null=True, blank=True)
     monthly_rent_kes = models.DecimalField(_("monthly rent (KES)"), max_digits=10, decimal_places=2)
     status = models.CharField(
-        _("status"), max_length=16, choices=TenancyStatus.choices, default=TenancyStatus.ACTIVE
+        _("status"),
+        max_length=16,
+        choices=TenancyStatus.choices,
+        default=TenancyStatus.CONFIRMED,
+        help_text=_(
+            "What the tenancy IS. Whether it is running is derived from the "
+            "dates -- see TenancyQuerySet.current()."
+        ),
     )
+
+    #: The stay ended before its agreed end. `end_date` is moved to the ACTUAL
+    #: date, so currency stays correct without consulting this at all; the flag
+    #: and reason exist because "ended in March" and "ended early in March" are
+    #: different facts about the same date.
+    terminated_early = models.BooleanField(_("terminated early"), default=False)
+    termination_reason = models.CharField(_("termination reason"), max_length=255, blank=True)
+
+    objects: ClassVar[TenancyManager] = TenancyManager()
+    all_objects: ClassVar[UnscopedTenancyManager] = UnscopedTenancyManager()
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -208,6 +307,8 @@ class Tenancy(TenantScopedModel):
         indexes = [
             models.Index(fields=["tenant", "-start_date"], name="tenancy_tenant_idx"),
             models.Index(fields=["unit", "status"], name="tenancy_unit_status_idx"),
+            # current()/past()/upcoming() all filter on the date pair.
+            models.Index(fields=["start_date", "end_date"], name="tenancy_currency_idx"),
             # The volume-control metric: the share of tenancies by source.
             models.Index(fields=["confirmation_source"], name="tenancy_source_idx"),
         ]
@@ -291,10 +392,31 @@ class Tenancy(TenantScopedModel):
             models.CheckConstraint(
                 condition=Q(monthly_rent_kes__gt=0), name="tenancy_rent_positive"
             ),
+            # Early termination needs the actual end date and a reason. Without
+            # the date, currency would still report the stay as running -- the
+            # exact class of lie the derived model exists to remove.
+            models.CheckConstraint(
+                condition=~Q(terminated_early=True)
+                | (Q(end_date__isnull=False) & ~Q(termination_reason="")),
+                name="tenancy_early_termination_is_dated_and_explained",
+            ),
         ]
 
     def __str__(self) -> str:
         return f"{self.tenant.get_full_name()} at {self.unit}"
+
+    def is_current(self, *, today: dt.date | None = None) -> bool:
+        """Whether this stay is running.
+
+        A method, not a stored field, and not a `@property` -- `unit` is a
+        field on this model (see tools/check_field_shadowing.py). Mirrors
+        `TenancyQuerySet.current()`; a test asserts the two agree, because two
+        implementations of one predicate is how they drift.
+        """
+        today = today or dt.date.today()
+        if self.status not in LIVE_TENANCY_STATUSES:
+            return False
+        return self.start_date <= today and (self.end_date is None or self.end_date >= today)
 
     def is_witnessed(self) -> bool:
         """Whether the platform saw the agreement rather than being told of it."""

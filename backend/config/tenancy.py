@@ -92,7 +92,12 @@ class TenantScopedManager(models.Manager.from_queryset(TenantScopedQuerySet)):  
         return self._unscoped()  # pragma: no cover - no non-strict model today
 
     def _unscoped(self) -> TenantScopedQuerySet:
-        return TenantScopedQuerySet(self.model, using=self._db, hints=self._hints)
+        # `self._queryset_class`, not a hardcoded TenantScopedQuerySet: a model
+        # whose queryset carries extra methods -- Tenancy's currency predicates,
+        # say -- builds its manager with
+        # `TenantScopedManager.from_queryset(...)`, and hardcoding here would
+        # silently hand back a queryset without them.
+        return self._queryset_class(self.model, using=self._db, hints=self._hints)
 
     # The two explicit entry points bypass the guard by construction.
     def for_tenant(self, university: Tenant | None) -> TenantScopedQuerySet:
@@ -149,8 +154,15 @@ def is_tenant_scoped(model: type[models.Model]) -> bool:
     Read by ``tests/test_architecture.py``: any local model that is neither
     scoped nor explicitly exempt fails the build.
     """
-    manager = model.__dict__.get("objects") or getattr(model, "objects", None)
-    return isinstance(manager, TenantScopedManager)
+    # `getattr`, not `model.__dict__["objects"]`. A manager declared in a class
+    # body is stored as a ManagerDescriptor, which is truthy -- so the old
+    # `__dict__.get(...) or getattr(...)` never reached the fallback and
+    # reported every such model as UNSCOPED. It went unnoticed because every
+    # scoped model inherited `objects` from TenantScopedModel, where it is
+    # absent from the subclass __dict__; the first model to declare its own
+    # (Tenancy, for the currency predicates) was reported unscoped despite
+    # being correctly scoped.
+    return isinstance(getattr(model, "objects", None), TenantScopedManager)
 
 
 def tenant_lookup_for(model: type[models.Model]) -> str:

@@ -106,6 +106,11 @@ def _tenancy_export(user: User) -> list[dict[str, Any]]:
             "end_date": tenancy.end_date,
             "monthly_rent_kes": tenancy.monthly_rent_kes,
             "status": tenancy.status,
+            # Derived, not stored. A subject reading their own export should
+            # see whether a stay is current, and the stored status no longer
+            # answers that.
+            "is_current": tenancy.is_current(),
+            "terminated_early": tenancy.terminated_early,
             "confirmation_source": tenancy.confirmation_source,
             "was_disputed": tenancy.was_disputed,
         }

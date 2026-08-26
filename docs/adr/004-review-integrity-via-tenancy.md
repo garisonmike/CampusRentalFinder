@@ -7,6 +7,7 @@
 **Amended:** 2026-08-25 — escalation reasons separated; correction-defeats-review closed; annotation derived
 **Amended:** 2026-08-25 — annotation batched per page; transitions table-driven; rating aggregates; cold start
 **Amended:** 2026-08-25 — overlap exclusion widened to every status; the active-only condition was a seeding hole
+**Amended:** 2026-08-26 — tenancy currency is derived from the dates, not stored
 **Deciders:** Tech lead
 
 ## Context
@@ -819,3 +820,68 @@ current time. A `BEFORE UPDATE` trigger could do it. Rejected for now: triggers
 are invisible to Django's migration history and to anyone reading the models,
 and the review path is narrow enough that a permission class covers it. Revisit
 if a second write path to reviews ever appears.
+
+
+## Amendment: currency is derived, never stored
+
+`Tenancy.status` carried `active` and `ended`. Both are gone, and this section
+exists so that neither comes back for query convenience.
+
+**A lifecycle state that depends on the passage of time cannot be stored
+correctly.** It needs a job to keep it true, and when the job stops the data
+lies *silently* — no error, no alert, just every historical stay reporting
+itself as running. That is the same failure mode as every other silent job in
+`docs/OPERATIONS.md`, except that this one has no alert to write, because the
+wrong value is indistinguishable from the right one at read time.
+
+The symptom that made it concrete: `confirm_claim` set `status='active'` on
+every tenancy it created, regardless of `end_date`. A stay seeded from 2023
+read as current. Nothing anywhere noticed, and the reason is worth recording —
+**nothing ever read the field.** It was written in two places, displayed in the
+admin, exported in a subject access request, and never once used as a
+predicate. A stored status that no query consults is not a cache; it is a
+comment that the database is obliged to keep.
+
+### What replaces it
+
+`TenancyQuerySet.current()`, `.past()` and `.upcoming()` answer from
+`start_date`, `end_date` and today. `Tenancy.is_current()` mirrors `.current()`
+for a single row, and a test asserts the two agree, because two implementations
+of one predicate is how they drift.
+
+**A null `end_date` is open-ended and currently running.** It is a real
+arrangement — most Kenyan student lets are month-to-month with nothing written
+— and it must never be conflated with a historical stay. The exclusion
+constraint already coalesces it to `infinity` for overlap purposes, and
+`current()` treats it the same way.
+
+### What `status` still holds
+
+Only states that change because somebody changed them: `confirmed` (the
+default, and the only state a new row can be in), `disputed`, `withdrawn`,
+`rejected`. `LIVE_TENANCY_STATUSES` and `VOID_TENANCY_STATUSES` partition it,
+and a test asserts the partition is total — a status in neither set would be
+invisible to `current()` and `past()` alike.
+
+**`pending` is deliberately absent.** A `Tenancy` row exists only once a claim
+was confirmed or an application accepted, so there is no earlier state to
+model; a pending *stay* is a `TenancyClaim`. Adding it would create the
+unreachable state §2c warns about.
+
+### Early termination
+
+`terminate_tenancy_early()` moves `end_date` to the actual date and sets
+`terminated_early` with a reason. **`end_date` stays authoritative for
+currency**, so a stay that ended in March reads as past from March with no flag
+consulted and no job run. The flag exists because "ended in March" and "ended
+early in March" are different facts about the same date, and a check constraint
+refuses an early termination with no date or no reason — without the date,
+currency would still report the stay as running, which is precisely the lie
+this amendment removes.
+
+### The overlap predicate
+
+`TenancyQuerySet.overlapping()` is now the single expression of the range
+predicate, used by `_find_covering_tenancy` and mirroring the exclusion
+constraint. It is status-independent for the reason given in the 2026-08-25
+amendment: an ended stay is still a duplicate of an overlapping claim.

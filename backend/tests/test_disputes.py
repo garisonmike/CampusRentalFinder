@@ -27,7 +27,6 @@ from tenancies.constants import (
     ConfirmationSource,
     DisputeReason,
     EscalationReason,
-    TenancyStatus,
 )
 from tenancies.models import Tenancy, TenancyClaim
 from tenancies.services import (
@@ -249,7 +248,11 @@ class TestDuplicate:
             monthly_rent_kes=Decimal("9500.00"),
         )
         tenancy = confirm_claim(first, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
-        Tenancy.all_objects.filter(pk=tenancy.pk).update(status=TenancyStatus.ENDED)
+        # The stay is over. Expressed as DATES, because there is no longer an
+        # `ended` status to set -- currency is derived.
+        Tenancy.all_objects.filter(pk=tenancy.pk).update(
+            end_date=dt.date.today() - dt.timedelta(days=1)
+        )
 
         second = create_claim(
             unit=unit,

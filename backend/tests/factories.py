@@ -334,7 +334,7 @@ class TenancyFactory(TenantScopedFactory):
     start_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=200))
     end_date = factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=20))
     monthly_rent_kes = Decimal("9500.00")
-    status = TenancyStatus.ACTIVE
+    status = TenancyStatus.CONFIRMED
 
 
 class ReviewFactory(TenantScopedFactory):

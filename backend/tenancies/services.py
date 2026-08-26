@@ -14,7 +14,6 @@ import datetime as dt
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -91,7 +90,7 @@ def accept_application(
         monthly_rent_kes=(
             monthly_rent_kes if monthly_rent_kes is not None else application.unit.rent_kes
         ),
-        status=TenancyStatus.ACTIVE,
+        status=TenancyStatus.CONFIRMED,
     )
 
 
@@ -246,7 +245,7 @@ def confirm_claim(
         start_date=claim.start_date,
         end_date=claim.end_date,
         monthly_rent_kes=claim.monthly_rent_kes,
-        status=TenancyStatus.ACTIVE,
+        status=TenancyStatus.CONFIRMED,
     )
 
 
@@ -324,28 +323,49 @@ def escalate(claim: TenancyClaim, *, reason: str, now: dt.datetime | None = None
 def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
     """The predicate behind a ``duplicate`` dispute.
 
-    Deliberately the same predicate the exclusion constraint enforces: a
-    confirmed stay for this unit and this claimant whose range overlaps the
-    claimed one. A database query, not a judgement call.
+    Deliberately the same predicate the exclusion constraint enforces, and now
+    expressed in exactly one place -- ``TenancyQuerySet.overlapping()`` -- so
+    the two cannot drift.
 
     Status-independent, exactly like the constraint. When this filtered on
-    ``status='active'`` and the constraint did too, a duplicate claim against
-    an ended stay was reported as "not in fact a duplicate" and escalated to an
+    ``status='active'`` and the constraint did too, a duplicate claim against an
+    ended stay was reported as "not in fact a duplicate" and escalated to an
     administrator -- who would have found a plainly duplicate stay the system
     had just told them was not one.
     """
-    overlapping = Q(start_date__lte=claim.end_date or dt.date.max) & (
-        Q(end_date__isnull=True) | Q(end_date__gte=claim.start_date)
-    )
     return (
-        Tenancy.all_objects.filter(
-            overlapping,
-            unit=claim.unit,
-            tenant=claim.claimant,
-        )
+        Tenancy.all_objects.overlapping(claim.start_date, claim.end_date)
+        .filter(unit=claim.unit, tenant=claim.claimant)
         .exclude(claim=claim)
         .first()
     )
+
+
+@transaction.atomic
+def terminate_tenancy_early(tenancy: Tenancy, *, ended_on: dt.date, reason: str) -> Tenancy:
+    """End a stay before its agreed end date.
+
+    **``end_date`` moves to the actual date and stays authoritative.** Currency
+    is derived from the dates, so a tenancy that ended in March reads as past
+    from March -- no flag is consulted and no job has to run for that to be
+    true.
+
+    ``terminated_early`` and the reason are recorded because "ended in March"
+    and "ended early in March" are different facts about the same date, and a
+    landlord's record of why a tenant left is worth keeping.
+    """
+    if not reason:
+        raise ValidationError(
+            {"reason": _("An early termination must say why. The date alone is not a record.")}
+        )
+    if ended_on < tenancy.start_date:
+        raise ValidationError({"ended_on": _("A stay cannot end before it started.")})
+
+    tenancy.end_date = ended_on
+    tenancy.terminated_early = True
+    tenancy.termination_reason = reason
+    tenancy.save(update_fields=["end_date", "terminated_early", "termination_reason", "updated_at"])
+    return tenancy
 
 
 @transaction.atomic

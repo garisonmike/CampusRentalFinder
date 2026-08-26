@@ -43,8 +43,44 @@ UNATTRIBUTED_SOURCES = (ConfirmationSource.AUTO, ConfirmationSource.DISPUTE_TIME
 
 
 class TenancyStatus(models.TextChoices):
-    ACTIVE = "active", _("Active")
-    ENDED = "ended", _("Ended")
+    """What a tenancy IS, never when it is (ADR-004).
+
+    **No ``active`` and no ``ended``.** Both were here, and both were wrong in
+    the same way: whether a stay is running is a function of ``start_date``,
+    ``end_date`` and today, so a stored value needs a job to stay true and the
+    data lies silently the moment the job stops. Currency is derived at query
+    time -- ``Tenancy.objects.current()``, ``.past()``, ``.upcoming()``.
+
+    The symptom that made it concrete: ``confirm_claim`` marked every stay
+    ACTIVE regardless of its end date, so every seeded 2023 tenancy read as
+    running, and nothing anywhere noticed.
+
+    What remains is genuinely stateful -- it changes only because somebody
+    changes it.
+    """
+
+    #: Every tenancy starts here. A Tenancy row exists only once a claim was
+    #: confirmed or an application accepted, so there is no earlier state.
+    CONFIRMED = "confirmed", _("Confirmed")
+
+    #: Challenged after the fact. Distinct from a disputed CLAIM, which has no
+    #: tenancy yet.
+    DISPUTED = "disputed", _("Disputed after confirmation")
+
+    #: Voided by the parties -- both agree the stay did not happen as recorded.
+    WITHDRAWN = "withdrawn", _("Withdrawn by the parties")
+
+    #: Voided by a platform administrator, e.g. found fraudulent.
+    REJECTED = "rejected", _("Rejected by an administrator")
+
+
+#: Statuses in which a tenancy is real evidence. Only these can be current,
+#: past or upcoming -- a voided tenancy is not a stay that happened at some
+#: other time, it is a stay that did not happen.
+LIVE_TENANCY_STATUSES = (TenancyStatus.CONFIRMED, TenancyStatus.DISPUTED)
+
+#: Statuses that void a tenancy.
+VOID_TENANCY_STATUSES = (TenancyStatus.WITHDRAWN, TenancyStatus.REJECTED)
 
 
 class ClaimStatus(models.TextChoices):

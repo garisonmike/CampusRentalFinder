@@ -435,7 +435,17 @@ declared in any slot is in fact walked.
 
 `backend/tools/check_field_shadowing.py` catches `property = ForeignKey(...)`
 declared beside an `@property`. It runs from pre-commit and from CI **before
-any step that imports Django**, and it cannot be a pytest test:
+any step that imports Django**.
+
+> **Do not "improve" this into an architecture test.** It was one, briefly, and
+> it could never have fired. Reviewed and confirmed: the import dies during app
+> registry population, before any assertion runs. A Django-aware version — one
+> that reads `apps.get_models()` to find model files — fails the same way and
+> harder, because it needs the very import that the defect breaks. If this file
+> looks like it belongs in `tests/test_architecture.py`, that is the trap, and
+> the reason it does not is below.
+
+It cannot be a pytest test:
 
 > The pattern raises `TypeError: 'ForeignKey' object is not callable` at
 > *import*, and Django imports every model module while populating its app

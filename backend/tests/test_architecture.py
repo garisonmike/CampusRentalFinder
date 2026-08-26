@@ -660,3 +660,28 @@ class TestScheduledJobs:
             assert subject.split()[0] in runbook.lower(), (
                 f"{job.func} is scheduled but not described in docs/OPERATIONS.md"
             )
+
+
+def test_scoping_detection_sees_a_manager_declared_in_the_class_body() -> None:
+    """`is_tenant_scoped` must resolve the descriptor, not read `__dict__`.
+
+    A manager declared in a class body is stored as a `ManagerDescriptor`,
+    which is truthy. An implementation reading `model.__dict__["objects"]`
+    first therefore never reaches its own `getattr` fallback, and reports every
+    such model as unscoped.
+
+    It stayed invisible for six phases because every scoped model inherited
+    `objects` from `TenantScopedModel` — absent from the subclass `__dict__`,
+    so the fallback always ran. `Tenancy` is the first to declare its own, and
+    was reported unscoped while being correctly scoped. Asserted on both shapes
+    so a future rewrite cannot regress just one.
+    """
+    from config.tenancy import is_tenant_scoped
+
+    declares_its_own = apps.get_model("tenancies", "Tenancy")
+    inherits_it = apps.get_model("ratings", "Review")
+
+    assert "objects" in declares_its_own.__dict__
+    assert "objects" not in inherits_it.__dict__
+    assert is_tenant_scoped(declares_its_own) is True
+    assert is_tenant_scoped(inherits_it) is True

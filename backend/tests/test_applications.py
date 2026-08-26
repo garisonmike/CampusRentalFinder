@@ -81,7 +81,7 @@ class TestAcceptingAnApplication:
         tenancy = accept_application(application, decided_by=landlord)
 
         assert tenancy.confirmation_source == ConfirmationSource.APPLICATION
-        assert tenancy.status == TenancyStatus.ACTIVE
+        assert tenancy.status == TenancyStatus.CONFIRMED
         assert tenancy.confirmed_by == landlord
         assert tenancy.confirmed_at is not None
 

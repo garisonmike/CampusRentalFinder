@@ -18,7 +18,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from config.tenancy import TenantScopeError
-from tenancies.constants import ClaimStatus, ConfirmationSource, TenancyStatus
+from tenancies.constants import ClaimStatus, ConfirmationSource
 from tenancies.models import Tenancy, TenancyClaim
 from tenancies.services import (
     ClaimRateLimitExceededError,
@@ -167,7 +167,7 @@ class TestClaimRateLimit:
 
 
 class TestOverlapExclusion:
-    """`(unit, tenant, daterange)` where status='active'.
+    """`(unit, tenant, daterange)`, unconditional.
 
     Scoped per unit **and per tenant**, not per unit alone. A `Unit` row can
     represent a pool — forty identical bedsitters in a block are one row with
@@ -197,6 +197,13 @@ class TestOverlapExclusion:
 
         Forty bedsitters are one Unit row; two students in different physical
         rooms share it, and both stays are real.
+
+        Asserted as **concurrency with each other**, not currency today. The
+        earlier version counted rows with `status='active'` on two stays that
+        ended 200 days ago, which passed only because `confirm_claim` marked
+        every tenancy active regardless of its dates. It was testing the right
+        thing through an assertion that could not have failed for the right
+        reason.
         """
         pooled = unit_factory(total_count=40, vacant_count=38)
 
@@ -204,7 +211,18 @@ class TestOverlapExclusion:
         second = self.confirmed(pooled, student_profile.user, landlord, start_offset=400, days=200)
 
         assert first.pk != second.pk
-        assert Tenancy.all_objects.filter(unit=pooled, status=TenancyStatus.ACTIVE).count() == 2
+
+        # Both ran over the same window, so each was current on any day inside
+        # it -- which is what "sharing a pooled unit" means.
+        midway = first.start_date + dt.timedelta(days=100)
+        concurrent = Tenancy.all_objects.across_tenants().filter(unit=pooled).current(today=midway)
+
+        assert concurrent.count() == 2
+        assert {first.pk, second.pk} == set(concurrent.values_list("pk", flat=True))
+
+        # And neither is current now, because both ended months ago. The old
+        # assertion could not tell these two situations apart.
+        assert Tenancy.all_objects.across_tenants().filter(unit=pooled).current().count() == 0
 
     def test_consecutive_stays_by_the_same_person_are_allowed(self, unit_factory, tenant, landlord):
         """Moving out and back in later is not an overlap."""
@@ -244,7 +262,10 @@ class TestOverlapExclusion:
         """
         unit = unit_factory()
         first = self.confirmed(unit, tenant, landlord, start_offset=400, days=200)
-        Tenancy.all_objects.filter(pk=first.pk).update(status=TenancyStatus.ENDED)
+        # Over. A date, not a status: there is no `ended` any more.
+        Tenancy.all_objects.filter(pk=first.pk).update(
+            end_date=dt.date.today() - dt.timedelta(days=1)
+        )
 
         overlapping = a_stay(unit, tenant, start_offset=300, days=200)
 
@@ -311,7 +332,10 @@ class TestOverlapExclusion:
             is_retrospective=True,
         )
         first = confirm_claim(january, source=ConfirmationSource.LANDLORD, confirmed_by=landlord)
-        Tenancy.all_objects.filter(pk=first.pk).update(status=TenancyStatus.ENDED)
+        # Over. A date, not a status: there is no `ended` any more.
+        Tenancy.all_objects.filter(pk=first.pk).update(
+            end_date=dt.date.today() - dt.timedelta(days=1)
+        )
 
         february = create_claim(
             unit=unit,
