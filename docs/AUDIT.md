@@ -605,7 +605,65 @@ cd ../frontend
 npm run lint && npm run typecheck && npm run test:run
 ```
 
-The findings in §4 and §5 each have a named test in
-`backend/tests/test_api_contract.py`. Where a test asserts broken behaviour, its
-docstring says so — **inverting those assertions is part of the schema
+The findings in §4 and §5 each had a named test in
+`backend/tests/test_api_contract.py`. Where a test asserted broken behaviour,
+its docstring said so — **inverting those assertions was part of the schema
 rewrite's definition of done.**
+
+`test_api_contract.py` was deleted in Phase 7 along with the apps it described.
+§9 below is what replaces it: the record that the loop actually closed.
+
+---
+
+## 9. Traceability: every finding and where it went
+
+`test_api_contract.py` pinned the draft's behaviour, including the parts that
+were broken. It died with the draft, which means **the evidence that each
+finding was addressed cannot live in a test any more** — a deleted test proves
+nothing. This table is that evidence.
+
+Three dispositions, and the distinction matters. *Fixed and pinned* means the
+new code behaves correctly and a named, living test fails if that stops being
+true. *Fixed by deletion* means the defective code no longer exists, and there
+is nothing to pin because there is nothing to regress. *Open* means exactly
+what it says.
+
+### §4 — Security and correctness
+
+| # | Finding | Disposition | Evidence |
+|---|---|---|---|
+| 4.1 | **`increment_views()` 500s the detail endpoint for every visitor.** `Rental.increment_views()` called `save()` inside a read path, tripping the `lease_duration` validation (4.9) on rows that predated it. | **Fixed by deletion.** No view-counter exists in the rebuilt models, and no read path writes. | `Property`/`Unit` carry no counter field; the read path has no `save()`. |
+| 4.2 | **Review reporting unreachable by anyone.** The `report` action required `IsAdminUser`, so the only people who could report a review were the ones who could already delete it. | **Fixed by deletion.** `ReviewReport` is gone. Moderation is now `Review.is_published` + `hidden_reason`, staff-only, and a check constraint refuses a hidden review with no reason. | `test_reviews.py::TestRatings::test_a_hidden_review_must_say_why` |
+| 4.3 | `SECRET_KEY` hard-coded insecure fallback. | **Fixed and pinned.** Prod settings refuse to boot without it. | `test_tenant_config.py`, `config/settings/prod.py` |
+| 4.4 | **`user_type` privilege escalation.** `user_type` was client-supplied at registration and `reviews/views.py` checked `user.user_type == 'admin'` for moderation — so anyone could register as a platform admin. | **Fixed by deletion, and the field is gone.** Role is now the *existence of a profile* (ADR-003); there is no field a registration payload could set. | `test_authorization.py`, and the `platform_admin` fixture exists specifically to prove the escalation path is closed |
+| 4.5 | **Logout never worked.** `token.blacklist()` was called but `token_blacklist` was not in `INSTALLED_APPS`, and a bare `except Exception` swallowed the error. Refresh tokens were immortal. | **Fixed and pinned.** | `test_smoke.py::test_token_blacklist_app_is_installed`, plus the auth tests |
+| 4.6 | `CORS_ALLOW_ALL_ORIGINS` under `DEBUG`. | **Fixed and pinned.** Split settings; prod never enables it. | `config/settings/prod.py`, `test_tenant_config.py` |
+| 4.7 | Dockerfile ran as root and migrated on start. | **Fixed.** Non-root user; migrations are a deploy step. | `backend/Dockerfile` |
+| 4.8 | docker-compose gaps (no healthchecks, no volumes). | **Fixed.** | `docker-compose.yml` |
+| 4.9 | `Rental.save()` raised bare `ValueError` → unhandled 500. | **Fixed by deletion.** Range validation is now a `CheckConstraint`, which DRF surfaces as a 400. | `tenancy_end_after_start`, `claim_end_after_start` and siblings |
+| 4.10 | Hard-coded LAN address; 60-minute access tokens; duplicated `VITE_API_URL`; two lockfiles. | **Fixed.** | settings, `.env.example`, `bun.lockb` removed |
+
+### §3 — US-context assumptions
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| **`square_footage` stored in ft², rendered as m².** A listing showing "120 m²" was 120 ft² — an order-of-magnitude lie about the size of a room. | **Fixed by deletion.** The rebuilt `Unit` has no area field at all. Kenyan student housing is advertised by room type (bedsitter, one-bedroom), not by area, so the honest fix was to stop storing a number nobody quotes. | `properties/models.py` — `unit_type`, no `square_footage` |
+| USD currency, US address shape, US property typology, `en-US` locale. | **Fixed by deletion and rebuild.** KES, county/town/estate, Kenyan unit types. | `universities/constants.py::KENYAN_COUNTIES`, `properties/constants.py` |
+
+### §5 — Frontend
+
+| Finding | Disposition |
+|---|---|
+| **Four dead URL contracts** — `GET /rentals/` (router root, not a list), `POST /rentals/`, `GET /rentals/top-rated/`, `GET /reviews/statistics/{id}/`. Plus `GET /admin/statistics/` and `PUT /auth/profile/` (405). | **Fixed by deletion, and structurally prevented.** The frontend was replaced in Round 2 and calls nothing by hand-written string: `src/api/schema.d.ts` is generated from the OpenAPI document, and CI fails if it drifts. A URL that does not exist is now a **type error**, not a 404 in production. |
+| `User.role` read but the field was `user_type`. | **Fixed by deletion.** Neither field exists; capabilities come from `/auth/me/`. |
+| Pagination shape mismatch. | **Fixed.** The client handles the DRF envelope in one place. |
+| 37 dead `components/ui/*` files. | **Fixed by deletion.** Four vendored primitives remain. |
+
+### Still open
+
+| Item | Why |
+|---|---|
+| **The backend has almost no HTTP API.** Thirteen auth paths and `/api/v1/tenant/config/`. Everything from phases 3–7 is models, services and jobs with no views. | Deliberate sequencing, not an oversight — but it is the largest single piece of remaining work, and the frontend round depends entirely on it. |
+| **Zero `PUBLIC_CANONICAL` routes.** ADR-001's neutral host has no content. | Every public route belonged to a draft app. Returns when the public listing endpoints are built. |
+| OpenAPI schema generates with warnings. | The draft's function-based views were the main source; the remainder clear up as the real views land. |
+| `Unit.vacant_count` is never reconciled against tenancies. | No job checks that vacancy matches reality. Worth building alongside the property API. |
