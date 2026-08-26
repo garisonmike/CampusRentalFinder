@@ -264,6 +264,12 @@ class VerificationRequest(TenantScopedModel):
     #: Which attempt this is, for the resubmission cap.
     attempt = models.PositiveSmallIntegerField(_("attempt"), default=1)
 
+    #: The opaque handle this case is known by in the access log after erasure.
+    #: Random, generated once, never derived from anything about the student.
+    subject_token = models.CharField(
+        _("subject token"), max_length=64, default=secrets.token_hex, editable=False
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -326,8 +332,40 @@ class DocumentAccessLog(models.Model):
     years later, and by then the only honest answer lives here.
     """
 
+    #: NULLED at erasure. The row survives; the link to a person does not.
     document = models.ForeignKey(
-        VerificationDocument, on_delete=models.PROTECT, related_name="access_log"
+        VerificationDocument,
+        on_delete=models.PROTECT,
+        related_name="access_log",
+        null=True,
+        blank=True,
+    )
+    #: Also nulled at erasure, for the same reason. Kept as a separate FK from
+    #: `document` because a document may back more than one request, and the
+    #: audit question is usually "case X", not "file Y".
+    verification_request = models.ForeignKey(
+        "accounts.VerificationRequest",
+        on_delete=models.SET_NULL,
+        related_name="access_log",
+        null=True,
+        blank=True,
+    )
+
+    #: An opaque, RANDOM handle for the case this access belonged to.
+    #:
+    #: Generated at creation and stored. **Not derived from any identifier** --
+    #: a hash of a user id is reversible by enumerating the users, which is not
+    #: pseudonymisation, it is obfuscation with extra steps.
+    #:
+    #: It is what survives erasure. Rows sharing a token were accesses to the
+    #: same case, so the trail still answers "who opened this, when, and why"
+    #: after every link to a person is gone. It cannot answer "which person was
+    #: that", and ADR-008 records that as deliberate and irreversible.
+    #: Defaulted so a row can never exist without one; the caller always
+    #: passes the case's token explicitly, and the constraint below refuses
+    #: a blank.
+    subject_token = models.CharField(
+        _("subject token"), max_length=64, default=secrets.token_hex, db_index=True
     )
     #: SET_NULL rather than PROTECT: a reviewer who leaves must be deletable,
     #: and the row survives to say a read happened even if it can no longer
@@ -354,6 +392,9 @@ class DocumentAccessLog(models.Model):
         ]
         constraints = [
             models.CheckConstraint(condition=~Q(reviewer_label=""), name="doclog_names_a_reader"),
+            # The token is what remains after erasure. A row without one is an
+            # access nobody can group, which is the trail failing quietly.
+            models.CheckConstraint(condition=~Q(subject_token=""), name="doclog_has_a_token"),
         ]
 
     def __str__(self) -> str:
@@ -486,8 +527,17 @@ def signed_document_url(
             }
         )
 
+    # The token identifies the CASE, so it comes from the request rather than
+    # being minted here -- otherwise every access to one document would carry a
+    # different handle and the post-erasure trail could not be grouped at all.
+    verification_request = document.requests.order_by("created_at").first()
+
     DocumentAccessLog.objects.create(
         document=document,
+        verification_request=verification_request,
+        subject_token=(
+            verification_request.subject_token if verification_request else secrets.token_hex(32)
+        ),
         reviewer=reviewer,
         reviewer_label=reviewer.get_full_name() or reviewer.email,
         purpose=purpose,

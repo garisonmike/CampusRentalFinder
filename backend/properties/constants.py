@@ -31,6 +31,17 @@ class PropertyStatus(models.TextChoices):
     SUSPENDED = "suspended", _("Suspended")
     ARCHIVED = "archived", _("Archived")
 
+    #: The owner erased their account (ADR-008). Distinct from ARCHIVED,
+    #: which is a decision the owner made about a listing they still hold.
+    #: A dormant property has no owner who can act on it, ever again, so
+    #: nothing may move it back out of this state.
+    DORMANT = "dormant", _("Dormant — the owner's account was erased")
+
+
+#: Statuses in which a property accepts new applications, claims and inquiries.
+#: DORMANT is absent by construction: there is nobody left to answer them.
+TRANSACTABLE_PROPERTY_STATUSES = (PropertyStatus.PUBLISHED,)
+
 
 class FurnishingStatus(models.TextChoices):
     UNFURNISHED = "unfurnished", _("Unfurnished")

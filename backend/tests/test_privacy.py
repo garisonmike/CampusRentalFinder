@@ -19,11 +19,14 @@ import pytest
 from accounts.privacy import (
     ERASED_EMAIL_DOMAIN,
     TOMBSTONE_NAME,
+    ActiveTenanciesError,
     AlreadyErasedError,
     display_name_for,
+    erase_landlord_data,
     erase_personal_data,
     export_personal_data,
     is_tombstoned,
+    landlord_erasure_blockers,
 )
 from ratings.models import Review
 from ratings.recompute import recompute_unit
@@ -411,3 +414,513 @@ class TestExportAfterErasure:
         user.refresh_from_db()
 
         assert len(export_personal_data(user)["reviews"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# The access log after erasure
+# ---------------------------------------------------------------------------
+
+
+def reachable_from(instance, *, max_depth: int = 6) -> list[str]:
+    """Every object reachable from ``instance`` by following forward FKs.
+
+    Walks the relations rather than asserting on the columns anyone happens to
+    remember. A field added later that reintroduces a path to a person is
+    exactly the regression this must catch, and a hand-written column list
+    cannot -- it would still pass, because it would not know to look.
+
+    Returns "app.Model#pk" strings so a failure names the path it found.
+    """
+    seen: set[tuple[str, int]] = set()
+    found: list[str] = []
+    frontier = [(instance, 0)]
+
+    while frontier:
+        obj, depth = frontier.pop()
+        if obj is None or depth > max_depth:
+            continue
+
+        key = (obj._meta.label, obj.pk)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(f"{obj._meta.label}#{obj.pk}")
+
+        for field in obj._meta.get_fields():
+            if not field.is_relation or not (field.many_to_one or field.one_to_one):
+                continue
+            if not hasattr(field, "attname"):
+                continue
+            try:
+                related = getattr(obj, field.name, None)
+            except Exception:  # noqa: S112 - a broken relation is not a leak
+                continue
+            if related is not None and hasattr(related, "_meta"):
+                frontier.append((related, depth + 1))
+
+    return found
+
+
+class TestAccessLogIsPseudonymisedAtErasure:
+    """ADR-008 §2.1. Neither deleting the audit trail nor keeping the link.
+
+    The log records what **our staff** did. Deleting it destroys evidence a
+    regulator is entitled to and the subject has no right to remove. Keeping
+    the foreign keys leaves the subject reachable from it. So the row survives
+    and every link to the person is cut.
+    """
+
+    def logged_access(self, student_profile, university_staff):
+        import io
+
+        from PIL import Image
+
+        from accounts.documents import (
+            DocumentAccessLog,
+            signed_document_url,
+            submit_verification_document,
+        )
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(buffer, format="JPEG")
+        request = submit_verification_document(student_profile, buffer.getvalue())
+        signed_document_url(request.document, reviewer=university_staff)
+        entry = DocumentAccessLog.objects.filter(verification_request=request).get()
+        return entry, request
+
+    def test_the_log_carries_the_cases_token(self, student_profile, university_staff):
+        entry, request = self.logged_access(student_profile, university_staff)
+
+        assert entry.subject_token == request.subject_token
+        assert len(entry.subject_token) >= 32
+
+    def test_the_token_is_random_not_derived(self, student_profile, university_staff):
+        """A hash of a user id is reversible by enumerating the users, which is
+        obfuscation rather than pseudonymisation.
+
+        Tested as **non-reproducibility**, not by looking for the pk inside the
+        string: a 3-digit pk turns up in random hex by chance often enough that
+        such an assertion is a coin flip. What matters is that nobody holding
+        the identifiers can regenerate the token.
+        """
+        import hashlib
+
+        entry, _request = self.logged_access(student_profile, university_staff)
+        token = entry.subject_token
+
+        identifiers = (
+            str(student_profile.pk),
+            str(student_profile.user_id),
+            student_profile.user.email,
+        )
+        for identifier in identifiers:
+            for candidate in (
+                identifier,
+                hashlib.sha256(identifier.encode()).hexdigest(),
+                hashlib.md5(identifier.encode()).hexdigest(),  # noqa: S324
+            ):
+                assert token != candidate
+
+    def test_the_same_student_gets_a_new_token_per_case(self, student_profile, university_staff):
+        """The property that rules out derivation from anything about the
+        student: a derived token would repeat for the same student."""
+        from accounts.documents import reject_verification
+
+        first_entry, first_request = self.logged_access(student_profile, university_staff)
+        reject_verification(first_request, reviewer=university_staff, reason="Blurry.")
+        second_entry, _second = self.logged_access(student_profile, university_staff)
+
+        assert first_entry.subject_token != second_entry.subject_token
+
+    def test_two_cases_get_different_tokens(
+        self, student_profile, student_profile_factory, university_staff
+    ):
+        entry, _request = self.logged_access(student_profile, university_staff)
+        other, _other = self.logged_access(student_profile_factory(), university_staff)
+
+        assert entry.subject_token != other.subject_token
+
+    def test_two_accesses_to_one_case_share_its_token(self, student_profile, university_staff):
+        """The grouping the post-erasure trail depends on. Minting a fresh
+        token per access would leave a log nobody could group at all."""
+        from accounts.documents import DocumentAccessLog, signed_document_url
+
+        _entry, request = self.logged_access(student_profile, university_staff)
+        signed_document_url(request.document, reviewer=university_staff)
+
+        tokens = set(
+            DocumentAccessLog.objects.filter(verification_request=request).values_list(
+                "subject_token", flat=True
+            )
+        )
+
+        assert len(tokens) == 1
+
+    def test_the_row_survives_erasure(self, student_profile, university_staff):
+        from accounts.documents import DocumentAccessLog
+
+        self.logged_access(student_profile, university_staff)
+
+        erase_personal_data(student_profile.user)
+
+        assert DocumentAccessLog.objects.count() == 1
+
+    def test_what_survives_still_answers_the_audit_question(
+        self, student_profile, university_staff
+    ):
+        """ "Who opened this case, when, and why" must still have an answer."""
+        entry, _request = self.logged_access(student_profile, university_staff)
+        token = entry.subject_token
+
+        erase_personal_data(student_profile.user)
+        entry.refresh_from_db()
+
+        assert entry.subject_token == token
+        assert entry.reviewer_label
+        assert entry.accessed_at is not None
+        assert entry.purpose
+
+    def test_the_links_to_the_person_are_cut(self, student_profile, university_staff):
+        entry, _request = self.logged_access(student_profile, university_staff)
+
+        erase_personal_data(student_profile.user)
+        entry.refresh_from_db()
+
+        assert entry.document_id is None
+        assert entry.verification_request_id is None
+
+    def test_no_join_path_reaches_surviving_personal_data(self, student_profile, university_staff):
+        """The property that matters, walked rather than remembered.
+
+        Follows every forward relation from the log row and asserts none of
+        them lands on the student, their profile, their request or their
+        document. A test asserting on the two columns I happen to remember
+        would still pass after somebody added a third.
+        """
+        entry, request = self.logged_access(student_profile, university_staff)
+        user = student_profile.user
+
+        # The path exists before erasure -- otherwise this proves nothing.
+        before = reachable_from(entry)
+        assert f"{user._meta.label}#{user.pk}" in before
+
+        erase_personal_data(user)
+        entry.refresh_from_db()
+
+        after = reachable_from(entry)
+        forbidden = {
+            f"{user._meta.label}#{user.pk}",
+            f"{student_profile._meta.label}#{student_profile.pk}",
+            f"{request._meta.label}#{request.pk}",
+            f"{request.document._meta.label}#{request.document.pk}",
+        }
+
+        assert not (set(after) & forbidden), (
+            f"erasure left a path from the access log to personal data: "
+            f"{sorted(set(after) & forbidden)}\nfull walk: {after}"
+        )
+
+    def test_the_reviewer_is_still_reachable_and_that_is_intended(
+        self, student_profile, university_staff
+    ):
+        """The trail is about the reviewer. Cutting that link too would leave a
+        row saying only that *somebody* looked at *something*."""
+        entry, _request = self.logged_access(student_profile, university_staff)
+
+        erase_personal_data(student_profile.user)
+        entry.refresh_from_db()
+
+        assert f"{university_staff._meta.label}#{university_staff.pk}" in reachable_from(entry)
+
+    def test_it_is_irreversible(self, student_profile, university_staff):
+        """The token is random, so there is nothing to reverse -- no key, no
+        salt, no lookup table anywhere in the system."""
+        from accounts.documents import DocumentAccessLog
+
+        _entry, request = self.logged_access(student_profile, university_staff)
+        token = request.subject_token
+
+        erase_personal_data(student_profile.user)
+
+        # The token still exists on the request row, but the request is no
+        # longer reachable FROM the log, and nothing else stores the mapping.
+        assert DocumentAccessLog.objects.filter(subject_token=token).exists()
+        assert not DocumentAccessLog.objects.filter(
+            subject_token=token, verification_request__isnull=False
+        ).exists()
+
+    def test_the_report_counts_what_it_pseudonymised(self, student_profile, university_staff):
+        self.logged_access(student_profile, university_staff)
+
+        report = erase_personal_data(student_profile.user)
+
+        assert report.access_log_rows_pseudonymised == 1
+
+
+# ---------------------------------------------------------------------------
+# Landlord erasure
+# ---------------------------------------------------------------------------
+
+
+class TestLandlordErasure:
+    """ADR-008 §2.2. A landlord is two things at once.
+
+    A natural person, whose personal data they may have erased; and a
+    counterparty to contracts other people are still relying on, whose business
+    record they may not delete on their own say-so.
+    """
+
+    def a_landlord_with_a_block(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        prop = property_factory(landlord=landlord_profile)
+        unit = unit_factory(property=prop)
+        end = dt.date.today() - dt.timedelta(days=1)
+        tenancy = tenancy_factory(
+            unit=unit, tenant=tenant, start_date=end - dt.timedelta(days=120), end_date=end
+        )
+        review = create_review(tenancy, rating=2, comment="The gate never locked.")
+        return landlord_profile.user, prop, unit, review
+
+    def test_personal_data_is_erased(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        user, _prop, _unit, _review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        landlord_profile.national_id = "12345678"
+        landlord_profile.kra_pin = "A001234567X"
+        landlord_profile.payout_phone = "+254700000000"
+        landlord_profile.business_name = "Mwangi Rentals"
+        landlord_profile.save()
+
+        erase_landlord_data(user)
+        user.refresh_from_db()
+        landlord_profile.refresh_from_db()
+
+        assert user.phone_number == ""
+        assert landlord_profile.national_id == ""
+        assert landlord_profile.kra_pin == ""
+        assert landlord_profile.payout_phone == ""
+        assert landlord_profile.business_name == ""
+
+    def test_the_business_record_is_retained(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """Deleting the properties would erase other people's tenancy history
+        and their reviews, which is not the landlord's right to exercise."""
+        from properties.models import Property, Unit
+
+        user, prop, unit, review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        erase_landlord_data(user)
+
+        assert Property.all_objects.filter(pk=prop.pk).exists()
+        assert Unit.all_objects.filter(pk=unit.pk).exists()
+        assert Review.all_objects.filter(pk=review.pk).exists()
+
+    def test_properties_go_dormant_rather_than_cascading(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        from properties.constants import PropertyStatus
+
+        user, prop, unit, _review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        erase_landlord_data(user)
+        prop.refresh_from_db()
+        unit.refresh_from_db()
+
+        assert prop.status == PropertyStatus.DORMANT
+        assert prop.published_at is None
+        assert unit.is_active is False
+
+    def test_a_dormant_property_is_unsearchable(
+        self,
+        landlord_profile,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        """Unlisted means unlisted. There is nobody left to answer an inquiry
+        about it."""
+        from properties.constants import TRANSACTABLE_PROPERTY_STATUSES
+        from properties.models import Property
+
+        user, prop, _unit, _review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        campus_distance_factory(
+            property=prop, university=university, campus=campus_factory(university=university)
+        )
+
+        erase_landlord_data(user)
+
+        listable = Property.objects.for_tenant(university).filter(
+            status__in=TRANSACTABLE_PROPERTY_STATUSES
+        )
+        assert prop not in listable
+
+    def test_dormant_is_not_a_state_the_owner_chose(self):
+        """Distinct from ARCHIVED, which is a decision an owner made about a
+        listing they still hold. Nobody can move a property back out of
+        dormant, because there is no owner left to do it."""
+        from properties.constants import PropertyStatus
+
+        assert PropertyStatus.DORMANT != PropertyStatus.ARCHIVED
+        from properties.constants import TRANSACTABLE_PROPERTY_STATUSES
+
+        assert PropertyStatus.DORMANT not in TRANSACTABLE_PROPERTY_STATUSES
+
+    def test_reviews_stay_visible(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """Same reasoning as student erasure: deleting criticism by deleting
+        the account cannot be an available move."""
+        user, _prop, _unit, review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        erase_landlord_data(user)
+        review.refresh_from_db()
+
+        assert review.is_published is True
+        assert "gate" in review.comment
+
+    def test_the_landlord_aggregate_survives_under_the_tombstone(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        from ratings.aggregates import LandlordRatingAggregate
+        from ratings.recompute import recompute_landlord
+
+        user, _prop, _unit, _review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        recompute_landlord(landlord_profile.pk)
+
+        erase_landlord_data(user)
+
+        aggregate = LandlordRatingAggregate.objects.get(landlord=landlord_profile)
+        assert aggregate.average_rating is not None
+        assert display_name_for(aggregate.landlord.user) == "Former landlord"
+
+    def test_the_tombstone_says_landlord(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        user, _prop, _unit, _review = self.a_landlord_with_a_block(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        erase_landlord_data(user)
+        user.refresh_from_db()
+
+        assert display_name_for(user) == "Former landlord"
+
+
+class TestLandlordErasureIsBlockedByRunningTenancies:
+    """Flag, never silently partial.
+
+    Erasing the safe fields and leaving the rest is the worst outcome: the
+    subject believes they are erased, the platform believes it complied, and
+    neither is true.
+    """
+
+    def a_landlord_with_a_running_stay(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        prop = property_factory(landlord=landlord_profile)
+        unit = unit_factory(property=prop)
+        tenancy_factory(
+            unit=unit,
+            tenant=tenant,
+            start_date=dt.date.today() - dt.timedelta(days=30),
+            end_date=dt.date.today() + dt.timedelta(days=90),
+        )
+        return landlord_profile.user, prop
+
+    def test_it_is_refused(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """A landlord with students living in their property is a party to a
+        running contract. Erasing their contact details mid-tenancy leaves
+        those students with nobody to call."""
+        user, _prop = self.a_landlord_with_a_running_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        with pytest.raises(ActiveTenanciesError):
+            erase_landlord_data(user)
+
+    def test_nothing_is_erased_when_it_is_refused(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        from properties.constants import PropertyStatus
+
+        user, prop = self.a_landlord_with_a_running_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        landlord_profile.national_id = "12345678"
+        landlord_profile.save(update_fields=["national_id"])
+        original_email = user.email
+
+        with pytest.raises(ActiveTenanciesError):
+            erase_landlord_data(user)
+
+        user.refresh_from_db()
+        landlord_profile.refresh_from_db()
+        prop.refresh_from_db()
+
+        assert user.email == original_email
+        assert user.erased_at is None
+        assert landlord_profile.national_id == "12345678"
+        assert prop.status != PropertyStatus.DORMANT
+
+    def test_the_blocker_says_what_is_in_the_way(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        user, _prop = self.a_landlord_with_a_running_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        blockers = landlord_erasure_blockers(user)
+
+        assert len(blockers) == 1
+        assert "tenanc" in blockers[0].lower()
+        assert "once they end" in blockers[0]
+
+    def test_it_completes_once_the_stay_ends(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """Currency is derived, so this needs no job to have run -- the same
+        rows answer differently on a later date."""
+        user, _prop = self.a_landlord_with_a_running_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        after_the_stay = dt.date.today() + dt.timedelta(days=200)
+
+        assert landlord_erasure_blockers(user, today=after_the_stay) == []
+
+        report = erase_landlord_data(user, today=after_the_stay)
+
+        assert report.properties_made_dormant == 1
+
+    def test_a_past_tenancy_does_not_block(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        prop = property_factory(landlord=landlord_profile)
+        end = dt.date.today() - dt.timedelta(days=1)
+        tenancy_factory(
+            unit=unit_factory(property=prop),
+            tenant=tenant,
+            start_date=end - dt.timedelta(days=120),
+            end_date=end,
+        )
+
+        assert landlord_erasure_blockers(landlord_profile.user) == []
