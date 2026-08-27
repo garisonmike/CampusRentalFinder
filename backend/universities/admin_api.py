@@ -144,10 +144,12 @@ class UniversityPolicySerializer(serializers.ModelSerializer):
 
 @extend_schema_view(
     get=extend_schema(
+        responses=UniversityPolicySerializer,
         summary="Your university's policy and theme",
         description="University staff only, and only for their own institution.",
     ),
     patch=extend_schema(
+        responses=UniversityPolicySerializer,
         summary="Update your university's policy or theme",
         description=(
             "**The lockout guard runs here.** Setting `signup_policy` to "

@@ -25,6 +25,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
@@ -174,6 +175,7 @@ class ErasureRequestResultSerializer(serializers.ModelSerializer):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
         summary="Export everything held about you",
         description=(
             "Kenya's Data Protection Act §26(a).\n\n"
@@ -206,6 +208,7 @@ class DataExportView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={202: ErasureRequestResultSerializer, 409: ErasureRequestResultSerializer},
         summary="Request erasure of your personal data",
         description=(
             "Kenya's Data Protection Act §26(e).\n\n"
@@ -226,7 +229,10 @@ class DataExportView(APIView):
         ),
         request=ErasureRequestSerializer,
     ),
-    get=extend_schema(summary="Your erasure requests and their outcomes"),
+    get=extend_schema(
+        summary="Your erasure requests and their outcomes",
+        responses=ErasureRequestResultSerializer(many=True),
+    ),
 )
 class ErasureRequestView(APIView):
     """Erasure."""
@@ -275,6 +281,7 @@ class ErasureRequestView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=ErasureRequestResultSerializer,
         summary="Cancel your erasure request",
         description=(
             "Only during the cooling-off window, and **only by the subject**. "

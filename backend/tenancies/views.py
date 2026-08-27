@@ -149,6 +149,7 @@ class ApplicationListView(SchemaSafeQuerysetMixin, ListAPIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={201: TenancySerializer},
         summary="Accept an application",
         description=(
             "Creates a confirmed tenancy in the same transaction. An accepted "
@@ -191,6 +192,7 @@ class ApplicationAcceptView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=ApplicationSerializer,
         summary="Reject an application",
         description="Creates nothing. The reason is shown to the applicant.",
         request=ApplicationDecisionSerializer,
@@ -224,6 +226,7 @@ class ApplicationRejectView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=ApplicationSerializer,
         summary="Withdraw your own application",
         description=(
             "The applicant's own act, so no decider is recorded -- withdrawing "
@@ -404,6 +407,7 @@ class ClaimActionView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={201: TenancySerializer},
         summary="Confirm a claim",
         description=(
             "The landlord or an assigned caretaker agreeing the stay happened. Creates the tenancy."
@@ -428,6 +432,7 @@ class ClaimConfirmView(ClaimActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=TenancyClaimSerializer,
         summary="Dispute a claim, with a typed reason",
         description=(
             "The reason is enumerated because an untyped dispute cannot be "
@@ -479,6 +484,7 @@ class ClaimantActionView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={200: TenancyClaimSerializer, 201: TenancySerializer},
         summary="Accept the disputer's corrected dates",
         description=(
             "Normally settles the dispute with no administrator involved.\n\n"
@@ -504,6 +510,7 @@ class ClaimAcceptCorrectionView(ClaimantActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=TenancyClaimSerializer,
         summary="Counter the correction, once",
         description=(
             "Once, because an unbounded exchange between two people who "
@@ -528,6 +535,7 @@ class ClaimCounterView(ClaimantActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={200: TenancyClaimSerializer, 201: TenancySerializer},
         summary="Accept the tenant's counter-dates",
         description="The same review-defeating guard applies: a correction laundered through a counter is still a correction.",
         request=None,
@@ -544,6 +552,7 @@ class ClaimAcceptCounterView(ClaimActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=TenancyClaimSerializer,
         summary="Reject the counter",
         description="Two parties, no agreement. Escalates as `counter_unresolved`.",
         request=None,
@@ -615,6 +624,7 @@ class DisputeQueueView(SchemaSafeQuerysetMixin, ListAPIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={200: TenancyClaimSerializer, 201: TenancySerializer},
         summary="Decide an escalated claim",
         description="Upholding it confirms the claim as an administrator decision.",
         request=None,

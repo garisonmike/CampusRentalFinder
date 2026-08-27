@@ -190,7 +190,7 @@ export interface paths {
          * Your erasure requests and their outcomes
          * @description Erasure.
          */
-        get: operations["auth_privacy_erasure_retrieve"];
+        get: operations["auth_privacy_erasure_list"];
         put?: never;
         /**
          * Request erasure of your personal data
@@ -1506,6 +1506,21 @@ export interface components {
              */
             student_email: string;
         };
+        /**
+         * @description What confirming a token tells the caller about themselves.
+         *
+         *     Declared so the client's type is generated rather than hand-written. An
+         *     undeclared response leaves the schema saying "no response body", and the
+         *     frontend then owns a private copy of the contract -- which is how
+         *     `Paginated<T>` drifted three fields behind the API without anything
+         *     noticing.
+         */
+        EmailVerificationResult: {
+            readonly verification_status: string;
+            readonly verification_method: string | null;
+            /** Format: date-time */
+            readonly verified_at: string | null;
+        };
         /** @description Asking to be erased. */
         ErasureRequestRequest: {
             /** @description Your current password. Required to confirm it is you. */
@@ -1515,6 +1530,30 @@ export interface components {
             /** @description You must pass true. Erasure is irreversible, and your reviews SURVIVE with your name replaced by a tombstone -- deleting them would let anyone remove criticism by deleting an account (ADR-008). */
             confirm_understanding: boolean;
         };
+        /** @description What the subject is told. */
+        ErasureRequestResult: {
+            readonly id: number;
+            readonly status: components["schemas"]["ErasureRequestResultStatusEnum"];
+            readonly blockers: unknown;
+            /** @description What survives erasure, and why. Shown before and after. */
+            readonly retained: string[];
+            /** Format: date-time */
+            readonly requested_at: string;
+            /** Format: date-time */
+            readonly executes_after: string | null;
+            /** Format: date-time */
+            readonly cancelled_at: string | null;
+            /** Format: date-time */
+            readonly completed_at: string | null;
+        };
+        /**
+         * @description * `cooling_off` - Cooling off
+         *     * `completed` - Completed
+         *     * `blocked` - Blocked
+         *     * `cancelled` - Cancelled by the subject
+         * @enum {string}
+         */
+        ErasureRequestResultStatusEnum: "cooling_off" | "completed" | "blocked" | "cancelled";
         /**
          * @description * `counter_unresolved` - Which set of dates is right
          *     * `correction_defeats_review` - Whether a review-defeating correction is honest
@@ -1606,6 +1645,41 @@ export interface components {
          * @enum {string}
          */
         InquiryStatusEnum: "sent" | "answered" | "closed" | "expired";
+        /**
+         * @description A landlord's record across every property they own.
+         *
+         *     The cold-start signal (ADR-004): a property with no reviews of its own can
+         *     show this, **explicitly labelled as being about the landlord**, never about
+         *     this property.
+         */
+        LandlordRating: {
+            /**
+             * Format: decimal
+             * @description Mean rating, 1.00-5.00. **null means 'no verified reviews yet' and must render as those words.** Never 0, never an empty star row, never a placeholder. On a trust platform a fabricated signal is worse than no signal, because it is indistinguishable from a real one.
+             */
+            readonly average_rating: string | null;
+            /** @description Distinct students who contributed. **This is the public denominator: render it as 'from N students'.** It is deliberately smaller than review_count whenever anyone reviewed more than one stay in the same property -- that divergence IS the de-duplication, not a bug. */
+            readonly student_count: number;
+            /** @description Number of review rows behind the average. **Not the public denominator** -- use student_count for that. A student who moved from a bedsitter to a one-bedroom in the same block writes two genuine reviews and counts as one voice, so these two numbers are SUPPOSED to differ. */
+            readonly review_count: number;
+            /** @description Counts by star, 1-5, every bucket present. Describes RAW reviews, not de-duplicated students -- 'how the scores fall' and 'how many people spoke' are different questions and both get an honest answer. */
+            readonly rating_distribution: {
+                [key: string]: number;
+            };
+            /** Format: date-time */
+            readonly last_review_at: string | null;
+            /**
+             * Format: date-time
+             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request.
+             */
+            readonly computed_at: string;
+            /** @description How many of this landlord's properties the figure spans. Show it alongside the average: '4.2 across one property' and '4.2 across nine' are different claims. */
+            readonly property_count: number;
+        };
+        /** @description A bare confirmation. The message is for a human, not for a branch. */
+        Message: {
+            readonly message: string;
+        };
         PaginatedAdminUserList: {
             /** @example 340 */
             count: number;
@@ -1759,6 +1833,31 @@ export interface components {
             /** Active */
             is_active?: boolean;
         };
+        /**
+         * @description Creating or editing a review.
+         *
+         *     ``tenancy`` is write-only and validated against the caller: a review is
+         *     only ever about the caller's own stay, and accepting an arbitrary tenancy
+         *     id would let anyone review anyone's.
+         */
+        PatchedReviewWriteRequest: {
+            /** @description The stay being reviewed. Must be one of your own, at least REVIEW_MINIMUM_STAY_DAYS long, and not already reviewed (ADR-004). */
+            tenancy?: number;
+            /** Overall rating */
+            rating?: number;
+            /** Cleanliness */
+            cleanliness_rating?: number | null;
+            /** Security */
+            security_rating?: number | null;
+            /** Water reliability */
+            water_reliability_rating?: number | null;
+            /** Landlord */
+            landlord_rating?: number | null;
+            /** Value for money */
+            value_rating?: number | null;
+            comment?: string;
+            would_recommend?: boolean | null;
+        };
         /** @description The settings a school administers about itself. */
         PatchedUniversityPolicyRequest: {
             /** @description Short form used in the interface, e.g. "KyU". */
@@ -1873,6 +1972,25 @@ export interface components {
             readonly view_count: number;
         };
         /**
+         * @description What the property rating endpoint returns: two aggregates, side by side.
+         *
+         *     Declared so the client's types are **generated** rather than hand-written.
+         *     An undeclared response makes the schema say "no response body", and a
+         *     frontend that then describes the payload by hand owns a second copy of the
+         *     contract -- which is how `Paginated<T>` drifted, and how three of the five
+         *     entries in `docs/OPERATIONS.md` began.
+         *
+         *     The landlord figure is a separate key rather than a fallback value on
+         *     purpose. A landlord's record is not this property's rating, and merging
+         *     them would be the platform quietly answering a question nobody asked.
+         */
+        PropertyRating: {
+            /** @description This property's own rating. `average_rating: null` means no verified reviews yet and must render as those words. */
+            readonly property: components["schemas"]["RatingAggregate"];
+            /** @description The owner's record across their whole portfolio, offered as a cold-start signal (ADR-004). **Label it as being about the landlord.** Never present it as this property's score, and never fall back to it when `property.average_rating` is null. */
+            readonly landlord: components["schemas"]["LandlordRating"];
+        };
+        /**
          * @description A property in a search result.
          *
          *     `nearest_campus_km` is annotated by the ordering helper and is present only
@@ -1935,6 +2053,35 @@ export interface components {
          */
         PropertyTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
         /**
+         * @description The shared shape of all three aggregates.
+         *
+         *     A plain Serializer rather than three ModelSerializers: the fields are
+         *     identical by design, and three copies would be three places for the
+         *     contract notes to drift apart.
+         */
+        RatingAggregate: {
+            /**
+             * Format: decimal
+             * @description Mean rating, 1.00-5.00. **null means 'no verified reviews yet' and must render as those words.** Never 0, never an empty star row, never a placeholder. On a trust platform a fabricated signal is worse than no signal, because it is indistinguishable from a real one.
+             */
+            readonly average_rating: string | null;
+            /** @description Distinct students who contributed. **This is the public denominator: render it as 'from N students'.** It is deliberately smaller than review_count whenever anyone reviewed more than one stay in the same property -- that divergence IS the de-duplication, not a bug. */
+            readonly student_count: number;
+            /** @description Number of review rows behind the average. **Not the public denominator** -- use student_count for that. A student who moved from a bedsitter to a one-bedroom in the same block writes two genuine reviews and counts as one voice, so these two numbers are SUPPOSED to differ. */
+            readonly review_count: number;
+            /** @description Counts by star, 1-5, every bucket present. Describes RAW reviews, not de-duplicated students -- 'how the scores fall' and 'how many people spoke' are different questions and both get an honest answer. */
+            readonly rating_distribution: {
+                [key: string]: number;
+            };
+            /** Format: date-time */
+            readonly last_review_at: string | null;
+            /**
+             * Format: date-time
+             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request.
+             */
+            readonly computed_at: string;
+        };
+        /**
          * @description * `dates_incorrect` - dates_incorrect
          *     * `never_tenanted` - never_tenanted
          *     * `duplicate` - duplicate
@@ -1987,6 +2134,36 @@ export interface components {
             readonly author_name: string;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        /** @description The landlord's reply. One per review, ever (ADR-004). */
+        ReviewResponseWriteRequest: {
+            /** Response */
+            body: string;
+        };
+        /**
+         * @description Creating or editing a review.
+         *
+         *     ``tenancy`` is write-only and validated against the caller: a review is
+         *     only ever about the caller's own stay, and accepting an arbitrary tenancy
+         *     id would let anyone review anyone's.
+         */
+        ReviewWriteRequest: {
+            /** @description The stay being reviewed. Must be one of your own, at least REVIEW_MINIMUM_STAY_DAYS long, and not already reviewed (ADR-004). */
+            tenancy: number;
+            /** Overall rating */
+            rating: number;
+            /** Cleanliness */
+            cleanliness_rating?: number | null;
+            /** Security */
+            security_rating?: number | null;
+            /** Water reliability */
+            water_reliability_rating?: number | null;
+            /** Landlord */
+            landlord_rating?: number | null;
+            /** Value for money */
+            value_rating?: number | null;
+            comment?: string;
+            would_recommend?: boolean | null;
         };
         /**
          * @description Saving one, by slug.
@@ -2192,6 +2369,12 @@ export interface components {
             secondary: string;
             accent: string;
         };
+        /** @description A bare confirmation. The message is for a human, not for a branch. */
+        ToggleActiveResult: {
+            readonly message: string;
+            /** @description The state AFTER the toggle, so the caller need not guess it. */
+            readonly is_active: boolean;
+        };
         TokenRefresh: {
             readonly access: string;
             refresh: string;
@@ -2350,6 +2533,45 @@ export interface components {
          * @enum {string}
          */
         UnitTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
+        /** @description The settings a school administers about itself. */
+        UniversityPolicy: {
+            readonly name: string;
+            /** @description Short form used in the interface, e.g. "KyU". */
+            display_name: string;
+            /**
+             * @description `open` (verification not mentioned at signup), `verification_encouraged` (prompted, can skip), or `verification_required`.
+             *
+             *     **Cannot be set to `verification_required` until at least one student here is verified.** A school that sets it before issuing student addresses locks out an entire intake in the week they most need the platform.
+             *
+             *     Raising this affects NEW signups only. Existing students keep what they had -- gating reads the policy frozen at each student's own registration (ADR-003).
+             *
+             *     * `open` - Open — verification is not mentioned at signup
+             *     * `verification_encouraged` - Encouraged — the student is prompted and can skip
+             *     * `verification_required` - Required — signup completes only for a verified student
+             */
+            signup_policy?: components["schemas"]["SignupPolicyEnum"];
+            /** @description Which paths this school offers. Empty means none, which is the default. A school with no document reviewers should not enable `student_id_upload`: uploads would arrive into a queue nobody works, and since the retention clock starts at upload that means collecting national IDs purely to delete them thirty days later. */
+            verification_methods_enabled?: components["schemas"]["VerificationMethodsEnabledEnum"][];
+            /** @description Domains that prove enrolment, e.g. `["s.kyu.ac.ke"]`. Matched EXACTLY on the full domain -- list every subdomain you want accepted, because `alumni.kyu.ac.ke` is not `kyu.ac.ke` and the platform will not infer enrolment from DNS hierarchy. Blank entries are dropped; whitespace and case are normalised. */
+            student_email_domains?: string[];
+            /**
+             * Verification grace period (days)
+             * @description How long a new student may use gated actions before verifying. Verification waits on a registry or a human reviewer, neither of which the student controls.
+             */
+            verification_grace_period_days?: number;
+            verification_required_to_review?: boolean;
+            /**
+             * Format: date
+             * @description Announce a change before it bites. Until this date the policy is treated as `open` for new signups.
+             */
+            verification_enforced_from?: string | null;
+            /** Primary colour */
+            primary_hsl?: string;
+            /** Secondary colour */
+            secondary_hsl?: string;
+            /** Accent colour */
+            accent_hsl?: string;
+        };
         /** @description A user's own identity, with their capability set. */
         User: {
             readonly id: number;
@@ -2413,6 +2635,16 @@ export interface components {
             last_name: string;
             phone_number?: string;
         };
+        /** @description Counts by capability rather than by a self-declared role string. */
+        UserStatistics: {
+            readonly total_users: number;
+            readonly active_users: number;
+            readonly students: number;
+            readonly landlords: number;
+            readonly university_staff: number;
+            readonly platform_staff: number;
+            readonly verified_students: number;
+        };
         /**
          * @description The fields a user may change about themselves.
          *
@@ -2475,6 +2707,11 @@ export interface components {
          * @enum {string}
          */
         VerificationStatusEnum: "pending" | "approved" | "rejected";
+        /** @description A bare confirmation. The message is for a human, not for a branch. */
+        VerifyUserResult: {
+            readonly message: string;
+            readonly user: components["schemas"]["User"];
+        };
     };
     responses: never;
     parameters: never;
@@ -2493,12 +2730,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UserStatistics"];
+                };
             };
         };
     };
@@ -2662,12 +2900,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ToggleActiveResult"];
+                };
             };
         };
     };
@@ -2682,12 +2921,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["VerifyUserResult"];
+                };
             };
             /** @description No response body */
             404: {
@@ -2732,12 +2972,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
             };
         };
     };
@@ -2775,16 +3016,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
             };
         };
     };
-    auth_privacy_erasure_retrieve: {
+    auth_privacy_erasure_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -2793,12 +3035,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErasureRequestResult"][];
+                };
             };
         };
     };
@@ -2817,12 +3060,21 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErasureRequestResult"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErasureRequestResult"];
+                };
             };
         };
     };
@@ -2843,12 +3095,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErasureRequestResult"];
+                };
             };
         };
     };
@@ -2867,12 +3120,15 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
             };
         };
     };
@@ -3035,12 +3291,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["VerificationRequest"];
+                };
             };
         };
     };
@@ -3059,12 +3316,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["EmailVerificationResult"];
+                };
             };
         };
     };
@@ -3158,12 +3416,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["VerificationRequest"];
+                };
             };
         };
     };
@@ -3207,12 +3466,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["VerificationRequest"];
+                };
             };
         };
     };
@@ -3276,12 +3536,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Inquiry"];
+                };
             };
         };
     };
@@ -3302,12 +3563,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Inquiry"];
+                };
             };
         };
     };
@@ -3491,14 +3753,21 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ReviewWriteRequest"];
+                "multipart/form-data": components["schemas"]["ReviewWriteRequest"];
+            };
+        };
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Review"];
+                };
             };
         };
     };
@@ -3511,14 +3780,21 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedReviewWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedReviewWriteRequest"];
+                "multipart/form-data": components["schemas"]["PatchedReviewWriteRequest"];
+            };
+        };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Review"];
+                };
             };
         };
     };
@@ -3531,14 +3807,21 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewResponseWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ReviewResponseWriteRequest"];
+                "multipart/form-data": components["schemas"]["ReviewResponseWriteRequest"];
+            };
+        };
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ReviewResponse"];
+                };
             };
         };
     };
@@ -3579,12 +3862,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PropertyRating"];
+                };
             };
         };
     };
@@ -3599,12 +3883,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["RatingAggregate"];
+                };
             };
         };
     };
@@ -3700,12 +3985,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Tenancy"];
+                };
             };
         };
     };
@@ -3726,12 +4012,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
             };
         };
     };
@@ -3746,12 +4033,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
             };
         };
     };
@@ -3815,12 +4103,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenancy"];
+                };
             };
         };
     };
@@ -3835,12 +4132,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenancy"];
+                };
             };
         };
     };
@@ -3855,12 +4161,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Tenancy"];
+                };
             };
         };
     };
@@ -3881,12 +4188,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
             };
         };
     };
@@ -3907,12 +4215,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
             };
         };
     };
@@ -3927,12 +4236,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
             };
         };
     };
@@ -3972,12 +4282,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tenancy"];
+                };
             };
         };
     };
@@ -4016,12 +4335,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UniversityPolicy"];
+                };
             };
         };
     };
@@ -4040,12 +4360,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UniversityPolicy"];
+                };
             };
         };
     };

@@ -110,6 +110,7 @@ class SavedPropertyListView(SchemaSafeQuerysetMixin, ListAPIView):
 
 @extend_schema_view(
     delete=extend_schema(
+        responses={204: None},
         summary="Unsave a property",
         description="Idempotent: unsaving something not saved is a 204, not a 404.",
     )
@@ -207,6 +208,7 @@ class InquiryListView(SchemaSafeQuerysetMixin, ListAPIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=InquirySerializer,
         summary="Answer an inquiry",
         description=(
             "The landlord always; an assigned caretaker only with the "
@@ -246,6 +248,7 @@ class InquiryRespondView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=InquirySerializer,
         summary="Close an inquiry without answering",
         description=(
             "Not a rejection: an inquiry is not an application, and there is "

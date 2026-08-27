@@ -37,7 +37,9 @@ from .aggregates import (
 from .models import Review
 from .serializers import (
     LandlordRatingSerializer,
+    PropertyRatingSerializer,
     RatingAggregateSerializer,
+    ReviewResponseSerializer,
     ReviewResponseWriteSerializer,
     ReviewSerializer,
     ReviewWriteSerializer,
@@ -94,6 +96,7 @@ EMPTY_AGGREGATE = {
             "secondary signal, **labelled as being about the landlord**, never "
             "about this property."
         ),
+        responses=PropertyRatingSerializer,
     )
 )
 class PropertyRatingView(APIView):
@@ -134,6 +137,7 @@ class PropertyRatingView(APIView):
             "collapse. `student_count` and `review_count` differ here only "
             "when someone genuinely returned to the same room years later."
         ),
+        responses=RatingAggregateSerializer,
     )
 )
 class UnitRatingView(APIView):
@@ -207,6 +211,8 @@ class PropertyReviewListView(SchemaSafeQuerysetMixin, ListAPIView):
 
 @extend_schema_view(
     post=extend_schema(
+        request=ReviewWriteSerializer,
+        responses={201: ReviewSerializer},
         summary="Write a review",
         description=(
             "Requires a confirmed tenancy of your own, at least "
@@ -236,6 +242,8 @@ class ReviewCreateView(APIView):
 
 @extend_schema_view(
     patch=extend_schema(
+        request=ReviewWriteSerializer,
+        responses=ReviewSerializer,
         summary="Edit your review, inside its window",
         description=(
             "Editable for REVIEW_EDIT_WINDOW_DAYS after posting, then frozen. "
@@ -272,6 +280,8 @@ class ReviewEditView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        request=ReviewResponseWriteSerializer,
+        responses={201: ReviewResponseSerializer},
         summary="Respond to a review, once",
         description=(
             "The landlord's single public reply. Never a caretaker's: a "
@@ -301,7 +311,5 @@ class ReviewResponseCreateView(APIView):
         response = respond_to_review(
             review, author=request.user, body=serializer.validated_data["body"]
         )
-
-        from .serializers import ReviewResponseSerializer
 
         return Response(ReviewResponseSerializer(response).data, status=201)

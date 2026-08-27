@@ -942,6 +942,103 @@ def test_the_contract_notes_reach_the_generated_schema() -> None:
     )
 
 
+# Operations whose success really is empty. Each carries its reason, and
+# `test_no_dead_empty_body_exemptions` fails when one stops being true --
+# because a schema cannot tell "declared as empty" from "nobody declared it",
+# and an exemption nobody re-reads is how the second becomes permanent.
+EMPTY_SUCCESS_BODIES: dict[str, str] = {
+    "POST /api/v1/auth/token/verify/ -> 200": (
+        "simplejwt answers a valid token with an empty object. The status IS "
+        "the answer; a body would be inventing something to say."
+    ),
+    "POST /api/v1/auth/verification/email/request/ -> 202": (
+        "Accepted, and deliberately silent. Confirming whether an address "
+        "exists or a mail was queued would make this an account-enumeration "
+        "oracle, so the same 202 is returned either way."
+    ),
+}
+
+
+def test_every_operation_declares_a_response_body() -> None:
+    """No endpoint may reach the client as "no response body".
+
+    drf-spectacular cannot guess the response of a plain `APIView`, and when it
+    cannot it emits the operation with no schema at all -- silently, as a
+    warning in a build that passes. The client then has two options and both
+    are bad: call the endpoint untyped, or hand-write the shape. Hand-writing
+    it is how `Paginated<T>` ended up three fields behind the API with nothing
+    able to notice, because a hand-written type cannot disagree with itself.
+
+    This is the same failure `docs/OPERATIONS.md` collects: the contract
+    declared in two places, and the copy the compiler reads being the wrong
+    one. The fix is that there is only ever one copy, which means every
+    operation has to declare its own.
+
+    Fails on **addition**: a new `APIView` without `responses=` fails here on
+    the commit that adds it, rather than on the frontend commit that needs it
+    six weeks later.
+    """
+    from drf_spectacular.generators import SchemaGenerator
+
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+
+    undeclared: list[str] = []
+
+    for path, operations in schema.get("paths", {}).items():
+        for method, operation in operations.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+
+            for status, response in operation.get("responses", {}).items():
+                # Success bodies only. 204 is the one honest empty success, and
+                # error bodies are the single shared error contract
+                # (`config/api/errors.py`) rather than something each endpoint
+                # describes for itself -- requiring them here would push the
+                # same envelope into fifty-odd declarations, which is the
+                # duplication this test exists to prevent.
+                if not str(status).startswith("2") or str(status) == "204":
+                    continue
+                key = f"{method.upper()} {path} -> {status}"
+                if not response.get("content") and key not in EMPTY_SUCCESS_BODIES:
+                    undeclared.append(key)
+
+    assert not undeclared, (
+        "These operations reach the generated types with no response schema:\n"
+        + "\n".join(f"  {entry}" for entry in sorted(undeclared))
+        + "\n\nAdd `responses=` to the view's extend_schema. An undeclared "
+        "response is a shape the frontend has to invent, and an invented shape "
+        "drifts without failing. If the body really is empty, add it to "
+        "EMPTY_SUCCESS_BODIES with the reason."
+    )
+
+
+def test_no_dead_empty_body_exemptions() -> None:
+    """An exemption for an endpoint that now returns a body is a lie the test
+    is telling on the endpoint's behalf."""
+    from drf_spectacular.generators import SchemaGenerator
+
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+
+    live = {
+        f"{method.upper()} {path} -> {status}"
+        for path, operations in schema.get("paths", {}).items()
+        for method, operation in operations.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+        for status, response in operation.get("responses", {}).items()
+        if not response.get("content")
+    }
+
+    assert not set(EMPTY_SUCCESS_BODIES) - live, (
+        "These operations no longer have an empty body, so their exemption is "
+        "stale: " + ", ".join(sorted(set(EMPTY_SUCCESS_BODIES) - live))
+    )
+
+
+def test_every_empty_body_exemption_has_a_reason() -> None:
+    for key, reason in EMPTY_SUCCESS_BODIES.items():
+        assert len(reason) > 40, f"{key} is exempt without saying why."
+
+
 def test_the_coverage_floor_is_declared_once() -> None:
     """One floor, in one place.
 

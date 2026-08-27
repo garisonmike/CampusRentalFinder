@@ -15,7 +15,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStatistics'
+          description: ''
   /api/v1/auth/admin/users/:
     get:
       operationId: auth_admin_users_list
@@ -192,7 +196,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleActiveResult'
+          description: ''
   /api/v1/auth/admin/verify/{user_id}/:
     post:
       operationId: auth_admin_verify_create
@@ -214,7 +222,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyUserResult'
+          description: ''
         '404':
           description: No response body
   /api/v1/auth/login/:
@@ -256,7 +268,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+          description: ''
   /api/v1/auth/me/:
     get:
       operationId: auth_me_retrieve
@@ -295,10 +311,14 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+          description: ''
   /api/v1/auth/privacy/erasure/:
     get:
-      operationId: auth_privacy_erasure_retrieve
+      operationId: auth_privacy_erasure_list
       description: Erasure.
       summary: Your erasure requests and their outcomes
       tags:
@@ -307,7 +327,13 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ErasureRequestResult'
+          description: ''
     post:
       operationId: auth_privacy_erasure_create
       description: |-
@@ -336,8 +362,18 @@ paths:
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestResult'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestResult'
+          description: ''
   /api/v1/auth/privacy/erasure/{id}/cancel/:
     post:
       operationId: auth_privacy_erasure_cancel_create
@@ -370,7 +406,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErasureRequestResult'
+          description: ''
   /api/v1/auth/privacy/export/:
     post:
       operationId: auth_privacy_export_create
@@ -399,7 +439,12 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/auth/profile/:
     get:
       operationId: auth_profile_retrieve
@@ -589,8 +634,12 @@ paths:
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequest'
+          description: ''
   /api/v1/auth/verification/email/confirm/:
     post:
       operationId: auth_verification_email_confirm_create
@@ -617,7 +666,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailVerificationResult'
+          description: ''
   /api/v1/auth/verification/email/request/:
     post:
       operationId: auth_verification_email_request_create
@@ -745,7 +798,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequest'
+          description: ''
   /api/v1/auth/verification/queue/{id}/document/:
     get:
       operationId: auth_verification_queue_document_retrieve
@@ -805,7 +862,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequest'
+          description: ''
   /api/v1/engagement/inquiries/:
     get:
       operationId: engagement_inquiries_list
@@ -886,7 +947,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inquiry'
+          description: ''
   /api/v1/engagement/inquiries/{id}/respond/:
     post:
       operationId: engagement_inquiries_respond_create
@@ -919,7 +984,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Inquiry'
+          description: ''
   /api/v1/engagement/saved/:
     get:
       operationId: engagement_saved_list
@@ -1203,11 +1272,27 @@ paths:
       summary: Write a review
       tags:
       - reviews
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReviewWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReviewWriteRequest'
+        required: true
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+          description: ''
   /api/v1/reviews/{id}/:
     patch:
       operationId: reviews_partial_update
@@ -1223,11 +1308,26 @@ paths:
         required: true
       tags:
       - reviews
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedReviewWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedReviewWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedReviewWriteRequest'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+          description: ''
   /api/v1/reviews/{id}/response/:
     post:
       operationId: reviews_response_create
@@ -1243,11 +1343,27 @@ paths:
         required: true
       tags:
       - reviews
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewResponseWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReviewResponseWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReviewResponseWriteRequest'
+        required: true
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewResponse'
+          description: ''
   /api/v1/reviews/properties/{slug}/:
     get:
       operationId: reviews_properties_list
@@ -1308,7 +1424,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyRating'
+          description: ''
   /api/v1/reviews/units/{id}/rating/:
     get:
       operationId: reviews_units_rating_retrieve
@@ -1330,7 +1450,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingAggregate'
+          description: ''
   /api/v1/tenancies/:
     get:
       operationId: tenancies_list
@@ -1462,8 +1586,12 @@ paths:
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenancy'
+          description: ''
   /api/v1/tenancies/applications/{id}/reject/:
     post:
       operationId: tenancies_applications_reject_create
@@ -1492,7 +1620,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+          description: ''
   /api/v1/tenancies/applications/{id}/withdraw/:
     post:
       operationId: tenancies_applications_withdraw_create
@@ -1511,7 +1643,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+          description: ''
   /api/v1/tenancies/claims/:
     get:
       operationId: tenancies_claims_list
@@ -1593,7 +1729,17 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenancy'
+          description: ''
   /api/v1/tenancies/claims/{id}/accept-counter/:
     post:
       operationId: tenancies_claims_accept_counter_create
@@ -1612,7 +1758,17 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenancy'
+          description: ''
   /api/v1/tenancies/claims/{id}/confirm/:
     post:
       operationId: tenancies_claims_confirm_create
@@ -1630,8 +1786,12 @@ paths:
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenancy'
+          description: ''
   /api/v1/tenancies/claims/{id}/counter/:
     post:
       operationId: tenancies_claims_counter_create
@@ -1662,7 +1822,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
   /api/v1/tenancies/claims/{id}/dispute/:
     post:
       operationId: tenancies_claims_dispute_create
@@ -1697,7 +1861,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
   /api/v1/tenancies/claims/{id}/reject-counter/:
     post:
       operationId: tenancies_claims_reject_counter_create
@@ -1715,7 +1883,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
   /api/v1/tenancies/disputes/:
     get:
       operationId: tenancies_disputes_list
@@ -1776,7 +1948,17 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenancyClaim'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenancy'
+          description: ''
   /api/v1/tenant/config/:
     get:
       operationId: tenant_config_retrieve
@@ -1810,7 +1992,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniversityPolicy'
+          description: ''
     patch:
       operationId: tenant_policy_partial_update
       description: '**The lockout guard runs here.** Setting `signup_policy` to `verification_required`
@@ -1835,7 +2021,11 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UniversityPolicy'
+          description: ''
   /health/live/:
     get:
       operationId: health_live_retrieve
@@ -2419,6 +2609,33 @@ components:
             is refused.
       required:
       - student_email
+    EmailVerificationResult:
+      type: object
+      description: |-
+        What confirming a token tells the caller about themselves.
+
+        Declared so the client's type is generated rather than hand-written. An
+        undeclared response leaves the schema saying "no response body", and the
+        frontend then owns a private copy of the contract -- which is how
+        `Paginated<T>` drifted three fields behind the API without anything
+        noticing.
+      properties:
+        verification_status:
+          type: string
+          readOnly: true
+        verification_method:
+          type: string
+          readOnly: true
+          nullable: true
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - verification_method
+      - verification_status
+      - verified_at
     ErasureRequestRequest:
       type: object
       description: Asking to be erased.
@@ -2441,6 +2658,65 @@ components:
       required:
       - confirm_understanding
       - password
+    ErasureRequestResult:
+      type: object
+      description: What the subject is told.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ErasureRequestResultStatusEnum'
+          readOnly: true
+        blockers:
+          readOnly: true
+        retained:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: What survives erasure, and why. Shown before and after.
+        requested_at:
+          type: string
+          format: date-time
+          readOnly: true
+        executes_after:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - blockers
+      - cancelled_at
+      - completed_at
+      - executes_after
+      - id
+      - requested_at
+      - retained
+      - status
+    ErasureRequestResultStatusEnum:
+      enum:
+      - cooling_off
+      - completed
+      - blocked
+      - cancelled
+      type: string
+      description: |-
+        * `cooling_off` - Cooling off
+        * `completed` - Completed
+        * `blocked` - Blocked
+        * `cancelled` - Cancelled by the subject
     EscalationReasonEnum:
       enum:
       - counter_unresolved
@@ -2612,6 +2888,82 @@ components:
         * `answered` - Answered
         * `closed` - Closed
         * `expired` - Expired unanswered
+    LandlordRating:
+      type: object
+      description: |-
+        A landlord's record across every property they own.
+
+        The cold-start signal (ADR-004): a property with no reviews of its own can
+        show this, **explicitly labelled as being about the landlord**, never about
+        this property.
+      properties:
+        average_rating:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          description: Mean rating, 1.00-5.00. **null means 'no verified reviews yet'
+            and must render as those words.** Never 0, never an empty star row, never
+            a placeholder. On a trust platform a fabricated signal is worse than no
+            signal, because it is indistinguishable from a real one.
+        student_count:
+          type: integer
+          readOnly: true
+          description: 'Distinct students who contributed. **This is the public denominator:
+            render it as ''from N students''.** It is deliberately smaller than review_count
+            whenever anyone reviewed more than one stay in the same property -- that
+            divergence IS the de-duplication, not a bug.'
+        review_count:
+          type: integer
+          readOnly: true
+          description: Number of review rows behind the average. **Not the public
+            denominator** -- use student_count for that. A student who moved from
+            a bedsitter to a one-bedroom in the same block writes two genuine reviews
+            and counts as one voice, so these two numbers are SUPPOSED to differ.
+        rating_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+          readOnly: true
+          description: Counts by star, 1-5, every bucket present. Describes RAW reviews,
+            not de-duplicated students -- 'how the scores fall' and 'how many people
+            spoke' are different questions and both get an honest answer.
+        last_review_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        computed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When this cache was last rebuilt. Aggregates are stale by design
+            between a review landing and the job running; a reconciler finds drift
+            rather than the number being recomputed per request.
+        property_count:
+          type: integer
+          readOnly: true
+          description: 'How many of this landlord''s properties the figure spans.
+            Show it alongside the average: ''4.2 across one property'' and ''4.2 across
+            nine'' are different claims.'
+      required:
+      - average_rating
+      - computed_at
+      - last_review_at
+      - property_count
+      - rating_distribution
+      - review_count
+      - student_count
+    Message:
+      type: object
+      description: A bare confirmation. The message is for a human, not for a branch.
+      properties:
+        message:
+          type: string
+          readOnly: true
+      required:
+      - message
     PaginatedAdminUserList:
       type: object
       required:
@@ -2951,6 +3303,61 @@ components:
         is_active:
           type: boolean
           title: Active
+    PatchedReviewWriteRequest:
+      type: object
+      description: |-
+        Creating or editing a review.
+
+        ``tenancy`` is write-only and validated against the caller: a review is
+        only ever about the caller's own stay, and accepting an arbitrary tenancy
+        id would let anyone review anyone's.
+      properties:
+        tenancy:
+          type: integer
+          writeOnly: true
+          description: The stay being reviewed. Must be one of your own, at least
+            REVIEW_MINIMUM_STAY_DAYS long, and not already reviewed (ADR-004).
+        rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          title: Overall rating
+        cleanliness_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Cleanliness
+        security_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Security
+        water_reliability_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Water reliability
+        landlord_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Landlord
+        value_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Value for money
+        comment:
+          type: string
+          maxLength: 2000
+        would_recommend:
+          type: boolean
+          nullable: true
     PatchedUniversityPolicyRequest:
       type: object
       description: The settings a school administers about itself.
@@ -3217,6 +3624,38 @@ components:
       - town
       - units
       - view_count
+    PropertyRating:
+      type: object
+      description: |-
+        What the property rating endpoint returns: two aggregates, side by side.
+
+        Declared so the client's types are **generated** rather than hand-written.
+        An undeclared response makes the schema say "no response body", and a
+        frontend that then describes the payload by hand owns a second copy of the
+        contract -- which is how `Paginated<T>` drifted, and how three of the five
+        entries in `docs/OPERATIONS.md` began.
+
+        The landlord figure is a separate key rather than a fallback value on
+        purpose. A landlord's record is not this property's rating, and merging
+        them would be the platform quietly answering a question nobody asked.
+      properties:
+        property:
+          allOf:
+          - $ref: '#/components/schemas/RatingAggregate'
+          readOnly: true
+          description: 'This property''s own rating. `average_rating: null` means
+            no verified reviews yet and must render as those words.'
+        landlord:
+          allOf:
+          - $ref: '#/components/schemas/LandlordRating'
+          readOnly: true
+          description: The owner's record across their whole portfolio, offered as
+            a cold-start signal (ADR-004). **Label it as being about the landlord.**
+            Never present it as this property's score, and never fall back to it when
+            `property.average_rating` is null.
+      required:
+      - landlord
+      - property
     PropertySummary:
       type: object
       description: |-
@@ -3360,6 +3799,66 @@ components:
         * `shared_house` - Shared House
         * `maisonette` - Maisonette
         * `other` - Other
+    RatingAggregate:
+      type: object
+      description: |-
+        The shared shape of all three aggregates.
+
+        A plain Serializer rather than three ModelSerializers: the fields are
+        identical by design, and three copies would be three places for the
+        contract notes to drift apart.
+      properties:
+        average_rating:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          description: Mean rating, 1.00-5.00. **null means 'no verified reviews yet'
+            and must render as those words.** Never 0, never an empty star row, never
+            a placeholder. On a trust platform a fabricated signal is worse than no
+            signal, because it is indistinguishable from a real one.
+        student_count:
+          type: integer
+          readOnly: true
+          description: 'Distinct students who contributed. **This is the public denominator:
+            render it as ''from N students''.** It is deliberately smaller than review_count
+            whenever anyone reviewed more than one stay in the same property -- that
+            divergence IS the de-duplication, not a bug.'
+        review_count:
+          type: integer
+          readOnly: true
+          description: Number of review rows behind the average. **Not the public
+            denominator** -- use student_count for that. A student who moved from
+            a bedsitter to a one-bedroom in the same block writes two genuine reviews
+            and counts as one voice, so these two numbers are SUPPOSED to differ.
+        rating_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+          readOnly: true
+          description: Counts by star, 1-5, every bucket present. Describes RAW reviews,
+            not de-duplicated students -- 'how the scores fall' and 'how many people
+            spoke' are different questions and both get an honest answer.
+        last_review_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        computed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When this cache was last rebuilt. Aggregates are stale by design
+            between a review landing and the job running; a reconciler finds drift
+            rather than the number being recomputed per request.
+      required:
+      - average_rating
+      - computed_at
+      - last_review_at
+      - rating_distribution
+      - review_count
+      - student_count
     ReasonEnum:
       enum:
       - dates_incorrect
@@ -3498,6 +3997,75 @@ components:
       - body
       - created_at
       - id
+    ReviewResponseWriteRequest:
+      type: object
+      description: The landlord's reply. One per review, ever (ADR-004).
+      properties:
+        body:
+          type: string
+          minLength: 1
+          title: Response
+          maxLength: 1000
+      required:
+      - body
+    ReviewWriteRequest:
+      type: object
+      description: |-
+        Creating or editing a review.
+
+        ``tenancy`` is write-only and validated against the caller: a review is
+        only ever about the caller's own stay, and accepting an arbitrary tenancy
+        id would let anyone review anyone's.
+      properties:
+        tenancy:
+          type: integer
+          writeOnly: true
+          description: The stay being reviewed. Must be one of your own, at least
+            REVIEW_MINIMUM_STAY_DAYS long, and not already reviewed (ADR-004).
+        rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          title: Overall rating
+        cleanliness_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Cleanliness
+        security_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Security
+        water_reliability_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Water reliability
+        landlord_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Landlord
+        value_rating:
+          type: integer
+          maximum: 5
+          minimum: 1
+          nullable: true
+          title: Value for money
+        comment:
+          type: string
+          maxLength: 2000
+        would_recommend:
+          type: boolean
+          nullable: true
+      required:
+      - rating
+      - tenancy
     SavePropertyRequest:
       type: object
       description: |-
@@ -3900,6 +4468,20 @@ components:
       - accent
       - primary
       - secondary
+    ToggleActiveResult:
+      type: object
+      description: A bare confirmation. The message is for a human, not for a branch.
+      properties:
+        message:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          description: The state AFTER the toggle, so the caller need not guess it.
+      required:
+      - is_active
+      - message
     TokenRefresh:
       type: object
       properties:
@@ -4259,6 +4841,83 @@ components:
         * `shared_house` - Shared House
         * `maisonette` - Maisonette
         * `other` - Other
+    UniversityPolicy:
+      type: object
+      description: The settings a school administers about itself.
+      properties:
+        name:
+          type: string
+          readOnly: true
+        display_name:
+          type: string
+          description: Short form used in the interface, e.g. "KyU".
+          maxLength: 50
+        signup_policy:
+          allOf:
+          - $ref: '#/components/schemas/SignupPolicyEnum'
+          description: |-
+            `open` (verification not mentioned at signup), `verification_encouraged` (prompted, can skip), or `verification_required`.
+
+            **Cannot be set to `verification_required` until at least one student here is verified.** A school that sets it before issuing student addresses locks out an entire intake in the week they most need the platform.
+
+            Raising this affects NEW signups only. Existing students keep what they had -- gating reads the policy frozen at each student's own registration (ADR-003).
+
+            * `open` - Open — verification is not mentioned at signup
+            * `verification_encouraged` - Encouraged — the student is prompted and can skip
+            * `verification_required` - Required — signup completes only for a verified student
+        verification_methods_enabled:
+          type: array
+          items:
+            $ref: '#/components/schemas/VerificationMethodsEnabledEnum'
+          description: 'Which paths this school offers. Empty means none, which is
+            the default. A school with no document reviewers should not enable `student_id_upload`:
+            uploads would arrive into a queue nobody works, and since the retention
+            clock starts at upload that means collecting national IDs purely to delete
+            them thirty days later.'
+        student_email_domains:
+          type: array
+          items:
+            type: string
+            maxLength: 255
+          description: Domains that prove enrolment, e.g. `["s.kyu.ac.ke"]`. Matched
+            EXACTLY on the full domain -- list every subdomain you want accepted,
+            because `alumni.kyu.ac.ke` is not `kyu.ac.ke` and the platform will not
+            infer enrolment from DNS hierarchy. Blank entries are dropped; whitespace
+            and case are normalised.
+        verification_grace_period_days:
+          type: integer
+          maximum: 180
+          minimum: 1
+          title: Verification grace period (days)
+          description: How long a new student may use gated actions before verifying.
+            Verification waits on a registry or a human reviewer, neither of which
+            the student controls.
+        verification_required_to_review:
+          type: boolean
+        verification_enforced_from:
+          type: string
+          format: date
+          nullable: true
+          description: Announce a change before it bites. Until this date the policy
+            is treated as `open` for new signups.
+        primary_hsl:
+          type: string
+          title: Primary colour
+          pattern: ^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$
+          maxLength: 32
+        secondary_hsl:
+          type: string
+          title: Secondary colour
+          pattern: ^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$
+          maxLength: 32
+        accent_hsl:
+          type: string
+          title: Accent colour
+          pattern: ^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$
+          maxLength: 32
+      required:
+      - display_name
+      - name
     User:
       type: object
       description: A user's own identity, with their capability set.
@@ -4416,6 +5075,39 @@ components:
       - last_name
       - password
       - password_confirm
+    UserStatistics:
+      type: object
+      description: Counts by capability rather than by a self-declared role string.
+      properties:
+        total_users:
+          type: integer
+          readOnly: true
+        active_users:
+          type: integer
+          readOnly: true
+        students:
+          type: integer
+          readOnly: true
+        landlords:
+          type: integer
+          readOnly: true
+        university_staff:
+          type: integer
+          readOnly: true
+        platform_staff:
+          type: integer
+          readOnly: true
+        verified_students:
+          type: integer
+          readOnly: true
+      required:
+      - active_users
+      - landlords
+      - platform_staff
+      - students
+      - total_users
+      - university_staff
+      - verified_students
     UserUpdateRequest:
       type: object
       description: |-
@@ -4540,6 +5232,20 @@ components:
         * `pending` - Awaiting review
         * `approved` - Approved
         * `rejected` - Rejected
+    VerifyUserResult:
+      type: object
+      description: A bare confirmation. The message is for a human, not for a branch.
+      properties:
+        message:
+          type: string
+          readOnly: true
+        user:
+          allOf:
+          - $ref: '#/components/schemas/User'
+          readOnly: true
+      required:
+      - message
+      - user
   securitySchemes:
     jwtAuth:
       type: http

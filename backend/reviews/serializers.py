@@ -79,6 +79,38 @@ class LandlordRatingSerializer(RatingAggregateSerializer):
     )
 
 
+class PropertyRatingSerializer(serializers.Serializer):
+    """What the property rating endpoint returns: two aggregates, side by side.
+
+    Declared so the client's types are **generated** rather than hand-written.
+    An undeclared response makes the schema say "no response body", and a
+    frontend that then describes the payload by hand owns a second copy of the
+    contract -- which is how `Paginated<T>` drifted, and how three of the five
+    entries in `docs/OPERATIONS.md` began.
+
+    The landlord figure is a separate key rather than a fallback value on
+    purpose. A landlord's record is not this property's rating, and merging
+    them would be the platform quietly answering a question nobody asked.
+    """
+
+    property = RatingAggregateSerializer(
+        read_only=True,
+        help_text=(
+            "This property's own rating. `average_rating: null` means no "
+            "verified reviews yet and must render as those words."
+        ),
+    )
+    landlord = LandlordRatingSerializer(
+        read_only=True,
+        help_text=(
+            "The owner's record across their whole portfolio, offered as a "
+            "cold-start signal (ADR-004). **Label it as being about the "
+            "landlord.** Never present it as this property's score, and never "
+            "fall back to it when `property.average_rating` is null."
+        ),
+    )
+
+
 class ReviewResponseSerializer(serializers.ModelSerializer):
     """The landlord's single reply."""
 

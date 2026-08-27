@@ -214,6 +214,10 @@ NOTE_EXEMPT: dict[str, frozenset[str]] = {
             "PropertySummary",
             "UnitPhoto",
             "ErasureRequest",
+            # An erasure's own lifecycle -- cooling off, completed, blocked,
+            # cancelled -- not a tenancy's. The `status` note is about
+            # tenancies and would misdescribe this one.
+            "ErasureRequestResult",
         }
     ),
     "end_date": frozenset(

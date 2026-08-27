@@ -26,11 +26,15 @@ from universities.constants import VerificationStatus
 from .models import User
 from .serializers import (
     AdminUserSerializer,
+    MessageSerializer,
     PasswordChangeSerializer,
+    ToggleActiveResultSerializer,
     UserLoginSerializer,
     UserRegistrationSerializer,
     UserSerializer,
+    UserStatisticsSerializer,
     UserUpdateSerializer,
+    VerifyUserResultSerializer,
 )
 
 
@@ -128,7 +132,12 @@ class UserLogoutView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_scope = Scope.AUTH
 
-    @extend_schema(summary="Log out", request=None, responses={200: None}, tags=["Authentication"])
+    @extend_schema(
+        summary="Log out",
+        request=None,
+        responses={200: MessageSerializer},
+        tags=["Authentication"],
+    )
     def post(self, request: Request) -> Response:
         refresh_token = request.data.get("refresh")
         if not refresh_token:
@@ -209,7 +218,7 @@ class PasswordChangeView(APIView):
     @extend_schema(
         summary="Change password",
         request=PasswordChangeSerializer,
-        responses={200: None},
+        responses={200: MessageSerializer},
         tags=["User Profile"],
     )
     def post(self, request: Request) -> Response:
@@ -249,7 +258,7 @@ def current_user(request: Request) -> Response:
 @extend_schema(
     summary="Verify a landlord",
     request=None,
-    responses={200: None, 404: None},
+    responses={200: VerifyUserResultSerializer, 404: None},
     tags=["Admin"],
 )
 @api_view(["POST"])
@@ -288,7 +297,12 @@ class AdminUserViewSet(ModelViewSet):
     search_fields = ["email", "first_name", "last_name", "phone_number"]
     ordering_fields = ["date_joined", "email"]
 
-    @extend_schema(summary="Toggle active", request=None, responses={200: None}, tags=["Admin"])
+    @extend_schema(
+        summary="Toggle active",
+        request=None,
+        responses={200: ToggleActiveResultSerializer},
+        tags=["Admin"],
+    )
     @action(detail=True, methods=["post"])
     def toggle_active(self, request: Request, pk: str | None = None) -> Response:
         user = self.get_object()
@@ -299,7 +313,7 @@ class AdminUserViewSet(ModelViewSet):
 
 @extend_schema(
     summary="User statistics",
-    responses={200: None},
+    responses={200: UserStatisticsSerializer},
     tags=["Admin"],
 )
 @api_view(["GET"])

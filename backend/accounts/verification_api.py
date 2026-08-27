@@ -68,6 +68,21 @@ class EmailVerificationConfirmSerializer(serializers.Serializer):
     )
 
 
+class EmailVerificationResultSerializer(serializers.Serializer):
+    """What confirming a token tells the caller about themselves.
+
+    Declared so the client's type is generated rather than hand-written. An
+    undeclared response leaves the schema saying "no response body", and the
+    frontend then owns a private copy of the contract -- which is how
+    `Paginated<T>` drifted three fields behind the API without anything
+    noticing.
+    """
+
+    verification_status = serializers.CharField(read_only=True)
+    verification_method = serializers.CharField(read_only=True, allow_null=True)
+    verified_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
 class VerificationRequestSerializer(serializers.ModelSerializer):
     """A document review request, as the student or the reviewer sees it.
 
@@ -194,6 +209,7 @@ class EmailVerificationRequestView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=EmailVerificationResultSerializer,
         summary="Confirm an email verification token",
         description=(
             "Single use, consumed atomically -- a replayed token loses the "
@@ -233,6 +249,7 @@ class EmailVerificationConfirmView(APIView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses={201: VerificationRequestSerializer},
         summary="Upload an identity document for review",
         description=(
             "For schools that issue no student addresses.\n\n"
@@ -379,6 +396,7 @@ class DocumentAccessView(ReviewerActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=VerificationRequestSerializer,
         summary="Approve a verification request",
         description="The student earns the badge. The reviewer is recorded internally and never shown.",
         request=VerificationDecisionSerializer,
@@ -402,6 +420,7 @@ class VerificationApproveView(ReviewerActionView):
 
 @extend_schema_view(
     post=extend_schema(
+        responses=VerificationRequestSerializer,
         summary="Reject a verification request",
         description=(
             "The reason is shown to the student and is required -- a blurry "

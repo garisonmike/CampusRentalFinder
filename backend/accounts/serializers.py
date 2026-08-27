@@ -315,3 +315,42 @@ class AdminUserSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_capabilities(obj: User) -> Capabilities:
         return capabilities_for(obj)
+
+
+# ---------------------------------------------------------------------------
+# Response shapes for the endpoints that return a dict rather than a model
+# ---------------------------------------------------------------------------
+#
+# Declared rather than left to `responses={200: None}`. "No response body" and
+# "a body nobody described" are different claims, and three of these endpoints
+# were making the first while returning the second -- the schema and the
+# handler disagreeing, with the schema winning in every generated type.
+
+
+class MessageSerializer(serializers.Serializer):
+    """A bare confirmation. The message is for a human, not for a branch."""
+
+    message = serializers.CharField(read_only=True)
+
+
+class ToggleActiveResultSerializer(MessageSerializer):
+    is_active = serializers.BooleanField(
+        read_only=True,
+        help_text="The state AFTER the toggle, so the caller need not guess it.",
+    )
+
+
+class VerifyUserResultSerializer(MessageSerializer):
+    user = UserSerializer(read_only=True)
+
+
+class UserStatisticsSerializer(serializers.Serializer):
+    """Counts by capability rather than by a self-declared role string."""
+
+    total_users = serializers.IntegerField(read_only=True)
+    active_users = serializers.IntegerField(read_only=True)
+    students = serializers.IntegerField(read_only=True)
+    landlords = serializers.IntegerField(read_only=True)
+    university_staff = serializers.IntegerField(read_only=True)
+    platform_staff = serializers.IntegerField(read_only=True)
+    verified_students = serializers.IntegerField(read_only=True)
