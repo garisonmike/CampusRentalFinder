@@ -1,6 +1,7 @@
 import { axe } from "vitest-axe";
 import { describe, expect, it } from "vitest";
 
+import { HOSTILE_PALETTES } from "./hostile-palettes";
 import { buildTokens, contrastRatio, parseHsl, type Hsl } from "./tokens";
 import { renderWithProviders } from "@/test/utils";
 
@@ -28,43 +29,6 @@ import { renderWithProviders } from "@/test/utils";
  * that survives without a browser; `npm run screenshots` renders the four for
  * a human to look at.
  */
-
-export const HOSTILE_PALETTES: Array<{
-  name: string;
-  primary: string;
-  secondary: string;
-  accent: string;
-  hazard: string;
-}> = [
-  {
-    name: "very dark navy",
-    primary: "222 60% 11%",
-    secondary: "222 30% 24%",
-    accent: "222 40% 92%",
-    hazard: "A primary button becomes a hole in the page; borders vanish.",
-  },
-  {
-    name: "very light yellow",
-    primary: "52 98% 62%",
-    secondary: "45 90% 78%",
-    accent: "52 100% 94%",
-    hazard: "White text on it is invisible; it reads as a warning colour.",
-  },
-  {
-    name: "saturated red",
-    primary: "0 88% 52%",
-    secondary: "12 70% 44%",
-    accent: "0 90% 95%",
-    hazard: "Every primary action looks destructive.",
-  },
-  {
-    name: "low-chroma grey",
-    primary: "210 4% 46%",
-    secondary: "210 3% 62%",
-    accent: "210 5% 92%",
-    hazard: "Primary and muted collapse into each other; nothing draws the eye.",
-  },
-];
 
 function applyPalette(palette: (typeof HOSTILE_PALETTES)[number]): void {
   const tokens = buildTokens(palette);
