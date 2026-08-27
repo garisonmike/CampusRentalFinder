@@ -98,7 +98,14 @@ addopts = [
     "--cov",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=xml",
-    "--cov-fail-under=88",
+    # No --cov-fail-under here. The floor lives in [tool.coverage.report] and
+    # nowhere else: a CLI flag OVERRIDES that setting silently, so the two
+    # copies drifted and the flag -- the decorative-looking one -- was the one
+    # actually enforcing. Raising the config value alone did nothing, and the
+    # build stayed green at the old floor while reporting success.
+    #
+    # Exactly the shape docs/OPERATIONS.md calls "checks that can pass without
+    # checking", in the file that configures the checks.
 ]
 markers = [
     "smoke: minimal checks that the project boots and its plumbing works",

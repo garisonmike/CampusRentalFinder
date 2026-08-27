@@ -940,3 +940,29 @@ def test_the_contract_notes_reach_the_generated_schema() -> None:
         "No contract note was found anywhere in the schema. Either the "
         "serializers stopped carrying them or this test stopped looking."
     )
+
+
+def test_the_coverage_floor_is_declared_once() -> None:
+    """One floor, in one place.
+
+    `--cov-fail-under` in pytest's `addopts` **overrides**
+    `[tool.coverage.report] fail_under` silently. Both existed, they drifted,
+    and the flag was the one enforcing -- so raising the config value did
+    nothing while the build reported success at the old floor.
+
+    That is the project's own most productive bug class (docs/OPERATIONS.md,
+    "checks that can pass without checking") occurring in the file that
+    configures the checks.
+    """
+    import tomllib
+
+    config = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text())
+
+    addopts = config["tool"]["pytest"]["ini_options"]["addopts"]
+    flags = [opt for opt in addopts if "cov-fail-under" in opt]
+
+    assert not flags, (
+        f"{flags} in addopts silently overrides [tool.coverage.report] "
+        f"fail_under. Declare the floor in one place -- the config section."
+    )
+    assert isinstance(config["tool"]["coverage"]["report"]["fail_under"], int)
