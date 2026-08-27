@@ -24,12 +24,15 @@ import datetime as dt
 
 import pytest
 from django.conf import settings
+from django.contrib.admin.sites import AdminSite
 from django.core.exceptions import ValidationError
-from django.test import override_settings
+from django.forms.models import model_to_dict
+from django.test import RequestFactory, override_settings
 from django.utils import timezone
 
+from properties.admin import PropertyAdmin, UnitAdmin, UnitInline
 from properties.constants import PropertyStatus, VacancyFreshness
-from properties.models import Unit
+from properties.models import Property, Unit
 from properties.services import (
     compare_occupancy,
     cross_check_coverage,
@@ -248,6 +251,120 @@ class TestStalenessPrompts:
         prompt_stale_vacancies()
 
         assert len(mailoutbox) == 0
+
+
+# ---------------------------------------------------------------------------
+# The other write path
+# ---------------------------------------------------------------------------
+
+
+class TestTheAdminWritePath:
+    """The admin edits `vacant_count` directly, which makes it a second door.
+
+    A service function that guards one entrance is a guard on one entrance.
+    `docs/OPERATIONS.md` records five occasions where a rule lived in two
+    places and the wrong copy won silently; a ModelForm that saves the count
+    without the timestamp is that shape exactly, and it is worse than a stale
+    count because the staleness signal would then assert currency.
+    """
+
+    def admin_form(self, model_admin, unit, **changes):
+        request = RequestFactory().get("/admin/")
+        form_class = model_admin.get_form(request, obj=unit, change=True)
+
+        data = {
+            name: value
+            for name, value in model_to_dict(unit, fields=form_class.base_fields).items()
+            if value is not None
+        }
+        data.update(changes)
+
+        form = form_class(instance=unit, data=data)
+        assert form.is_valid(), form.errors
+        return form
+
+    def test_an_admin_edit_stamps_provenance(self, unit_factory, staff_user):
+        unit = unit_factory(total_count=40, vacant_count=0)
+        model_admin = UnitAdmin(Unit, AdminSite())
+
+        form = self.admin_form(model_admin, unit, vacant_count=7)
+        request = RequestFactory().post("/admin/")
+        request.user = staff_user
+        model_admin.save_model(request, form.save(commit=False), form, change=True)
+        unit.refresh_from_db()
+
+        assert unit.vacant_count == 7
+        assert unit.vacant_count_updated_by == staff_user
+        assert vacancy_freshness(unit) == VacancyFreshness.FRESH
+
+    def test_saving_without_touching_the_count_does_not_refresh_it(
+        self, unit_factory, staff_user, landlord
+    ):
+        """An unrelated edit is not a restatement.
+
+        Stamping one would refresh the staleness signal without anybody having
+        looked at the rooms -- a false claim of currency, which is worse than
+        the honest stale label it replaced.
+        """
+        unit = state_vacancy(unit_factory(total_count=40), vacant_count=9, stated_by=landlord)
+        age_the_count(unit, days=200)
+        model_admin = UnitAdmin(Unit, AdminSite())
+
+        form = self.admin_form(model_admin, unit, label="Block C")
+        request = RequestFactory().post("/admin/")
+        request.user = staff_user
+        model_admin.save_model(request, form.save(commit=False), form, change=True)
+        unit.refresh_from_db()
+
+        assert unit.label == "Block C"
+        assert unit.vacant_count_updated_by == landlord
+        assert vacancy_freshness(unit) == VacancyFreshness.STALE
+
+    def test_the_provenance_fields_are_not_hand_editable(self):
+        """Otherwise the stamp becomes a third thing to keep in sync by hand,
+        and a date somebody typed is not evidence of anything."""
+        model_admin = UnitAdmin(Unit, AdminSite())
+
+        assert "vacant_count_updated_at" in model_admin.readonly_fields
+        assert "vacant_count_updated_by" in model_admin.readonly_fields
+
+    def test_the_inline_is_covered_too(self, staff_user, property_factory, unit_factory):
+        """The likeliest place for this edit is the property page, editing the
+        listing and its rooms together -- which a `save_model` override on
+        UnitAdmin alone would not reach."""
+        prop = property_factory()
+        unit = unit_factory(property=prop, total_count=40, vacant_count=0)
+        model_admin = PropertyAdmin(Property, AdminSite())
+        request = RequestFactory().post("/admin/")
+        request.user = staff_user
+
+        formset_class = UnitInline(Property, AdminSite()).get_formset(request, obj=prop)
+        prefix = formset_class.get_default_prefix()
+        formset = formset_class(
+            instance=prop,
+            prefix=prefix,
+            data={
+                f"{prefix}-TOTAL_FORMS": "1",
+                f"{prefix}-INITIAL_FORMS": "1",
+                f"{prefix}-MIN_NUM_FORMS": "0",
+                f"{prefix}-MAX_NUM_FORMS": "1000",
+                f"{prefix}-0-id": str(unit.pk),
+                f"{prefix}-0-property": str(prop.pk),
+                f"{prefix}-0-label": unit.label,
+                f"{prefix}-0-unit_type": unit.unit_type,
+                f"{prefix}-0-rent_kes": str(unit.rent_kes),
+                f"{prefix}-0-total_count": str(unit.total_count),
+                f"{prefix}-0-vacant_count": "5",
+                f"{prefix}-0-is_active": "on",
+            },
+        )
+        assert formset.is_valid(), formset.errors
+
+        model_admin.save_formset(request, form=None, formset=formset, change=True)
+        unit.refresh_from_db()
+
+        assert unit.vacant_count == 5
+        assert unit.vacant_count_updated_by == staff_user
 
 
 # ---------------------------------------------------------------------------
