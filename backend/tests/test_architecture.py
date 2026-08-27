@@ -764,3 +764,105 @@ def test_every_recurring_job_is_actually_scheduled() -> None:
         + "\n\nAdd them to config/jobs/schedule.py, or rename them if they are "
         "not recurring jobs."
     )
+
+
+# ---------------------------------------------------------------------------
+# The API layer
+# ---------------------------------------------------------------------------
+
+
+#: Third-party route trees we do not own and cannot annotate.
+_FOREIGN_ROUTE_PREFIXES = ("admin", "django-rq")
+
+#: drf-spectacular's own schema and documentation views.
+#:
+#: Exempt because they serve the OpenAPI document and its two viewers, not
+#: product data -- there is nothing behind them a permission class would
+#: protect. They are already classified in `config/hosts.py` as API_INTERNAL,
+#: which is where the decision about who may reach them actually lives.
+_DOC_VIEW_NAMES = frozenset({"schema", "swagger-ui", "redoc"})
+
+
+def _api_view_classes() -> list[tuple[str, type]]:
+    """Every view class the API router exposes, with its route name."""
+    found = []
+    for route in all_routes():
+        if route.namespace in _FOREIGN_ROUTE_PREFIXES:
+            continue
+        if route.name in _DOC_VIEW_NAMES:
+            continue
+        view_class = getattr(route.callback, "cls", None)
+        if view_class is None:
+            continue
+        found.append((route.name or route.pattern, view_class))
+    return found
+
+
+def test_every_api_view_declares_its_permission_classes() -> None:
+    """No falling through to `DEFAULT_PERMISSION_CLASSES`.
+
+    A default exists so that a forgotten view is not accidentally public, but
+    relying on it is how a view ends up with the wrong policy: the default is
+    `IsAuthenticated`, which is right for roughly half the API and silently
+    wrong for the rest -- too open for a reviewer queue, too closed for a
+    public listing.
+
+    Declaring it at the view makes the decision visible in review, at the point
+    where someone can judge whether it is correct.
+    """
+    from rest_framework.settings import api_settings
+
+    default = tuple(api_settings.DEFAULT_PERMISSION_CLASSES)
+    undeclared = []
+
+    for name, view_class in _api_view_classes():
+        declared = view_class.__dict__.get("permission_classes")
+        if declared is None and tuple(getattr(view_class, "permission_classes", ())) == default:
+            undeclared.append(f"{view_class.__name__} ({name})")
+
+    assert not undeclared, (
+        "These views fall through to DEFAULT_PERMISSION_CLASSES:\n"
+        + "\n".join(f"  {entry}" for entry in sorted(set(undeclared)))
+        + "\n\nDeclare permission_classes on the view, even if the answer is "
+        "the same as the default. The point is that someone chose it."
+    )
+
+
+def _effective_throttle_scope(view_class) -> str | None:
+    """The scope actually in force, however it was declared.
+
+    Two mechanisms exist, for a reason rather than by accident: a class view
+    sets `throttle_scope`, and a function view cannot, because `@api_view`
+    copies `throttle_classes` onto its generated class but not
+    `throttle_scope`. What matters is that *a* scope is in effect.
+    """
+    declared = getattr(view_class, "throttle_scope", None)
+    if declared:
+        return declared
+
+    for throttle_class in getattr(view_class, "throttle_classes", ()):
+        bound = getattr(throttle_class, "scope", None)
+        if bound:
+            return bound
+
+    return None
+
+
+def test_every_api_view_declares_a_throttle_scope() -> None:
+    """A view with no scope inherits whatever the default throttle does.
+
+    `config.api.throttling.Scope` is the vocabulary; `ScopedThrottle` raises on
+    a scope with no configured rate, so the remaining failure is a view that
+    names none at all and is therefore unthrottled.
+    """
+    unscoped = []
+
+    for name, view_class in _api_view_classes():
+        if _effective_throttle_scope(view_class) is None:
+            unscoped.append(f"{view_class.__name__} ({name})")
+
+    assert not unscoped, (
+        "These views declare no throttle_scope:\n"
+        + "\n".join(f"  {entry}" for entry in sorted(set(unscoped)))
+        + "\n\nPick one from config.api.throttling.Scope."
+    )

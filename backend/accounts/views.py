@@ -15,8 +15,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView as BaseTokenRefreshView
+from rest_framework_simplejwt.views import TokenVerifyView as BaseTokenVerifyView
 
 from accounts.permissions import IsPlatformStaff
+from config.api.throttling import Scope
+from config.api.throttling import scope as throttle_scope
 from universities.constants import VerificationStatus
 
 from .models import User
@@ -35,10 +39,41 @@ def issue_tokens(user: User) -> dict[str, str]:
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
+class TokenRefreshView(BaseTokenRefreshView):
+    """simplejwt's refresh, with our policy attached.
+
+    Subclassed rather than exempted: a refresh endpoint with no throttle is
+    the one an attacker holding a stolen refresh token uses fastest, and
+    "third party" is not a reason for it to be the only unthrottled write on
+    the API.
+    """
+
+    # simplejwt's stubs type this as `tuple[()]` -- an empty tuple -- so any
+    # value at all reads as incompatible. The runtime attribute is an ordinary
+    # permission tuple.
+    permission_classes = (AllowAny,)  # type: ignore[assignment]
+    throttle_scope = Scope.AUTH
+
+
+class TokenVerifyView(BaseTokenVerifyView):
+    """simplejwt's verify, with our policy attached.
+
+    Also an oracle: it answers "is this token valid" for anything presented,
+    so it is throttled on the same scope as login.
+    """
+
+    # simplejwt's stubs type this as `tuple[()]` -- an empty tuple -- so any
+    # value at all reads as incompatible. The runtime attribute is an ordinary
+    # permission tuple.
+    permission_classes = (AllowAny,)  # type: ignore[assignment]
+    throttle_scope = Scope.AUTH
+
+
 class UserRegistrationView(APIView):
     """Create an account and return tokens."""
 
     permission_classes = [AllowAny]
+    throttle_scope = Scope.AUTH
     serializer_class = UserRegistrationSerializer
 
     @extend_schema(
@@ -64,6 +99,7 @@ class UserRegistrationView(APIView):
 
 class UserLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = Scope.AUTH
     serializer_class = UserLoginSerializer
 
     @extend_schema(
@@ -90,6 +126,7 @@ class UserLogoutView(APIView):
     """Blacklist the refresh token."""
 
     permission_classes = [IsAuthenticated]
+    throttle_scope = Scope.AUTH
 
     @extend_schema(summary="Log out", request=None, responses={200: None}, tags=["Authentication"])
     def post(self, request: Request) -> Response:
@@ -114,6 +151,7 @@ class UserProfileView(APIView):
     """The caller's own identity."""
 
     permission_classes = [IsAuthenticated]
+    throttle_scope = Scope.AUTHENTICATED_READ
     serializer_class = UserSerializer
 
     @extend_schema(summary="Get profile", responses={200: UserSerializer}, tags=["User Profile"])
@@ -165,6 +203,7 @@ class UserProfileView(APIView):
 
 class PasswordChangeView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_scope = Scope.AUTH
     serializer_class = PasswordChangeSerializer
 
     @extend_schema(
@@ -188,6 +227,7 @@ class PasswordChangeView(APIView):
 )
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+@throttle_scope(Scope.AUTHENTICATED_READ)
 def current_user(request: Request) -> Response:
     """The caller, with capabilities.
 
@@ -214,6 +254,7 @@ def current_user(request: Request) -> Response:
 )
 @api_view(["POST"])
 @permission_classes([IsPlatformStaff])
+@throttle_scope(Scope.WRITE)
 def verify_user(request: Request, user_id: int) -> Response:
     """Mark a landlord profile verified.
 
@@ -243,6 +284,7 @@ class AdminUserViewSet(ModelViewSet):
     queryset = User.objects.all().order_by("-date_joined")
     serializer_class = AdminUserSerializer
     permission_classes = [IsPlatformStaff]
+    throttle_scope = Scope.AUTHENTICATED_READ
     search_fields = ["email", "first_name", "last_name", "phone_number"]
     ordering_fields = ["date_joined", "email"]
 
@@ -262,6 +304,7 @@ class AdminUserViewSet(ModelViewSet):
 )
 @api_view(["GET"])
 @permission_classes([IsPlatformStaff])
+@throttle_scope(Scope.AUTHENTICATED_READ)
 def user_statistics(request: Request) -> Response:
     """Counts by capability rather than by a self-declared string."""
     stats = User.objects.aggregate(

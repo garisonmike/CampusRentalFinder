@@ -26,6 +26,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from config.api.throttling import Scope
+from config.api.throttling import scope as throttle_scope
+
 logger = structlog.get_logger("campusrental.health")
 
 
@@ -38,6 +41,7 @@ logger = structlog.get_logger("campusrental.health")
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @never_cache
+@throttle_scope(Scope.PUBLIC_READ)
 def health_live(request: Request) -> Response:
     """Liveness: no dependency is checked, by design."""
     return Response({"status": "ok"})
@@ -77,6 +81,7 @@ def _check_redis() -> tuple[bool, str | None]:
 @api_view(["GET"])
 @permission_classes([AllowAny])
 @never_cache
+@throttle_scope(Scope.PUBLIC_READ)
 def health_ready(request: Request) -> Response:
     """Readiness: the instance should only take traffic when this passes."""
     db_ok, db_error = _check_database()

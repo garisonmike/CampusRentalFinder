@@ -81,6 +81,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # After authentication so a view sees both; before anything that queries
     # tenant-scoped data (ADR-001).
+    # First among ours: the request id is bound before anything else can log,
+    # so a failure inside tenant resolution still carries one.
+    "config.api.request_id.RequestIDMiddleware",
     "config.middleware.TenantResolutionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -169,10 +172,13 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    # A default exists so nothing is accidentally public, but every viewset
+    # action declares its own anyway -- tests/test_architecture.py fails the
+    # build on any action that falls through to this (docs/ENGINEERING.md).
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "config.api.pagination.StandardPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_FILTER_BACKENDS": [
@@ -180,6 +186,27 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+    # One error shape for the whole API. The frontend branches on it, so it
+    # must not vary by endpoint (config/api/errors.py).
+    "EXCEPTION_HANDLER": "config.api.errors.api_exception_handler",
+    "DEFAULT_THROTTLE_CLASSES": ["config.api.throttling.ScopedThrottle"],
+    "DEFAULT_THROTTLE_RATES": {
+        # Reading listings is the product; anonymous browsing is generous.
+        "public_read": config("THROTTLE_PUBLIC_READ", default="120/min"),
+        "authenticated_read": config("THROTTLE_AUTHENTICATED_READ", default="240/min"),
+        "write": config("THROTTLE_WRITE", default="60/min"),
+        # An inquiry is an unsolicited message to a stranger.
+        "inquiry": config("THROTTLE_INQUIRY", default="10/hour"),
+        # Anything that mails a person or accepts an identity document.
+        "verification": config("THROTTLE_VERIFICATION", default="10/hour"),
+        # Assertions the platform must test rather than witness.
+        "claim": config("THROTTLE_CLAIM", default="10/hour"),
+        # Separate from `write` so credential stuffing cannot hide inside
+        # ordinary write traffic.
+        "auth": config("THROTTLE_AUTH", default="20/min"),
+        # Rare by nature; a burst is a signal rather than usage.
+        "privacy": config("THROTTLE_PRIVACY", default="5/hour"),
+    },
 }
 
 SIMPLE_JWT = {

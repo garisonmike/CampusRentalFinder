@@ -956,7 +956,7 @@ class TestLandlordErasureIsBlockedByUpcomingTenancies:
     def test_the_blocker_says_the_stay_has_not_started(
         self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
     ):
-        """"Currently running" and "due to start" need different wording, or
+        """ "Currently running" and "due to start" need different wording, or
         the operator reading the flag looks for a tenant who is not there."""
         user = self.a_landlord_with_a_future_stay(
             landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
@@ -1005,9 +1005,7 @@ class TestLandlordErasureIsBlockedByUpcomingTenancies:
         """An operator clearing the way needs the whole list, not the first
         obstacle followed by another one after they fix it."""
         prop = property_factory(landlord=landlord_profile)
-        tenancy_factory(
-            unit=unit_factory(property=prop, label="A1"), tenant=tenant, current=True
-        )
+        tenancy_factory(unit=unit_factory(property=prop, label="A1"), tenant=tenant, current=True)
         tenancy_factory(
             unit=unit_factory(property=prop, label="A2"),
             tenant=student_profile.user,

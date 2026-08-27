@@ -9,6 +9,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from config.api.throttling import Scope
+from config.api.throttling import scope as throttle_scope
+
 from .serializers import TenantConfigSerializer
 
 
@@ -25,6 +28,7 @@ from .serializers import TenantConfigSerializer
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@throttle_scope(Scope.PUBLIC_READ)
 def tenant_config(request: Request) -> Response:
     """Return the active tenant's public configuration.
 
