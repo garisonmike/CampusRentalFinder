@@ -29,7 +29,7 @@ from .constants import (
     EscalationReason,
     TenancyStatus,
 )
-from .models import Application, Tenancy, TenancyClaim
+from .models import Application, Tenancy, TenancyClaim, TerminationRequest
 
 
 class ApplicationNotDecidableError(ValidationError):
@@ -342,30 +342,312 @@ def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
 
 
 @transaction.atomic
-def terminate_tenancy_early(tenancy: Tenancy, *, ended_on: dt.date, reason: str) -> Tenancy:
-    """End a stay before its agreed end date.
+def effective_stay_days(tenancy: Tenancy, *, today: dt.date | None = None) -> int:
+    """How long the stay has lasted so far.
 
-    **``end_date`` moves to the actual date and stays authoritative.** Currency
-    is derived from the dates, so a tenancy that ended in March reads as past
-    from March -- no flag is consulted and no job has to run for that to be
-    true.
-
-    ``terminated_early`` and the reason are recorded because "ended in March"
-    and "ended early in March" are different facts about the same date, and a
-    landlord's record of why a tenant left is worth keeping.
+    An ongoing tenancy counts up to today. This is the *live* figure -- it goes
+    down if `end_date` moves back, which is exactly why review eligibility is
+    latched rather than read from here.
     """
+    end = tenancy.end_date or (today or dt.date.today())
+    return (end - tenancy.start_date).days
+
+
+def review_eligibility_date(tenancy: Tenancy, *, today: dt.date | None = None) -> dt.date | None:
+    """The day this stay became long enough to review, **latched**.
+
+    Returns ``None`` while the threshold has not been reached.
+
+    Nothing writes a row on the day a threshold passes, so this stamps the
+    first time anything observes it met -- with the date it was actually
+    crossed, not with today. `start_date + REVIEW_MINIMUM_STAY_DAYS` is the
+    honest fact; `now` would be an artefact of when somebody happened to look.
+
+    **Once set it is never cleared and never moved.** That is the whole point:
+
+    > A landlord who can move `end_date` can otherwise push a stay back under
+    > the minimum and delete a review right that was already earned. It is
+    > `correction_defeats_review` at a different door, and the same answer
+    > applies -- eligibility, once earned, is not the counterparty's to revoke.
+    """
+    if tenancy.review_eligible_at is not None:
+        return tenancy.review_eligible_at
+
+    if effective_stay_days(tenancy, today=today) < settings.REVIEW_MINIMUM_STAY_DAYS:
+        return None
+
+    crossed_on = tenancy.start_date + dt.timedelta(days=settings.REVIEW_MINIMUM_STAY_DAYS)
+    Tenancy.all_objects.filter(pk=tenancy.pk).update(review_eligible_at=crossed_on)
+    tenancy.review_eligible_at = crossed_on
+    return crossed_on
+
+
+def termination_would_defeat_review(
+    tenancy: Tenancy, proposed_end: dt.date, *, today: dt.date | None = None
+) -> bool:
+    """Whether this termination would NEWLY remove a review right.
+
+    Two conditions, and both are required:
+
+    - the stay has **not yet** earned eligibility (if it has, the latch
+      protects it and nothing here can take it away); and
+    - the proposed date would leave it under the minimum.
+
+    A termination that shortens an already-eligible stay is not caught, and
+    must not be: the right is already earned, so there is nothing to defend.
+    """
+    if review_eligibility_date(tenancy, today=today) is not None:
+        return False
+
+    return (proposed_end - tenancy.start_date).days < settings.REVIEW_MINIMUM_STAY_DAYS
+
+
+class TerminationNotOpenError(ValidationError):
+    """This termination is not in a state where that action applies."""
+
+
+def _assert_terminable(tenancy: Tenancy, ended_on: dt.date, *, today: dt.date) -> None:
+    if ended_on < tenancy.start_date:
+        raise ValidationError({"ended_on": _("A stay cannot end before it started.")})
+
+    if ended_on > today:
+        # A date that has not happened yet is not a termination; it is an
+        # agreement to end later, which is a lease amendment. This platform
+        # records what happened, and accepting a future date here would mean
+        # storing a fact that is not yet true and might never be.
+        raise ValidationError(
+            {
+                "ended_on": _(
+                    "An early termination records a move-out that has already "
+                    "happened. A future date is a lease amendment, which this "
+                    "platform does not record."
+                )
+            }
+        )
+
+
+@transaction.atomic
+def request_early_termination(
+    tenancy: Tenancy,
+    *,
+    initiated_by: User,
+    ended_on: dt.date,
+    reason: str,
+    now: dt.datetime | None = None,
+    today: dt.date | None = None,
+) -> TerminationRequest:
+    """Propose that a stay ended early. Either party may.
+
+    The counterparty has ``settings.TENANCY_CONFIRMATION_WINDOW_DAYS`` to
+    confirm or dispute, and silence auto-confirms -- the same shape as a claim,
+    for the same reason: an indefinite wait would let either side veto a fact
+    by ignoring it.
+
+    **Unless it would newly defeat a review right**, in which case it escalates
+    immediately and no amount of silence confirms it.
+    """
+    now = now or timezone.now()
+    today = today or dt.date.today()
+
     if not reason:
         raise ValidationError(
             {"reason": _("An early termination must say why. The date alone is not a record.")}
         )
-    if ended_on < tenancy.start_date:
-        raise ValidationError({"ended_on": _("A stay cannot end before it started.")})
+    _assert_terminable(tenancy, ended_on, today=today)
 
-    tenancy.end_date = ended_on
+    request = TerminationRequest.all_objects.create(
+        tenancy=tenancy,
+        initiated_by=initiated_by,
+        proposed_end_date=ended_on,
+        reason=reason,
+        confirmation_deadline=now + dt.timedelta(days=settings.TENANCY_CONFIRMATION_WINDOW_DAYS),
+    )
+
+    if termination_would_defeat_review(tenancy, ended_on, today=today):
+        # Straight to an administrator. Not disputed -- nobody has disagreed
+        # yet -- but it must never reach the auto-confirm sweep, because the
+        # counterparty's silence would then delete their own review right.
+        return escalate_termination(
+            request,
+            reason=EscalationReason.TERMINATION_DEFEATS_REVIEW,
+            now=now,
+        )
+
+    return request
+
+
+@transaction.atomic
+def escalate_termination(
+    request: TerminationRequest, *, reason: str, now: dt.datetime | None = None
+) -> TerminationRequest:
+    """Put a termination in front of an administrator.
+
+    The permitted pairings come from ``DISPUTE_TRANSITIONS`` -- the same table
+    the claim state machine reads -- so a termination cannot escalate as
+    something a dates dispute could not.
+    """
+    now = now or timezone.now()
+    permitted = DISPUTE_TRANSITIONS[DisputeReason.TERMINATION_DATE].escalates_to
+
+    if reason not in permitted:
+        raise UnroutableDisputeError(
+            {
+                "escalation_reason": _("A termination cannot escalate as %(escalation)s.")
+                % {"escalation": reason}
+            }
+        )
+
+    request.status = ClaimStatus.ESCALATED
+    request.escalation_reason = reason
+    request.escalated_at = now
+    request.escalation_deadline = now + dt.timedelta(days=settings.DISPUTE_RESOLUTION_WINDOW_DAYS)
+    request.save(
+        update_fields=[
+            "status",
+            "escalation_reason",
+            "escalated_at",
+            "escalation_deadline",
+            "updated_at",
+        ]
+    )
+    return request
+
+
+@transaction.atomic
+def confirm_termination(request: TerminationRequest, *, now: dt.datetime | None = None) -> Tenancy:
+    """Apply the termination to the tenancy.
+
+    ``end_date`` moves to the actual date and stays authoritative for currency,
+    so a stay that ended in March reads as past from March with no flag
+    consulted and no job run.
+
+    ``terminated_early`` and the reason are kept because "ended in March" and
+    "ended early in March" are different facts about the same date.
+    """
+    now = now or timezone.now()
+
+    if not request.is_open():
+        raise TerminationNotOpenError(
+            {"status": _("This termination is already %(status)s.") % {"status": request.status}}
+        )
+
+    tenancy = request.tenancy
+    # Latch before moving the date. Once end_date shrinks the live computation
+    # can no longer see that the threshold was met, so this is the last moment
+    # the fact is observable.
+    review_eligibility_date(tenancy)
+
+    tenancy.end_date = request.proposed_end_date
     tenancy.terminated_early = True
-    tenancy.termination_reason = reason
-    tenancy.save(update_fields=["end_date", "terminated_early", "termination_reason", "updated_at"])
+    tenancy.termination_reason = request.reason
+    tenancy.save(
+        update_fields=[
+            "end_date",
+            "terminated_early",
+            "termination_reason",
+            "review_eligible_at",
+            "updated_at",
+        ]
+    )
+
+    request.status = ClaimStatus.CONFIRMED
+    request.resolved_at = now
+    request.save(update_fields=["status", "resolved_at", "updated_at"])
+
     return tenancy
+
+
+@transaction.atomic
+def dispute_termination(
+    request: TerminationRequest,
+    *,
+    disputed_by: User,
+    counter_end_date: dt.date | None = None,
+    now: dt.datetime | None = None,
+) -> TerminationRequest:
+    """The counterparty disagrees about when the stay ended."""
+    now = now or timezone.now()
+
+    if request.status != ClaimStatus.PENDING:
+        raise TerminationNotOpenError({"status": _("Only a pending termination can be disputed.")})
+
+    request.status = ClaimStatus.DISPUTED
+    request.dispute_reason = DisputeReason.TERMINATION_DATE
+    request.disputed_by = disputed_by
+    request.disputed_at = now
+    request.counter_end_date = counter_end_date
+    request.save(
+        update_fields=[
+            "status",
+            "dispute_reason",
+            "disputed_by",
+            "disputed_at",
+            "counter_end_date",
+            "updated_at",
+        ]
+    )
+
+    if counter_end_date is None:
+        # No counter-proposal means there is nothing for the parties to settle
+        # between them.
+        return escalate_termination(request, reason=EscalationReason.COUNTER_UNRESOLVED, now=now)
+
+    return request
+
+
+@transaction.atomic
+def accept_termination_counter(
+    request: TerminationRequest,
+    *,
+    now: dt.datetime | None = None,
+    today: dt.date | None = None,
+) -> TerminationRequest | Tenancy:
+    """The initiator accepts the counterparty's date.
+
+    The review-defeating guard applies again, against the **counter** date. A
+    termination laundered through a counter is still a termination.
+    """
+    now = now or timezone.now()
+    today = today or dt.date.today()
+
+    if request.counter_end_date is None:
+        raise TerminationNotOpenError(
+            {"counter_end_date": _("This termination has not been countered.")}
+        )
+
+    if termination_would_defeat_review(request.tenancy, request.counter_end_date, today=today):
+        return escalate_termination(
+            request, reason=EscalationReason.TERMINATION_DEFEATS_REVIEW, now=now
+        )
+
+    request.proposed_end_date = request.counter_end_date
+    request.save(update_fields=["proposed_end_date", "updated_at"])
+    return confirm_termination(request, now=now)
+
+
+@transaction.atomic
+def resolve_termination_escalation(
+    request: TerminationRequest,
+    *,
+    resolved_by: User,
+    uphold: bool,
+    now: dt.datetime | None = None,
+) -> TerminationRequest | Tenancy:
+    """An administrator decides an escalated termination."""
+    now = now or timezone.now()
+
+    if request.status != ClaimStatus.ESCALATED:
+        raise TerminationNotOpenError({"status": _("This termination is not escalated.")})
+
+    if uphold:
+        request.status = ClaimStatus.PENDING
+        request.save(update_fields=["status", "updated_at"])
+        return confirm_termination(request, now=now)
+
+    request.status = ClaimStatus.WITHDRAWN
+    request.resolved_at = now
+    request.save(update_fields=["status", "resolved_at", "updated_at"])
+    return request
 
 
 @transaction.atomic

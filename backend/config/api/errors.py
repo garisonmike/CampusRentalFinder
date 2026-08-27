@@ -104,6 +104,7 @@ SERVICE_EXCEPTION_MAP: dict[str, tuple[str, int]] = {
     # than "you sent the wrong thing".
     "ApplicationNotDecidableError": (ErrorCode.CONFLICT, 409),
     "DisputeNotOpenError": (ErrorCode.CONFLICT, 409),
+    "TerminationNotOpenError": (ErrorCode.CONFLICT, 409),
     "InquiryNotAnswerableError": (ErrorCode.CONFLICT, 409),
     "PropertyNotContactableError": (ErrorCode.CONFLICT, 409),
     "OverlappingTenancyError": (ErrorCode.CONFLICT, 409),

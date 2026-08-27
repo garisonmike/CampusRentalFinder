@@ -124,6 +124,10 @@ class DisputeReason(models.TextChoices):
     DATES_INCORRECT = "dates_incorrect", _("The stay happened; the dates are wrong")
     NEVER_TENANTED = "never_tenanted", _("This person never lived here")
     DUPLICATE = "duplicate", _("Already covered by an existing tenancy")
+    TERMINATION_DATE = (
+        "termination_date",
+        _("The stay ended; the proposed move-out date is wrong"),
+    )
 
 
 class EscalationReason(models.TextChoices):
@@ -141,6 +145,10 @@ class EscalationReason(models.TextChoices):
         _("Whether a review-defeating correction is honest"),
     )
     IDENTITY_DISPUTED = "identity_disputed", _("Whether this person lived here at all")
+    TERMINATION_DEFEATS_REVIEW = (
+        "termination_defeats_review",
+        _("Whether an early termination that removes a review right is honest"),
+    )
     DUPLICATE_UNMATCHED = "duplicate_unmatched", _("Whether an existing tenancy covers this")
 
 
@@ -186,6 +194,20 @@ DISPUTE_TRANSITIONS: dict[str, DisputeTransition] = {
         escalates_to=(EscalationReason.DUPLICATE_UNMATCHED,),
         can_resolve_between_parties=False,
         auto_resolves=True,
+    ),
+    # An early termination the counterparty disagrees with. Both parties accept
+    # the stay happened and differ on when it ended -- so it settles between
+    # them like a dates dispute, with one exception that cannot.
+    DisputeReason.TERMINATION_DATE: DisputeTransition(
+        escalates_to=(
+            EscalationReason.COUNTER_UNRESOLVED,
+            # A termination that would NEWLY remove a review right. Same
+            # reasoning as correction_defeats_review: the parties cannot settle
+            # it privately because one of them may not realise what they are
+            # agreeing to.
+            EscalationReason.TERMINATION_DEFEATS_REVIEW,
+        ),
+        can_resolve_between_parties=True,
     ),
 }
 

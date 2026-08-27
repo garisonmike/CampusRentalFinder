@@ -305,6 +305,19 @@ class Tenancy(TenantScopedModel):
     #: date, so currency stays correct without consulting this at all; the flag
     #: and reason exist because "ended in March" and "ended early in March" are
     #: different facts about the same date.
+    #: The day this stay first became long enough to review, latched.
+    #:
+    #: **Read eligibility from here, never from a live date computation.** A
+    #: landlord who can move `end_date` can otherwise push a stay back under
+    #: REVIEW_MINIMUM_STAY_DAYS and delete a review right that was already
+    #: earned -- correction_defeats_review at a different door (ADR-004 §2b).
+    #:
+    #: Latched rather than stored-from-the-start: nothing writes a row on the
+    #: day a threshold passes, so this is stamped the first time anything
+    #: observes the threshold met, with the date it was actually crossed.
+    #: Once set it is never cleared and never moved.
+    review_eligible_at = models.DateField(_("review eligible from"), null=True, blank=True)
+
     terminated_early = models.BooleanField(_("terminated early"), default=False)
     termination_reason = models.CharField(_("termination reason"), max_length=255, blank=True)
 
@@ -475,6 +488,134 @@ def _permitted_escalations_condition() -> Q:
         if transition.escalates_to:
             condition |= Q(dispute_reason=reason, escalation_reason__in=transition.escalates_to)
     return condition
+
+
+class TerminationRequest(TenantScopedModel):
+    """One party proposing that a stay ended early (ADR-004).
+
+    Same shape as a claim, and deliberately so: one side asserts a fact about a
+    date, the other has a window to confirm or dispute, and silence confirms.
+    Reusing that shape means reusing the dispute vocabulary and the transition
+    table rather than growing a second state machine that drifts from the
+    first.
+
+    **The hazard this exists to contain**: a landlord who can move ``end_date``
+    can push a stay under ``REVIEW_MINIMUM_STAY_DAYS`` and delete a review
+    right. That is ``correction_defeats_review`` at a different door, and it
+    gets the same answer -- it cannot settle between the parties.
+    """
+
+    tenant_lookup = "tenancy__unit__property__campus_distances__university"
+
+    tenancy = models.ForeignKey(
+        Tenancy, on_delete=models.CASCADE, related_name="termination_requests"
+    )
+    initiated_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="terminations_initiated"
+    )
+
+    #: The actual last day. Must not be in the future: a date that has not
+    #: happened yet is a lease amendment, which this platform does not model.
+    proposed_end_date = models.DateField(_("actual move-out date"))
+    reason = models.CharField(_("reason"), max_length=255)
+
+    status = models.CharField(
+        _("status"),
+        max_length=16,
+        choices=ClaimStatus.choices,
+        default=ClaimStatus.PENDING,
+    )
+    confirmation_deadline = models.DateTimeField(
+        _("confirmation deadline"),
+        help_text=_("Silence past this point auto-confirms, as with a claim."),
+    )
+
+    #: The counterparty's disagreement, in the shared vocabulary.
+    dispute_reason = models.CharField(
+        _("dispute reason"), max_length=24, choices=DisputeReason.choices, blank=True
+    )
+    disputed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="terminations_disputed",
+    )
+    disputed_at = models.DateTimeField(_("disputed at"), null=True, blank=True)
+    counter_end_date = models.DateField(_("counter date"), null=True, blank=True)
+
+    escalation_reason = models.CharField(
+        _("escalation reason"), max_length=26, choices=EscalationReason.choices, blank=True
+    )
+    escalated_at = models.DateTimeField(_("escalated at"), null=True, blank=True)
+    escalation_deadline = models.DateTimeField(_("escalation deadline"), null=True, blank=True)
+
+    resolved_at = models.DateTimeField(_("resolved at"), null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Termination request")
+        verbose_name_plural = _("Termination requests")
+        ordering = ["-created_at"]
+        base_manager_name = "all_objects"
+        default_manager_name = "all_objects"
+        indexes = [
+            models.Index(
+                fields=["status", "confirmation_deadline"], name="termination_deadline_idx"
+            ),
+            models.Index(
+                fields=["escalation_reason", "escalated_at"], name="termination_queue_idx"
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenancy"],
+                condition=Q(status__in=OPEN_CLAIM_STATUSES),
+                name="termination_one_open_per_tenancy",
+            ),
+            models.CheckConstraint(condition=~Q(reason=""), name="termination_states_why"),
+            # DISPUTED only, unlike TenancyClaim which includes ESCALATED.
+            #
+            # The two differ because their escalations have different origins.
+            # Every claim escalation follows a human dispute, so requiring a
+            # typed reason there is always satisfiable. A termination can
+            # escalate with **nobody having disputed it**: the system detects
+            # that the proposed date would newly defeat a review right and
+            # routes it to an administrator on its own.
+            #
+            # Stamping a dispute_reason there to satisfy a constraint would
+            # record a disagreement that never happened -- a lie in the audit
+            # trail, told to keep a check quiet.
+            models.CheckConstraint(
+                condition=~Q(status=ClaimStatus.DISPUTED)
+                | (~Q(dispute_reason="") & Q(disputed_at__isnull=False)),
+                name="termination_dispute_is_typed",
+            ),
+            # The other direction: a recorded dispute names its reason,
+            # whatever the current status. This is what stops the narrowing
+            # above from letting an untyped dispute through on its way to
+            # somewhere else.
+            models.CheckConstraint(
+                condition=Q(disputed_at__isnull=True) | ~Q(dispute_reason=""),
+                name="termination_disputed_at_implies_a_reason",
+            ),
+            models.CheckConstraint(
+                condition=~Q(status=ClaimStatus.ESCALATED)
+                | (~Q(escalation_reason="") & Q(escalated_at__isnull=False)),
+                name="termination_escalation_names_its_question",
+            ),
+            models.CheckConstraint(
+                condition=~Q(status__in=TERMINAL_CLAIM_STATUSES) | Q(resolved_at__isnull=False),
+                name="termination_terminal_has_a_resolution_time",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"termination of {self.tenancy_id} on {self.proposed_end_date}"
+
+    def is_open(self) -> bool:
+        return self.status in OPEN_CLAIM_STATUSES
 
 
 class TenancyClaim(TenantScopedModel):

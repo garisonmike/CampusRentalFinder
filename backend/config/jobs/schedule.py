@@ -50,6 +50,17 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="tenancies.jobs.sweep_overdue_terminations",
+        cron="0 * * * *",
+        queue="default",
+        on_failure=(
+            "Early terminations sit pending for ever and the stays behind them "
+            "keep reading as current -- so a landlord's vacancy list is wrong "
+            "and a student who moved out months ago still shows as living "
+            "there. Silence stops being a signal and becomes a veto."
+        ),
+    ),
+    ScheduledJob(
         func="accounts.retention.sweep_expired_documents",
         cron="0 2 * * *",
         queue="default",

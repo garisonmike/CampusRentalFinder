@@ -97,9 +97,14 @@ def assert_tenancy_is_reviewable(tenancy: Tenancy, *, today: dt.date | None = No
     """
     _assert_verification_permits(tenancy.tenant, GatedAction.WRITE_REVIEW)
 
-    days = stay_days(tenancy, today=today)
+    # Read the LATCH, not a live date computation. Once a stay has earned the
+    # right to be reviewed, moving `end_date` backwards cannot take it away --
+    # otherwise a landlord could delete a review right by terminating early,
+    # which is correction_defeats_review at a different door (ADR-004 §2b).
+    from tenancies.services import review_eligibility_date
 
-    if days < settings.REVIEW_MINIMUM_STAY_DAYS:
+    if review_eligibility_date(tenancy, today=today) is None:
+        days = stay_days(tenancy, today=today)
         raise TenancyNotReviewableError(
             {
                 "tenancy": _(

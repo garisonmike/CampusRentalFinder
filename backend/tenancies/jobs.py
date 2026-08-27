@@ -188,3 +188,77 @@ def sweep_overdue_disputes(limit: int = 500, now: dt.datetime | None = None) -> 
         oldest_overdue_seconds=None if waiting is None else int(waiting.total_seconds()),
     )
     return len(claim_ids)
+
+
+# ---------------------------------------------------------------------------
+# Termination auto-confirmation
+# ---------------------------------------------------------------------------
+
+
+def overdue_terminations(now: dt.datetime | None = None):
+    """Pending terminations whose confirmation window has elapsed.
+
+    **Pending only.** A termination that escalated as
+    `termination_defeats_review` is deliberately not here: letting silence
+    confirm it would delete the counterparty's own review right by inaction,
+    which is the exact outcome escalating it exists to prevent.
+    """
+    from .models import TerminationRequest
+
+    return TerminationRequest.all_objects.filter(
+        status=ClaimStatus.PENDING,
+        confirmation_deadline__lte=now or timezone.now(),
+    )
+
+
+def auto_confirm_termination(request_id: int) -> None:
+    """Confirm one termination the counterparty neither confirmed nor disputed.
+
+    Same principle as a claim: silence is a signal, not a veto. A stay that
+    ended is a fact, and an indefinite wait would let either side deny it by
+    ignoring the request.
+    """
+    from .models import TerminationRequest
+    from .services import confirm_termination
+
+    request = TerminationRequest.all_objects.filter(pk=request_id).first()
+    if request is None:
+        logger.info("termination_auto_confirm_skipped", request_id=request_id, reason="deleted")
+        return
+
+    if request.status != ClaimStatus.PENDING:
+        logger.info(
+            "termination_auto_confirm_skipped",
+            request_id=request_id,
+            reason="no_longer_pending",
+            status=request.status,
+        )
+        return
+
+    confirm_termination(request)
+    logger.info("termination_auto_confirmed", request_id=request_id)
+
+
+def sweep_overdue_terminations(limit: int = 500, now: dt.datetime | None = None) -> int:
+    """Enqueue auto-confirmation for every termination past its window.
+
+    Scheduled hourly. `confirmation_deadline` is NOT NULL, so the ascending
+    order has no NULLs to strand (docs/OPERATIONS.md).
+    """
+    now = now or timezone.now()
+    queryset = overdue_terminations(now)
+
+    waiting = _oldest_overdue_age(queryset, "confirmation_deadline")
+    request_ids = list(
+        queryset.order_by("confirmation_deadline").values_list("pk", flat=True)[:limit]
+    )
+
+    for request_id in request_ids:
+        django_rq.get_queue("default").enqueue(auto_confirm_termination, request_id)
+
+    logger.info(
+        "termination_confirmation_sweep",
+        enqueued=len(request_ids),
+        oldest_overdue_seconds=None if waiting is None else int(waiting.total_seconds()),
+    )
+    return len(request_ids)

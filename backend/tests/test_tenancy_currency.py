@@ -25,11 +25,28 @@ from tenancies.constants import (
     TenancyStatus,
 )
 from tenancies.models import Tenancy
-from tenancies.services import terminate_tenancy_early
+from tenancies.services import confirm_termination, request_early_termination
 
 pytestmark = pytest.mark.django_db
 
 TODAY = dt.date.today()
+
+
+def terminate_tenancy_early(tenancy, *, ended_on, reason, initiated_by=None):
+    """Request and immediately confirm, as a landlord and tenant agreeing.
+
+    The one-call helper these tests were written against is now a two-party
+    state machine (ADR-004): a termination is proposed and then confirmed,
+    because a date one party asserts about the other is exactly the shape that
+    needed a confirmation window everywhere else.
+    """
+    request = request_early_termination(
+        tenancy,
+        initiated_by=initiated_by or tenancy.tenant,
+        ended_on=ended_on,
+        reason=reason,
+    )
+    return confirm_termination(request)
 
 
 def stay(tenancy_factory, *, starts: int, ends: int | None, **kwargs):

@@ -86,6 +86,29 @@ incentive to suppress.
 
 **Time to visible:** 14 days, then indefinitely.
 
+### 2a. Termination auto-confirmation
+
+| | |
+|---|---|
+| **Schedule** | Hourly |
+| **Does** | Confirms `TerminationRequest` rows past `confirmation_deadline` that are still `pending` |
+| **Guarantees** | That a stay which ended is recorded as ended, without either party's silence acting as a veto |
+
+**Symptom if it stops:** early terminations sit `pending` for ever and the
+stays behind them keep reading as **current** — so a landlord's vacancy list is
+wrong, and a student who moved out months ago still shows as living there.
+Nothing errors. Silence stops being a signal and quietly becomes a veto, which
+is the behaviour the confirmation window exists to defeat.
+
+**What it deliberately does NOT sweep:** a termination escalated as
+`termination_defeats_review`. Letting silence confirm one of those would delete
+the counterparty's own review right by inaction — the precise outcome
+escalating it exists to prevent. Those wait for an administrator, and the
+dispute SLA above covers them.
+
+**Time to visible:** 7 days plus however long anyone takes to notice a vacancy
+figure that never moves. Realistically: never, without the alert.
+
 ### 3. Verification document retention deletion
 
 | | |
@@ -280,71 +303,72 @@ they would have sorted. The filter is what makes them safe, not the ordering.
 
 ## Checks that can pass without checking
 
-**This has been the most productive bug class in the project.** Three instances
-so far, none of which failed anything, and each was found by someone asking
-"would this have caught it?" rather than by a test going red.
+**This has been the most productive bug class in the project.** Four instances
+so far, none of which failed anything. Each was found by someone asking "would
+this have caught it?" — or by reading a log line that disagreed with a commit
+message — rather than by a test going red.
 
 ### The shape
 
-A check that reports success is not the same as a check that ran. The failure
-is always the same one:
+The generic form is: a check reports success, and the thing it was supposed to
+look at was never in scope. But that is too vague to grep for. The specific
+form, which all four share, is sharper:
 
-> The mechanism is present, the output is green, and **the thing it was
-> supposed to look at was never in scope.**
+> **The check and the thing it checks were configured in two places, and the
+> wrong one won silently.**
 
-It is worse than no check at all. No check is an obvious gap. A check that
-cannot fail is a gap wearing a badge that says it is covered, and it stops
-anyone looking again.
+Not "won and errored". Won *silently* — the losing configuration stayed in the
+file, readable, plausible, and completely inert. Anyone editing it got a green
+build and believed they had changed something.
 
-### The three we have produced
+That is worth grepping for directly. **Any value that appears twice is a
+candidate**, and the question is always: *which copy does the machine actually
+read?*
 
-**1. Coverage flags that measured a subset.** `--cov=` named four packages and
-was never updated as apps were added, so `properties`, `tenancies` and
-`universities` were never measured at all. The number was real; the denominator
-was not. The report said 84% and there was no way to tell it meant "84% of a
-little over half the code". *Fixed by deriving the measured set from
-`LOCAL_APPS + PROJECT_APPS`, so a new app is covered without anyone
-remembering.*
+### The four
 
-**2. A sweep that reported success while its backlog grew.**
-`route_stale_distances` ordered a nullable `routed_at` ascending. PostgreSQL
-sorts NULLs **last**, so it handed back rows that already had an answer and left
-the never-routed ones permanently at the back. The job logged a healthy
-`enqueued` count every run. *Fixed with `nulls_first=True`, and the audit table
-above records every other ordering in the codebase.*
+| # | The two places | Which won | What it looked like |
+|---|---|---|---|
+| 1 | `--cov=<pkg>` flags in `addopts`; `source` in `[tool.coverage.run]` | the flags | 84% of a little over half the code, reported as 84% |
+| 2 | `order_by("routed_at")`; PostgreSQL's **unstated** `NULLS LAST` default | the default | a healthy `enqueued` count every run, backlog growing |
+| 3 | the test file's skip condition; the CI service-container config | the skip | a green build with the compliance test never executed |
+| 4 | `--cov-fail-under=88` in `addopts`; `fail_under = 89` in `[tool.coverage.report]` | the flag | CI printing "88% reached" on the commit that raised it to 89 |
 
-**3. Compliance tests that would have skipped silently in CI.** The verified
-delete cannot be tested against `InMemoryStorage` — it is a dict whose
-`delete()` always works and whose `exists()` always tells the truth, so those
-tests pass whether or not the verification does anything. They were moved to
-MinIO, and then the MinIO service container failed to start, which showed as
-*skipped*, which shows as a green build. *Fixed by a test that fails when MinIO
-is unreachable and `CI` is set.*
+**Number 2 is the variant to watch for**, because it is the one a grep for
+duplicated values will not find. There, the second "place" was not a line
+anywhere in the repository — it was a **library or database default that
+nobody had written down**. The code said `order_by("routed_at")` and meant
+"oldest first, never-routed first of all"; PostgreSQL said "NULLs last" and
+nobody had stated which of those two the system was relying on.
 
-### What to look for
+So the grep has two halves:
 
-Four questions, in the order they are worth asking:
+1. **Duplicated values.** The same number, package list, or threshold appearing
+   in two files, or twice in one file. One of them is inert.
+2. **Unstated defaults on the critical path.** Sort order, null handling,
+   manager selection, exception handling, throttle rates. If the behaviour
+   depends on a default nobody named, the default is the second place.
 
-**Would this fail if the thing it checks were broken?** Break it and watch. This
-is the only one that gives a definite answer, and it is cheap: comment out the
-guard, run the test, put it back. The re-read in
-`delete_verification_document` was confirmed this way — four tests fail without
-it.
+### The four questions
 
-**Is the scope derived, or written down?** Any hand-maintained list of things to
-check — apps, packages, models, routes — drifts the moment something is added.
-Derive it from a fact that cannot drift: what is installed, where the code
-lives, what the router exposes.
+**Would this fail if the thing it checks were broken?** Break it and watch. The
+only one that gives a definite answer, and it is cheap: comment out the guard,
+run the test, put it back. The re-read in `delete_verification_document` was
+confirmed this way — four tests fail without it. The coverage floor was
+confirmed by setting it to 99 and watching it fail.
+
+**Is the scope derived, or written down?** Any hand-maintained list — apps,
+packages, models, routes — drifts the moment something is added. Derive it from
+a fact that cannot drift: what is installed, where the code lives, what the
+router exposes.
 
 **Can it skip?** A skipped test and a passing test look identical in a summary
-line. If a skip is legitimate locally but not in CI, assert that distinction
-rather than trusting it.
+line. If a skip is legitimate locally but not in CI, assert that distinction.
 
 **Does the fixture contain the case?** A suite whose fixtures are all
 currently-running tenancies cannot see a bug that needs history — which is
 exactly how the `vacant_count` bug survived eleven filters with the same shape.
-`docs/ENGINEERING.md` records why the default factory shape is the awkward case
-rather than the convenient one.
+`docs/ENGINEERING.md` records why the default factory shape is the awkward case.
 
 ### Where this is already enforced
 
@@ -356,6 +380,8 @@ rather than the convenient one.
 | `test_the_contract_notes_reach_the_generated_schema` | A frontend-facing contract note stops being emitted into the schema |
 | `test_every_api_view_declares_its_permission_classes` | A view inherits DRF's default without anyone choosing it |
 | `test_minio_is_reachable_in_ci` | A compliance test would skip rather than run |
+| `test_the_coverage_floor_is_declared_once` | The floor is declared in two places again |
+| `test_the_performance_budget_is_enforced` (frontend) | The listing bundle grows past its budget |
 
 ## Alerting
 
