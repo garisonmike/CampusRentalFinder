@@ -458,6 +458,33 @@ class UnitPhoto(TenantScopedModel):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def variant_url(self, variant: str) -> str:
+        """Public URL for one rendition, or empty if it has not been made.
+
+        A method rather than a property: `Unit.property` shadows the builtin
+        elsewhere in this module and the codebase keeps one convention
+        (tools/check_field_shadowing.py).
+        """
+        from django.core.files.storage import storages
+
+        key = getattr(self, f"{variant}_key", "")
+        return storages["default"].url(key) if key else ""
+
+    def best_url(self) -> str:
+        """The best rendition available, falling back to the original.
+
+        Never empty for a stored photo. Until the resize job runs there are no
+        variants, and serving the original costs page weight rather than
+        showing a broken image (ADR-007).
+        """
+        from django.core.files.storage import storages
+
+        for variant in ("medium", "large", "thumb"):
+            url = self.variant_url(variant)
+            if url:
+                return url
+        return storages["default"].url(self.original_key)
+
     class Meta:
         verbose_name = _("Unit photo")
         verbose_name_plural = _("Unit photos")

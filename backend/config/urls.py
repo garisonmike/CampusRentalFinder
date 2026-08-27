@@ -15,6 +15,7 @@ from config.health import health_live, health_ready
 api_v1_patterns = [
     path("tenant/", include("universities.urls")),
     path("auth/", include("accounts.urls")),
+    path("properties/", include("properties.urls")),
 ]
 
 urlpatterns = [

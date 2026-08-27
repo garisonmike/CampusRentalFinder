@@ -77,6 +77,14 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     # Function-based, GET-only, AllowAny. These are the only routes today that
     # can honestly be served from the neutral host: a DRF router route cannot,
     # because one URL name covers both the safe and the unsafe methods.
+    # -- Tenant-scoped: listings -------------------------------------------
+    # Public to read, but NOT public-canonical: which properties exist depends
+    # entirely on which university's campuses they are joined to (ADR-002), so
+    # a response served from the neutral host would be meaningless. The neutral
+    # host has no tenant and correctly gets a 404.
+    "properties:property-list": HostClass.TENANT_SCOPED,
+    "properties:property-detail": HostClass.TENANT_SCOPED,
+    "properties:unit-detail": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The
