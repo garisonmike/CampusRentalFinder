@@ -153,12 +153,33 @@ At erasure, `document` and `verification_request` are set to null.
 | Which cases did this reviewer open? | yes | **yes** |
 | Whose case was it? | yes | **no** |
 
-**That last row is deliberate and irreversible by design.** The token is
-random, so there is no key, no salt and no lookup table anywhere in the system
-that could undo it — not held by us, not recoverable under compulsion, not
-recoverable by us if we later wished we could. Anyone reading this looking for
-a way to re-link the trail should stop: there is not one, and adding one would
-defeat the whole mechanism.
+**That last row is deliberate. State the guarantee precisely, because an
+earlier draft of this ADR overclaimed it.**
+
+What is true: **the access log cannot identify the subject.** The token is
+random, so nothing *inside a log row* — and no key, salt or lookup table
+anywhere — maps it back to a person. No amount of reading the log, alone or in
+bulk, recovers whose case it was.
+
+What is **not** true, and what the earlier wording ("irreversible by design")
+wrongly implied: that the link is gone from the *system*. `subject_token` also
+lives on the surviving `VerificationRequest`, which still points at the profile.
+**Someone with direct database access can therefore still join a log row back to
+a named student.**
+
+That is a deliberate trade, not an oversight. Closing it means deleting the
+`VerificationRequest` row, which destroys the verification **outcome** — the
+record that a decision was made, on what date, with what reason — that this same
+ADR retains on purpose two sections above. Between "the audit trail is
+pseudonymised against everyone who reads the audit trail" and "the verification
+outcome is destroyed", the first is the right line.
+
+So the boundary this mechanism defends is **the log's own readers**: reviewers,
+auditors, anyone granted the trail without being granted the database. It is not
+a defence against a database administrator, and this ADR must not be read as
+claiming otherwise. An ADR that overstates its guarantee is worse than one that
+states a weaker guarantee accurately, because the overstatement is what someone
+later relies on.
 
 The property is tested by **walking the foreign keys** from a log row and
 asserting none of them lands on the subject, rather than by asserting on the

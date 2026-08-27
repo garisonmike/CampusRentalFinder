@@ -924,3 +924,98 @@ class TestLandlordErasureIsBlockedByRunningTenancies:
         )
 
         assert landlord_erasure_blockers(landlord_profile.user) == []
+
+
+class TestLandlordErasureIsBlockedByUpcomingTenancies:
+    """An agreed stay that has not started blocks too.
+
+    Checking only `.current()` let a landlord with a tenancy starting next
+    month erase today, leaving that student a dormant listing and no
+    counterparty on move-in day. That is precisely the harm the block exists to
+    prevent, and it is worse than the running case: the student has not had the
+    tenancy long enough to have noticed anything going wrong.
+    """
+
+    def a_landlord_with_a_future_stay(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant, upcoming=True)
+        return landlord_profile.user
+
+    def test_it_is_refused(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        user = self.a_landlord_with_a_future_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        with pytest.raises(ActiveTenanciesError):
+            erase_landlord_data(user)
+
+    def test_the_blocker_says_the_stay_has_not_started(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """"Currently running" and "due to start" need different wording, or
+        the operator reading the flag looks for a tenant who is not there."""
+        user = self.a_landlord_with_a_future_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+
+        blockers = landlord_erasure_blockers(user)
+
+        assert len(blockers) == 1
+        assert "due to start" in blockers[0]
+
+    def test_nothing_is_erased(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """Flag, never silently partial."""
+        user = self.a_landlord_with_a_future_stay(
+            landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+        )
+        original = user.email
+
+        with pytest.raises(ActiveTenanciesError):
+            erase_landlord_data(user)
+        user.refresh_from_db()
+
+        assert user.email == original
+        assert user.erased_at is None
+
+    def test_a_past_stay_alone_does_not_block(
+        self, landlord_profile, property_factory, unit_factory, tenancy_factory, tenant
+    ):
+        """History is not a running obligation. The default fixture is a
+        finished stay, which is exactly this case."""
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant)
+
+        assert landlord_erasure_blockers(landlord_profile.user) == []
+
+    def test_both_kinds_are_reported_together(
+        self,
+        landlord_profile,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+        student_profile,
+    ):
+        """An operator clearing the way needs the whole list, not the first
+        obstacle followed by another one after they fix it."""
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(
+            unit=unit_factory(property=prop, label="A1"), tenant=tenant, current=True
+        )
+        tenancy_factory(
+            unit=unit_factory(property=prop, label="A2"),
+            tenant=student_profile.user,
+            upcoming=True,
+        )
+
+        blockers = landlord_erasure_blockers(landlord_profile.user)
+
+        assert len(blockers) == 2
+        assert any("currently running" in line for line in blockers)
+        assert any("due to start" in line for line in blockers)

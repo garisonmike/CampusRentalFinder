@@ -149,6 +149,43 @@ hide the authorization bugs the test exists to catch.
 **Factories** are in `backend/tests/factories.py`. Use them; do not hand-build
 model instances.
 
+### The default fixture shape decides which bugs the suite can see
+
+This is not a style point. It cost us a production-shaped bug that the suite
+was structurally incapable of noticing:
+
+> `Unit.vacant_count` reconciliation counted tenancies by `status='active'`,
+> which at the time was stamped on every stay regardless of its dates. A pooled
+> unit's occupancy therefore included **every historical tenancy it had ever
+> had** — a block with three years of turnover reported itself full and vanished
+> from search, permanently, with no error anywhere. Eleven filters had the same
+> shape; this was the only one where it mattered.
+>
+> No test caught it because **no fixture had any history.** Every stay the suite
+> could construct was currently running, so the count was accidentally right in
+> every case that existed to be tested.
+
+So the defaults are chosen to be the **awkward** case, not the convenient one:
+
+| Factory | Default | Why |
+|---|---|---|
+| `TenancyFactory` | a **finished** stay | A running stay is the easy case; almost any implementation gets it right. A finished one is where "current" and "exists" stop being the same question. |
+| `UniversityFactory` | both verification methods enabled | The several hundred tests about something else should not each have to know that verification is per-university configuration. The *model's* default stays empty, asserted separately. |
+| `StudentProfileFactory` | unverified | Verification is opt-in per ADR-003, and an unverified student is the one the gating rules have something to say about. |
+
+Ask for the easy case explicitly, at the call site, where a reader sees it:
+
+```python
+TenancyFactory()                     # finished last month
+TenancyFactory(current=True)         # running now, open-ended
+TenancyFactory(current_fixed_term=True)
+TenancyFactory(upcoming=True)        # starts next month
+```
+
+`tests/test_tenancy_currency.py::TestTheFixtureDefaultShape` pins all of this,
+because the convention *is* the safety property — a default quietly flipped back
+to "currently running" would restore the blind spot without failing anything.
+
 **Frontend**: `renderWithProviders` from `src/test/utils.tsx` wraps a component
 in the same providers `App.tsx` uses. Pass `route` and `path` for pages reading
 `useParams`, and `withTenant: false` when a test drives the theme provider

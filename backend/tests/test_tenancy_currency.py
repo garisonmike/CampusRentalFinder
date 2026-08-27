@@ -336,3 +336,72 @@ class TestCurrencyIsAvailableThroughTheScopedManager:
 
         with pytest.raises(TenantScopeError):
             list(Tenancy.objects.current())
+
+
+class TestTheFixtureDefaultShape:
+    """The default fixture shape decides which bugs the suite can see.
+
+    `TenancyFactory` produces a **finished** stay unless a trait says
+    otherwise. This is pinned by test rather than left as a convention,
+    because the convention is the whole safety property:
+
+    > `Unit.vacant_count` reconciliation counted tenancies by `status='active'`,
+    > stamped at the time on every stay regardless of dates. A pooled unit's
+    > occupancy therefore included every historical tenancy it had ever had.
+    > No test caught it because no fixture had any history -- every stay the
+    > suite created was currently running, so the count was accidentally right
+    > in every case the suite could construct.
+
+    A running stay is the easy case; almost any implementation gets it right.
+    A finished one is where "current" and "exists" stop being the same
+    question.
+    """
+
+    def test_the_default_is_a_finished_stay(self, tenancy_factory):
+        tenancy = tenancy_factory()
+
+        assert tenancy.end_date is not None
+        assert tenancy.end_date < dt.date.today()
+        assert tenancy in Tenancy.all_objects.past()
+        assert tenancy not in Tenancy.all_objects.current()
+
+    def test_current_is_open_ended_by_default(self, tenancy_factory):
+        """`end_date=None` means running with no agreed end -- a real case, and
+        NOT the same as a stay that has ended (ADR-004)."""
+        tenancy = tenancy_factory(current=True)
+
+        assert tenancy.end_date is None
+        assert tenancy in Tenancy.all_objects.current()
+        assert tenancy not in Tenancy.all_objects.past()
+
+    def test_a_fixed_term_stay_can_also_be_current(self, tenancy_factory):
+        tenancy = tenancy_factory(current_fixed_term=True)
+
+        assert tenancy.end_date > dt.date.today()
+        assert tenancy in Tenancy.all_objects.current()
+
+    def test_upcoming_has_not_started(self, tenancy_factory):
+        tenancy = tenancy_factory(upcoming=True)
+
+        assert tenancy.start_date > dt.date.today()
+        assert tenancy in Tenancy.all_objects.upcoming()
+        assert tenancy not in Tenancy.all_objects.current()
+
+    def test_the_three_states_are_disjoint(self, tenancy_factory):
+        """A tenancy is past, current or upcoming -- never two at once."""
+        past = tenancy_factory()
+        current = tenancy_factory(current=True)
+        upcoming = tenancy_factory(upcoming=True)
+
+        buckets = {
+            "past": set(Tenancy.all_objects.past().values_list("pk", flat=True)),
+            "current": set(Tenancy.all_objects.current().values_list("pk", flat=True)),
+            "upcoming": set(Tenancy.all_objects.upcoming().values_list("pk", flat=True)),
+        }
+
+        assert buckets["past"] & buckets["current"] == set()
+        assert buckets["current"] & buckets["upcoming"] == set()
+        assert buckets["past"] & buckets["upcoming"] == set()
+        assert past.pk in buckets["past"]
+        assert current.pk in buckets["current"]
+        assert upcoming.pk in buckets["upcoming"]

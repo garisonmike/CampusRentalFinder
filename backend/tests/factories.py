@@ -318,10 +318,51 @@ class ApplicationFactory(TenantScopedFactory):
 
 
 class TenancyFactory(TenantScopedFactory):
-    """A confirmed stay, long enough to be reviewable."""
+    """A confirmed stay that is **finished**, and long enough to be reviewable.
+
+    **Past by default, deliberately.** The default fixture shape decides which
+    bugs the suite can see, and this one was chosen after a bug it could not:
+
+    > `Unit.vacant_count` reconciliation counted tenancies by `status='active'`,
+    > which at the time was stamped on every stay regardless of its dates. A
+    > pooled unit's occupancy therefore included every historical tenancy it had
+    > ever had, so a block with three years of turnover reported itself full and
+    > vanished from search. **No test caught it, because no fixture had any
+    > history** — every stay the suite created was currently running, so the
+    > count was accidentally right in every case the suite could construct.
+
+    A currently-running stay is the *easy* case: almost any implementation gets
+    it right. A finished stay is where "current" and "exists" stop being the
+    same question, so that is what a test gets unless it asks otherwise.
+
+    Ask otherwise with a trait, at the call site, where a reader can see it::
+
+        TenancyFactory()                  # finished last month
+        TenancyFactory(current=True)      # running now, open-ended
+        TenancyFactory(upcoming=True)     # starts next month
+    """
 
     class Meta:
         model = Tenancy
+
+    class Params:
+        #: Running now. `end_date=None` means open-ended, which is a real case
+        #: and is NOT the same as a stay that has ended (ADR-004).
+        current = factory.Trait(
+            start_date=factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=60)),
+            end_date=None,
+        )
+        #: Running now, with an agreed end still in the future.
+        current_fixed_term = factory.Trait(
+            start_date=factory.LazyFunction(lambda: dt.date.today() - dt.timedelta(days=60)),
+            end_date=factory.LazyFunction(lambda: dt.date.today() + dt.timedelta(days=120)),
+        )
+        #: Agreed, not started. Blocks landlord erasure just as a running stay
+        #: does -- the student has a counterparty they have not needed yet.
+        upcoming = factory.Trait(
+            start_date=factory.LazyFunction(lambda: dt.date.today() + dt.timedelta(days=30)),
+            end_date=factory.LazyFunction(lambda: dt.date.today() + dt.timedelta(days=300)),
+        )
 
     unit = factory.SubFactory(UnitFactory)
     tenant = factory.SubFactory(UserFactory)

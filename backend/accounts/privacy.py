@@ -381,10 +381,17 @@ class LandlordErasureReport:
 def landlord_erasure_blockers(user: User, *, today: dt.date | None = None) -> list[str]:
     """Why this landlord cannot complete erasure yet.
 
-    A landlord with students currently living in their property is a party to
-    a running contract. Erasing their contact details mid-tenancy would leave
-    those students with a leaking roof and nobody to call, which is not a
-    privacy outcome — it is an outage with a legal basis attached.
+    A landlord with students currently living in their property — **or due to
+    move in** — is a party to a running contract. Erasing their contact details
+    mid-tenancy would leave those students with a leaking roof and nobody to
+    call, which is not a privacy outcome; it is an outage with a legal basis
+    attached.
+
+    **Upcoming stays block too.** An earlier version checked only `.current()`,
+    so a landlord with a tenancy starting next month could erase today and leave
+    that student a dormant listing and no counterparty on move-in day. That is
+    precisely the harm the block exists to prevent, and the student has not even
+    had the tenancy yet to notice it going wrong.
 
     **Flagged, never silently partial.** Erasing the fields that happen to be
     safe and leaving the rest is the worst option: the subject believes they
@@ -398,16 +405,24 @@ def landlord_erasure_blockers(user: User, *, today: dt.date | None = None) -> li
         return []
 
     property_ids = Property.all_objects.filter(landlord=profile).values("pk")
-    running = (
-        Tenancy.all_objects.filter(unit__property__in=property_ids).current(today=today).count()
-    )
+    theirs = Tenancy.all_objects.filter(unit__property__in=property_ids)
 
+    running = theirs.current(today=today).count()
+    upcoming = theirs.upcoming(today=today).count()
+
+    blockers = []
     if running:
-        return [
+        blockers.append(
             f"{running} tenancy(ies) are currently running in this landlord's "
             f"property. Erasure can complete once they end."
-        ]
-    return []
+        )
+    if upcoming:
+        blockers.append(
+            f"{upcoming} tenancy(ies) are due to start in this landlord's "
+            f"property. Erasure can complete once they have ended, or once "
+            f"they are cancelled."
+        )
+    return blockers
 
 
 @transaction.atomic
