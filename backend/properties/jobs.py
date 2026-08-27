@@ -1,18 +1,21 @@
 """
 Background jobs for properties (ADR-002, ADR-007).
 
-Two jobs live here. Both fail **silently** if the worker stops — nothing
-errors, no request 500s — so both are monitored on the age of their oldest
+Three jobs live here. All three fail **silently** if the worker stops — nothing
+errors, no request 500s — so all three are monitored on the age of their oldest
 unprocessed row rather than on job success. `docs/OPERATIONS.md` states the
 thresholds.
 
-Neither job invents data. Image variants degrade to serving the original, and a
-routing failure leaves the walking fields null. `None` is a supported state in
-both cases, which is the whole point: an honest gap beats a plausible guess.
+No job here invents data. Image variants degrade to serving the original, a
+routing failure leaves the walking fields null, and an unsent vacancy prompt
+leaves the count where the landlord last put it — ageing visibly, never
+silently corrected. `None` and "stale" are supported states, which is the whole
+point: an honest gap beats a plausible guess.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -193,3 +196,81 @@ def route_stale_distances(limit: int = 100) -> int:
 
     logger.info("routing_sweep", enqueued=enqueued)
     return enqueued
+
+
+# ---------------------------------------------------------------------------
+# Vacancy staleness prompts (ADR-002)
+# ---------------------------------------------------------------------------
+
+
+def prompt_stale_vacancies(limit: int = 200, now: dt.datetime | None = None) -> int:
+    """Ask landlords whose vacancy counts have aged out to restate them.
+
+    `vacant_count` is landlord-stated and never derived, which makes the
+    landlord the only person who can refresh it. If nobody asks them, nobody
+    does -- and the listing goes on advertising last term's vacancies.
+
+    Grouped by property rather than sent per unit: a landlord with forty units
+    should get one message, not forty. A prompt that arrives as a flood is a
+    prompt that gets filtered.
+
+    Returns the number of landlords prompted, which is what the alert reads.
+    """
+    from collections import defaultdict
+
+    from .services import units_with_stale_vacancy
+
+    now = now or timezone.now()
+    stale = (
+        units_with_stale_vacancy(now)
+        .select_related("property__landlord__user")
+        .order_by("vacant_count_updated_at")[:limit]
+    )
+
+    by_landlord: dict[int, list] = defaultdict(list)
+    for unit in stale:
+        by_landlord[unit.property.landlord_id].append(unit)
+
+    for units in by_landlord.values():
+        _send_vacancy_prompt(units)
+
+    logger.info(
+        "vacancy_prompt_sweep", landlords=len(by_landlord), units=len(by_landlord and stale)
+    )
+    return len(by_landlord)
+
+
+def _send_vacancy_prompt(units) -> None:
+    """One message per landlord, listing their stale units."""
+    from django.core.mail import send_mail
+
+    landlord = units[0].property.landlord
+    if landlord.user.erased_at is not None:
+        # A dormant listing needs no prompt, and mailing a tombstoned address
+        # is at best pointless (ADR-008).
+        return
+
+    lines = "\n".join(
+        f"  - {unit.property.name}: {unit.label} "
+        f"(says {unit.vacant_count} free"
+        + (
+            ", never updated)"
+            if unit.vacant_count_updated_at is None
+            else f", last updated {unit.vacant_count_updated_at:%d %B %Y})"
+        )
+        for unit in units
+    )
+
+    send_mail(
+        subject="Are these still available?",
+        message=(
+            "Students see these vacancy counts when they search, and we show "
+            "how old each one is. Updating them takes a moment and makes your "
+            "listings rank as current:\n\n"
+            f"{lines}\n\n"
+            "If nothing has changed, confirming that is enough."
+        ),
+        from_email=None,
+        recipient_list=[landlord.user.email],
+        fail_silently=True,
+    )

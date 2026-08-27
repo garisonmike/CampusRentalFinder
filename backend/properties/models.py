@@ -223,7 +223,32 @@ class Unit(TenantScopedModel):
         _("total units"), default=1, help_text=_("How many identical units exist.")
     )
     vacant_count = models.PositiveSmallIntegerField(
-        _("vacant units"), default=0, help_text=_("How many are free right now.")
+        _("vacant units"),
+        default=0,
+        help_text=_(
+            "How many are free right now, AS STATED BY THE LANDLORD. Never "
+            "derived and never overwritten: they know about the room let last "
+            "week off-platform and we do not, so their number is usually "
+            "better than anything we could compute."
+        ),
+    )
+    #: When the landlord last said so. Set on every write of `vacant_count`.
+    #:
+    #: A stated number with no timestamp is a number of unknown age presented
+    #: as current, which is the same class of dishonesty as a fabricated
+    #: rating: the reader cannot tell the difference and assumes the
+    #: flattering one.
+    vacant_count_updated_at = models.DateTimeField(_("vacancy updated at"), null=True, blank=True)
+    #: Who said so. A caretaker walking the block and a landlord updating from
+    #: an office are different kinds of evidence, and an operator chasing a
+    #: stale listing needs to know which they are chasing.
+    vacant_count_updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vacancy_updates",
+        verbose_name=_("vacancy updated by"),
     )
     available_from = models.DateField(_("available from"), null=True, blank=True)
     min_stay_months = models.PositiveSmallIntegerField(

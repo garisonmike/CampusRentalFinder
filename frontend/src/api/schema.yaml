@@ -3981,13 +3981,36 @@ components:
           type: integer
           readOnly: true
           title: Vacant units
-          description: How many are free right now.
+          description: 'How many are free right now, AS STATED BY THE LANDLORD. Never
+            derived and never overwritten: they know about the room let last week
+            off-platform and we do not, so their number is usually better than anything
+            we could compute.'
         is_available:
           type: boolean
           readOnly: true
           description: Whether any of this unit's rooms are free. Derived from vacant_count
             -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy'
             is not the same question.
+        vacancy_freshness:
+          allOf:
+          - $ref: '#/components/schemas/VacancyFreshnessEnum'
+          description: 'How much to trust `vacant_count`: fresh | ageing | stale |
+            unknown. **Surface this. Never present a stale count as current.** The
+            number is stated by the landlord and never derived -- they know about
+            the room let off-platform last week and we do not -- so it is only as
+            good as its age. A stale count is still SHOWN, with its age; hiding it
+            or zeroing it would replace a number the reader can judge with one they
+            cannot. Render the band, do not recompute it from the timestamp: the thresholds
+            are server side and a second copy in the client is how they drift.'
+          readOnly: true
+        vacancy_age_days:
+          type: integer
+          nullable: true
+          readOnly: true
+          description: Days since the landlord last stated `vacant_count`, or null
+            if they never have. **null is not zero** -- 'nobody has ever said' and
+            'said today' are opposite facts. Show alongside `vacancy_freshness`; do
+            not derive the band from this.
         available_from:
           type: string
           format: date
@@ -4053,6 +4076,8 @@ components:
       - size_sqm
       - total_count
       - unit_type
+      - vacancy_age_days
+      - vacancy_freshness
       - vacant_count
       - water_included
       - wifi_included
@@ -4156,13 +4181,36 @@ components:
           type: integer
           readOnly: true
           title: Vacant units
-          description: How many are free right now.
+          description: 'How many are free right now, AS STATED BY THE LANDLORD. Never
+            derived and never overwritten: they know about the room let last week
+            off-platform and we do not, so their number is usually better than anything
+            we could compute.'
         is_available:
           type: boolean
           readOnly: true
           description: Whether any of this unit's rooms are free. Derived from vacant_count
             -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy'
             is not the same question.
+        vacancy_freshness:
+          allOf:
+          - $ref: '#/components/schemas/VacancyFreshnessEnum'
+          description: 'How much to trust `vacant_count`: fresh | ageing | stale |
+            unknown. **Surface this. Never present a stale count as current.** The
+            number is stated by the landlord and never derived -- they know about
+            the room let off-platform last week and we do not -- so it is only as
+            good as its age. A stale count is still SHOWN, with its age; hiding it
+            or zeroing it would replace a number the reader can judge with one they
+            cannot. Render the band, do not recompute it from the timestamp: the thresholds
+            are server side and a second copy in the client is how they drift.'
+          readOnly: true
+        vacancy_age_days:
+          type: integer
+          nullable: true
+          readOnly: true
+          description: Days since the landlord last stated `vacant_count`, or null
+            if they never have. **null is not zero** -- 'nobody has ever said' and
+            'said today' are opposite facts. Show alongside `vacancy_freshness`; do
+            not derive the band from this.
         available_from:
           type: string
           format: date
@@ -4186,6 +4234,8 @@ components:
       - size_sqm
       - total_count
       - unit_type
+      - vacancy_age_days
+      - vacancy_freshness
       - vacant_count
     UnitTypeEnum:
       enum:
@@ -4394,6 +4444,13 @@ components:
       required:
       - first_name
       - last_name
+    VacancyFreshnessEnum:
+      enum:
+      - fresh
+      - ageing
+      - stale
+      - unknown
+      type: string
     VerificationDecisionRequest:
       type: object
       description: Approving or rejecting one.

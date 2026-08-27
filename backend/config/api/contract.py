@@ -144,6 +144,28 @@ WALKING_MINUTES = (
     "sells, so the API will never substitute the straight-line estimate here."
 )
 
+# ---------------------------------------------------------------------------
+# 7. Vacancy staleness (ADR-002)
+# ---------------------------------------------------------------------------
+
+VACANCY_FRESHNESS = (
+    "How much to trust `vacant_count`: fresh | ageing | stale | unknown. "
+    "**Surface this. Never present a stale count as current.** The number is "
+    "stated by the landlord and never derived -- they know about the room let "
+    "off-platform last week and we do not -- so it is only as good as its age. "
+    "A stale count is still SHOWN, with its age; hiding it or zeroing it would "
+    "replace a number the reader can judge with one they cannot. Render the "
+    "band, do not recompute it from the timestamp: the thresholds are server "
+    "side and a second copy in the client is how they drift."
+)
+
+VACANCY_AGE_DAYS = (
+    "Days since the landlord last stated `vacant_count`, or null if they never "
+    "have. **null is not zero** -- 'nobody has ever said' and 'said today' are "
+    "opposite facts. Show alongside `vacancy_freshness`; do not derive the band "
+    "from this."
+)
+
 #: Serializer field name -> the note it must carry in the generated schema.
 #:
 #: The architecture test reads this. A field appearing here whose description
@@ -161,6 +183,8 @@ CONTRACT_NOTES: dict[str, str] = {
     "capabilities": CAPABILITIES,
     "straight_line_km": STRAIGHT_LINE_KM,
     "walking_minutes": WALKING_MINUTES,
+    "vacancy_freshness": VACANCY_FRESHNESS,
+    "vacancy_age_days": VACANCY_AGE_DAYS,
 }
 
 #: Schema components where a listed field name means something else entirely.

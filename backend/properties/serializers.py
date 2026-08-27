@@ -15,7 +15,12 @@ from __future__ import annotations
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from config.api.contract import STRAIGHT_LINE_KM, WALKING_MINUTES
+from config.api.contract import (
+    STRAIGHT_LINE_KM,
+    VACANCY_AGE_DAYS,
+    VACANCY_FRESHNESS,
+    WALKING_MINUTES,
+)
 from universities.models import Campus
 
 from .constants import PHOTO_VARIANTS
@@ -116,6 +121,8 @@ class UnitSummarySerializer(serializers.ModelSerializer):
             "rooms, so 'has a tenancy' is not the same question."
         )
     )
+    vacancy_freshness = serializers.SerializerMethodField(help_text=VACANCY_FRESHNESS)
+    vacancy_age_days = serializers.SerializerMethodField(help_text=VACANCY_AGE_DAYS)
 
     class Meta:
         model = Unit
@@ -131,6 +138,8 @@ class UnitSummarySerializer(serializers.ModelSerializer):
             "total_count",
             "vacant_count",
             "is_available",
+            "vacancy_freshness",
+            "vacancy_age_days",
             "available_from",
             "min_stay_months",
         )
@@ -139,6 +148,18 @@ class UnitSummarySerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.BooleanField())
     def get_is_available(self, unit: Unit) -> bool:
         return unit.is_available()
+
+    @extend_schema_field(serializers.ChoiceField(choices=["fresh", "ageing", "stale", "unknown"]))
+    def get_vacancy_freshness(self, unit: Unit) -> str:
+        from .services import vacancy_freshness
+
+        return vacancy_freshness(unit)
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_vacancy_age_days(self, unit: Unit) -> int | None:
+        from .services import vacancy_age_days
+
+        return vacancy_age_days(unit)
 
 
 class UnitDetailSerializer(UnitSummarySerializer):

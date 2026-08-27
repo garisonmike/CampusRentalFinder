@@ -2234,11 +2234,15 @@ export interface components {
             readonly total_count: number;
             /**
              * Vacant units
-             * @description How many are free right now.
+             * @description How many are free right now, AS STATED BY THE LANDLORD. Never derived and never overwritten: they know about the room let last week off-platform and we do not, so their number is usually better than anything we could compute.
              */
             readonly vacant_count: number;
             /** @description Whether any of this unit's rooms are free. Derived from vacant_count -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy' is not the same question. */
             readonly is_available: boolean;
+            /** @description How much to trust `vacant_count`: fresh | ageing | stale | unknown. **Surface this. Never present a stale count as current.** The number is stated by the landlord and never derived -- they know about the room let off-platform last week and we do not -- so it is only as good as its age. A stale count is still SHOWN, with its age; hiding it or zeroing it would replace a number the reader can judge with one they cannot. Render the band, do not recompute it from the timestamp: the thresholds are server side and a second copy in the client is how they drift. */
+            readonly vacancy_freshness: components["schemas"]["VacancyFreshnessEnum"];
+            /** @description Days since the landlord last stated `vacant_count`, or null if they never have. **null is not zero** -- 'nobody has ever said' and 'said today' are opposite facts. Show alongside `vacancy_freshness`; do not derive the band from this. */
+            readonly vacancy_age_days: number | null;
             /** Format: date */
             readonly available_from: string | null;
             /**
@@ -2316,11 +2320,15 @@ export interface components {
             readonly total_count: number;
             /**
              * Vacant units
-             * @description How many are free right now.
+             * @description How many are free right now, AS STATED BY THE LANDLORD. Never derived and never overwritten: they know about the room let last week off-platform and we do not, so their number is usually better than anything we could compute.
              */
             readonly vacant_count: number;
             /** @description Whether any of this unit's rooms are free. Derived from vacant_count -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy' is not the same question. */
             readonly is_available: boolean;
+            /** @description How much to trust `vacant_count`: fresh | ageing | stale | unknown. **Surface this. Never present a stale count as current.** The number is stated by the landlord and never derived -- they know about the room let off-platform last week and we do not -- so it is only as good as its age. A stale count is still SHOWN, with its age; hiding it or zeroing it would replace a number the reader can judge with one they cannot. Render the band, do not recompute it from the timestamp: the thresholds are server side and a second copy in the client is how they drift. */
+            readonly vacancy_freshness: components["schemas"]["VacancyFreshnessEnum"];
+            /** @description Days since the landlord last stated `vacant_count`, or null if they never have. **null is not zero** -- 'nobody has ever said' and 'said today' are opposite facts. Show alongside `vacancy_freshness`; do not derive the band from this. */
+            readonly vacancy_age_days: number | null;
             /** Format: date */
             readonly available_from: string | null;
             /**
@@ -2419,6 +2427,8 @@ export interface components {
             /** Format: uri */
             avatar_url?: string;
         };
+        /** @enum {string} */
+        VacancyFreshnessEnum: "fresh" | "ageing" | "stale" | "unknown";
         /** @description Approving or rejecting one. */
         VerificationDecisionRequest: {
             /** @description Shown to the student. **Required for a rejection** -- a student told 'no' with nothing to act on cannot resubmit successfully. */

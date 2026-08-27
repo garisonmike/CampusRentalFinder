@@ -78,3 +78,21 @@ MAX_PHOTOS_PER_UNIT = 12
 #: Content types accepted on upload. Validated against the actual bytes, never
 #: the client-supplied header.
 ALLOWED_PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+
+
+class VacancyFreshness(models.TextChoices):
+    """How much to trust a landlord-stated vacancy count.
+
+    **Banded on the server, deliberately.** The client is given both a plain
+    age in days and this band, and must not compute the band from the
+    timestamp itself -- that would put the threshold in two places, which is
+    the failure `docs/OPERATIONS.md` catalogues five instances of.
+    """
+
+    FRESH = "fresh", _("Updated recently")
+    AGEING = "ageing", _("Updated a while ago")
+    STALE = "stale", _("Not updated in a long time")
+    #: Never stated at all. Distinct from `stale`, because "nobody has ever
+    #: said" and "somebody said, long ago" call for different words in the UI
+    #: and different urgency in the prompt.
+    UNKNOWN = "unknown", _("Never stated")

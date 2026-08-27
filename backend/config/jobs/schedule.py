@@ -104,6 +104,18 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="properties.jobs.prompt_stale_vacancies",
+        cron="0 9 * * 1",
+        queue="default",
+        on_failure=(
+            "Vacancy counts age and nobody is asked to refresh them. The "
+            "listings quietly become misleading -- advertising last term's "
+            "free rooms -- with no error anywhere, because a stale number is "
+            "indistinguishable from a current one to everything except its "
+            "own timestamp."
+        ),
+    ),
+    ScheduledJob(
         func="properties.jobs.route_stale_distances",
         cron="*/15 * * * *",
         queue="default",

@@ -171,6 +171,36 @@ a real S3 API and CI provides MinIO as a service container. A test in that file
 fails the build if MinIO is unreachable while `CI` is set, because a silently
 skipped compliance test is indistinguishable from a passing one.
 
+### 2b. Vacancy staleness prompts
+
+| | |
+|---|---|
+| **Schedule** | Weekly, Monday 09:00 |
+| **Does** | Emails landlords whose `vacant_count` has not been restated within `VACANCY_STALE_DAYS`, grouped one message per landlord |
+| **Guarantees** | That the only person who *can* refresh a stated vacancy is asked to |
+
+`vacant_count` is stated by the landlord and never derived — they know about
+the room let off-platform last week and we do not, so their number is usually
+better than anything we could compute. The cost of that choice is that it only
+stays true if somebody restates it.
+
+**Symptom if it stops:** counts age, nobody is asked, and listings quietly
+become misleading — advertising last term's free rooms. **Nothing errors**, and
+nothing can: a stale number is indistinguishable from a current one to
+everything except its own timestamp. A student travels to view a room that was
+let in March.
+
+The API mitigates rather than hides this: `vacancy_freshness` and
+`vacancy_age_days` ship on every unit and the frontend is required by contract
+note to surface them. So a stopped job degrades to "every listing is labelled
+stale", which is honest and visible, rather than to silence. That is the
+intended failure mode and it is why the count is never hidden or zeroed.
+
+**Time to visible:** the labels start appearing at `VACANCY_STALE_DAYS` (30)
+whether or not the job runs, so this one *does* surface on its own — the alert
+is for the case where an operator wants to know the prompts stopped before
+every listing on the platform is wearing a stale badge.
+
 ### 3a. Campus routing
 
 | | |

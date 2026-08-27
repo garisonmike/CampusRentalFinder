@@ -431,6 +431,15 @@ INQUIRY_EXPIRY_DAYS = config("INQUIRY_EXPIRY_DAYS", default=14, cast=int)
 # is a worse problem than the one it solves.
 ERASURE_COOLING_OFF_DAYS = config("ERASURE_COOLING_OFF_DAYS", default=7, cast=int)
 
+# How long a landlord-stated vacancy count stays trustworthy (ADR-002).
+#
+# Banded on the server so the client cannot compute it differently. A count
+# older than the stale threshold is still SHOWN -- never hidden, never
+# zeroed -- with its age attached, because a stale number the reader can judge
+# beats no number at all.
+VACANCY_FRESH_DAYS = config("VACANCY_FRESH_DAYS", default=7, cast=int)
+VACANCY_STALE_DAYS = config("VACANCY_STALE_DAYS", default=30, cast=int)
+
 # Manual ID verification (ADR-003). Every default here takes the option that
 # holds less data for less time -- this is Data Protection Act 2019 territory,
 # not a preference.
