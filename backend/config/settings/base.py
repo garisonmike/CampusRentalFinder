@@ -424,6 +424,13 @@ INQUIRY_MAX_PER_UNIT = config("INQUIRY_MAX_PER_UNIT", default=2, cast=int)
 # from one still waiting.
 INQUIRY_EXPIRY_DAYS = config("INQUIRY_EXPIRY_DAYS", default=14, cast=int)
 
+# How long an erasure request stays cancellable before the job executes it
+# (ADR-008). The window is the ONLY protection against a coerced or
+# compromised request, because there is deliberately no approval step: an
+# approval gate would give the platform discretion to refuse an erasure, which
+# is a worse problem than the one it solves.
+ERASURE_COOLING_OFF_DAYS = config("ERASURE_COOLING_OFF_DAYS", default=7, cast=int)
+
 # Manual ID verification (ADR-003). Every default here takes the option that
 # holds less data for less time -- this is Data Protection Act 2019 territory,
 # not a preference.

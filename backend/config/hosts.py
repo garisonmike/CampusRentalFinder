@@ -136,6 +136,7 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     # -- Tenant-scoped: privacy (ADR-008) ----------------------------------
     "accounts:privacy-export": HostClass.TENANT_SCOPED,
     "accounts:privacy-erasure": HostClass.TENANT_SCOPED,
+    "accounts:privacy-erasure-cancel": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The

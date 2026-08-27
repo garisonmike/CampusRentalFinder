@@ -17,8 +17,13 @@ platform knows about somebody. A stolen phone should not be able to do either.
 
 from __future__ import annotations
 
+import datetime as dt
+
+from django.conf import settings
 from django.contrib.auth import authenticate as authenticate_user
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import serializers
@@ -29,8 +34,6 @@ from rest_framework.views import APIView
 from config.api.throttling import Scope
 
 from .privacy import (
-    erase_landlord_data,
-    erase_personal_data,
     export_personal_data,
     landlord_erasure_blockers,
 )
@@ -87,15 +90,22 @@ class ErasureRequest(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
+        #: Cancellable by the subject, for ERASURE_COOLING_OFF_DAYS.
+        COOLING_OFF = "cooling_off", "Cooling off"
         COMPLETED = "completed", "Completed"
         BLOCKED = "blocked", "Blocked"
+        CANCELLED = "cancelled", "Cancelled by the subject"
 
     user = models.ForeignKey(
         "accounts.User", on_delete=models.CASCADE, related_name="erasure_requests"
     )
     reason = models.CharField(max_length=500, blank=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.COOLING_OFF)
+    #: When the scheduled job may execute this. The window exists so that a
+    #: coerced or compromised request is visible to the real account owner
+    #: before it becomes irreversible.
+    executes_after = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     #: Why it could not complete. A landlord with running tenancies is a party
     #: to a contract other people are relying on (ADR-008 §2.2).
     blockers = models.JSONField(default=list, blank=True)
@@ -107,6 +117,23 @@ class ErasureRequest(models.Model):
         verbose_name = "Erasure request"
         verbose_name_plural = "Erasure requests"
         ordering = ["-requested_at"]
+        indexes = [
+            # The execution sweep reads the oldest due row. `executes_after` is
+            # nullable -- null on a blocked or cancelled request -- so the job
+            # filters on `__lte` rather than relying on ordering, which
+            # excludes nulls wherever they would sort (docs/OPERATIONS.md).
+            models.Index(fields=["status", "executes_after"], name="erasure_due_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(status="cooling_off") | models.Q(executes_after__isnull=False),
+                name="erasure_cooling_off_has_a_deadline",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="cancelled") | models.Q(cancelled_at__isnull=False),
+                name="erasure_cancelled_has_a_time",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"erasure request {self.pk} ({self.status})"
@@ -121,7 +148,16 @@ class ErasureRequestResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ErasureRequest
-        fields = ("id", "status", "blockers", "retained", "requested_at", "completed_at")
+        fields = (
+            "id",
+            "status",
+            "blockers",
+            "retained",
+            "requested_at",
+            "executes_after",
+            "cancelled_at",
+            "completed_at",
+        )
         read_only_fields = fields
 
     def get_retained(self, _request) -> list[str]:
@@ -207,10 +243,6 @@ class ErasureRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         _confirm_identity(request, serializer.validated_data["password"])
 
-        erasure = ErasureRequest.objects.create(
-            user=request.user, reason=serializer.validated_data.get("reason", "")
-        )
-
         is_landlord = getattr(request.user, "landlord_profile", None) is not None
         blockers = landlord_erasure_blockers(request.user) if is_landlord else []
 
@@ -218,22 +250,98 @@ class ErasureRequestView(APIView):
             # Flagged, never silently partial. Erasing the safe fields and
             # leaving the rest is the worst outcome: the subject believes they
             # are erased, the platform believes it complied, and neither is
-            # true.
-            erasure.status = ErasureRequest.Status.BLOCKED
-            erasure.blockers = blockers
-            erasure.save(update_fields=["status", "blockers"])
+            # true. Recorded as blocked rather than entering cooling-off,
+            # because a window that will end in a refusal is a week of false
+            # reassurance.
+            erasure = ErasureRequest.objects.create(
+                user=request.user,
+                reason=serializer.validated_data.get("reason", ""),
+                status=ErasureRequest.Status.BLOCKED,
+                blockers=blockers,
+            )
             return Response(ErasureRequestResultSerializer(erasure).data, status=409)
 
-        if is_landlord:
-            erase_landlord_data(request.user)
-        else:
-            erase_personal_data(request.user)
+        now = timezone.now()
+        erasure = ErasureRequest.objects.create(
+            user=request.user,
+            reason=serializer.validated_data.get("reason", ""),
+            status=ErasureRequest.Status.COOLING_OFF,
+            executes_after=now + dt.timedelta(days=settings.ERASURE_COOLING_OFF_DAYS),
+        )
+        _notify_cooling_off(request.user, erasure)
 
-        erasure.status = ErasureRequest.Status.COMPLETED
-        erasure.completed_at = timezone.now()
-        erasure.save(update_fields=["status", "completed_at"])
+        return Response(ErasureRequestResultSerializer(erasure).data, status=202)
 
-        return Response(ErasureRequestResultSerializer(erasure).data, status=200)
+
+@extend_schema_view(
+    post=extend_schema(
+        summary="Cancel your erasure request",
+        description=(
+            "Only during the cooling-off window, and **only by the subject**. "
+            "Nobody else may cancel it -- not support, not an administrator. "
+            "The window exists to protect the account owner from a coerced or "
+            "compromised request, and a third party who could cancel could "
+            "also be leaned on.\n\n"
+            "The account is **not suspended** while it cools off, for the same "
+            "reason: a suspended account cannot cancel its own request."
+        ),
+        request=IdentityConfirmationSerializer,
+    )
+)
+class ErasureCancelView(APIView):
+    """Cancel a request inside its window."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = Scope.PRIVACY
+
+    def post(self, request, pk: int):
+        serializer = IdentityConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        _confirm_identity(request, serializer.validated_data["password"])
+
+        # Filtered by user, so another account's request is a 404 rather than
+        # a 403: its existence is not theirs to learn.
+        erasure = get_object_or_404(ErasureRequest, pk=pk, user=request.user)
+
+        if erasure.status != ErasureRequest.Status.COOLING_OFF:
+            raise ValidationError(
+                {"status": f"This request is already {erasure.get_status_display().lower()}."}
+            )
+
+        erasure.status = ErasureRequest.Status.CANCELLED
+        erasure.cancelled_at = timezone.now()
+        erasure.executes_after = None
+        erasure.save(update_fields=["status", "cancelled_at", "executes_after"])
+
+        return Response(ErasureRequestResultSerializer(erasure).data)
+
+
+def _notify_cooling_off(user, erasure) -> None:
+    """Tell the account owner that an erasure is running.
+
+    **The whole point of the window.** A coerced request, or one made from a
+    stolen session, is invisible to the real owner unless something reaches
+    them out of band. This is that thing.
+
+    `fail_silently` because a bounced notification must not roll back the
+    request -- the subject asked, and a mail failure is our problem rather
+    than a reason to refuse them.
+    """
+    from django.core.mail import send_mail
+
+    send_mail(
+        subject="Your CampusRentalFinder account is scheduled for erasure",
+        message=(
+            "An erasure request was made on your account.\n\n"
+            f"It becomes permanent on {erasure.executes_after:%d %B %Y}. "
+            "Until then you can cancel it by signing in.\n\n"
+            "If you did not make this request, sign in and cancel it now, "
+            "then change your password."
+        ),
+        from_email=None,
+        recipient_list=[user.email],
+        fail_silently=True,
+    )
 
 
 def _confirm_identity(request, password: str) -> None:

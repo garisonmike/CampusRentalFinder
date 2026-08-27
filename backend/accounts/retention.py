@@ -42,6 +42,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from config.jobs.sweeps import oldest_overdue_age
+
 from .documents import (
     VerificationDocument,
     VerificationRequest,
@@ -261,3 +263,118 @@ def unconfirmed_deletions():
     return VerificationDocument.objects.filter(
         deleted_at__isnull=True, delete_attempts__gt=0
     ).order_by("uploaded_at")
+
+
+# ---------------------------------------------------------------------------
+# Erasure execution (ADR-008)
+# ---------------------------------------------------------------------------
+
+
+def erasures_due(now: dt.datetime | None = None):
+    """Requests whose cooling-off window has closed.
+
+    Filtered on `executes_after__lte`, which excludes the nulls that a blocked
+    or cancelled request carries -- so the ordering is not what makes this
+    safe (docs/OPERATIONS.md).
+    """
+    from .privacy_api import ErasureRequest
+
+    return ErasureRequest.objects.filter(
+        status=ErasureRequest.Status.COOLING_OFF,
+        executes_after__lte=now or timezone.now(),
+    )
+
+
+def execute_erasure(erasure_id: int, now: dt.datetime | None = None) -> bool:
+    """Carry out one erasure, irreversibly.
+
+    **No approval step, deliberately.** An approval gate would give the
+    platform discretion to refuse a data-subject erasure request, which is a
+    worse problem than the one it solves: the cooling-off window protects the
+    subject from coercion, whereas an approver protects nobody and creates a
+    party who can say no. ADR-008 records this so it is not added later in the
+    belief that it is a safeguard.
+    """
+    from .privacy import (
+        AlreadyErasedError,
+        erase_landlord_data,
+        erase_personal_data,
+        landlord_erasure_blockers,
+    )
+    from .privacy_api import ErasureRequest
+
+    now = now or timezone.now()
+    erasure = ErasureRequest.objects.filter(pk=erasure_id).select_related("user").first()
+
+    if erasure is None:
+        logger.info("erasure_skipped", erasure_id=erasure_id, reason="deleted")
+        return True
+
+    if erasure.status != ErasureRequest.Status.COOLING_OFF:
+        # Cancelled inside the window, which is the outcome the window exists
+        # to make possible.
+        logger.info(
+            "erasure_skipped",
+            erasure_id=erasure_id,
+            reason="not_cooling_off",
+            status=erasure.status,
+        )
+        return True
+
+    user = erasure.user
+    is_landlord = getattr(user, "landlord_profile", None) is not None
+
+    # Re-checked at execution, not only at request time. A landlord with no
+    # running tenancies a week ago may have one now, and erasing them
+    # mid-tenancy would leave those students with nobody to call.
+    blockers = landlord_erasure_blockers(user) if is_landlord else []
+    if blockers:
+        erasure.status = ErasureRequest.Status.BLOCKED
+        erasure.blockers = blockers
+        erasure.executes_after = None
+        erasure.save(update_fields=["status", "blockers", "executes_after"])
+        logger.warning("erasure_blocked_at_execution", erasure_id=erasure_id)
+        return False
+
+    try:
+        if is_landlord:
+            erase_landlord_data(user)
+        else:
+            erase_personal_data(user)
+    except AlreadyErasedError:
+        # Two requests for one account. Not an error: the outcome the subject
+        # asked for is already true.
+        logger.info("erasure_already_done", erasure_id=erasure_id)
+
+    erasure.status = ErasureRequest.Status.COMPLETED
+    erasure.completed_at = now
+    erasure.executes_after = None
+    erasure.save(update_fields=["status", "completed_at", "executes_after"])
+
+    logger.info("erasure_executed", erasure_id=erasure_id)
+    return True
+
+
+def sweep_due_erasures(limit: int = 200, now: dt.datetime | None = None) -> int:
+    """Execute every erasure whose window has closed.
+
+    Scheduled hourly. A request that enters cooling-off and never executes is
+    a compliance breach that looks like nothing at all -- the subject was told
+    a date, the date passed, and the record still says `cooling_off`.
+    """
+
+    now = now or timezone.now()
+    queryset = erasures_due(now)
+
+    waiting = oldest_overdue_age(queryset, "executes_after")
+    erasure_ids = list(queryset.order_by("executes_after").values_list("pk", flat=True)[:limit])
+
+    for erasure_id in erasure_ids:
+        django_rq.get_queue("default").enqueue(execute_erasure, erasure_id)
+
+    logger.info(
+        "erasure_sweep",
+        enqueued=len(erasure_ids),
+        oldest_overdue_seconds=None if waiting is None else int(waiting.total_seconds()),
+    )
+    return len(erasure_ids)

@@ -126,22 +126,53 @@ class TestErasure:
 
         assert response.status_code == 400
 
-    def test_it_is_recorded_as_a_request_with_a_decision(self, authenticate, tenant, host):
+    def test_it_opens_a_cooling_off_window(self, authenticate, tenant, host):
         """Not an immediate delete. A coerced erasure is a real risk where a
         landlord has leverage over a student who reviewed them badly, and the
-        record puts a person and a timestamp between the button and the
-        tombstone."""
+        window is the only thing that gives the real owner a chance to notice.
+        """
         response = post(authenticate(tenant), ERASURE, host, self.payload())
 
-        assert response.status_code == 200
-        assert ErasureRequest.objects.filter(user=tenant).count() == 1
-        assert response.json()["status"] == "completed"
-        assert response.json()["completed_at"] is not None
+        assert response.status_code == 202
+        assert response.json()["status"] == "cooling_off"
+        assert response.json()["executes_after"] is not None
 
-    def test_it_tombstones_the_account(self, authenticate, tenant, host):
+    def test_nothing_is_erased_yet(self, authenticate, tenant, host):
         original = tenant.email
 
         post(authenticate(tenant), ERASURE, host, self.payload())
+        tenant.refresh_from_db()
+
+        assert tenant.email == original
+        assert tenant.erased_at is None
+
+    def test_the_account_is_not_suspended(self, authenticate, tenant, host):
+        """A suspended account cannot cancel its own request, which would turn
+        the protection into a trap."""
+        post(authenticate(tenant), ERASURE, host, self.payload())
+        tenant.refresh_from_db()
+
+        assert tenant.is_active is True
+
+    def test_the_owner_is_notified_out_of_band(self, authenticate, tenant, host):
+        """The whole point of the window. A request made from a stolen session
+        is invisible to the real owner unless something reaches them by
+        another route."""
+        from django.core import mail
+
+        post(authenticate(tenant), ERASURE, host, self.payload())
+
+        assert len(mail.outbox) == 1
+        assert tenant.email in mail.outbox[0].to
+        assert "cancel" in mail.outbox[0].body.lower()
+
+    def test_executing_it_tombstones_the_account(self, authenticate, tenant, host):
+        from accounts.retention import execute_erasure
+
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+        original = tenant.email
+
+        execute_erasure(erasure_id)
         tenant.refresh_from_db()
 
         assert tenant.email != original
@@ -155,6 +186,71 @@ class TestErasure:
         retained = " ".join(body["retained"]).lower()
         assert "former student" in retained
         assert "landlord" in retained
+
+    def test_the_subject_can_cancel_inside_the_window(self, authenticate, tenant, host):
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+
+        response = post(
+            authenticate(tenant),
+            f"{ERASURE}{erasure_id}/cancel/",
+            host,
+            {"password": PASSWORD},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+
+    def test_a_cancelled_request_never_executes(self, authenticate, tenant, host):
+        from accounts.retention import execute_erasure
+
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+        post(
+            authenticate(tenant),
+            f"{ERASURE}{erasure_id}/cancel/",
+            host,
+            {"password": PASSWORD},
+        )
+
+        execute_erasure(erasure_id)
+        tenant.refresh_from_db()
+
+        assert tenant.erased_at is None
+
+    def test_nobody_else_can_cancel(self, authenticate, tenant, host, student_profile):
+        """Not support, not an administrator. A third party who could cancel
+        could also be leaned on, which is the situation the window exists for."""
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+
+        response = post(
+            authenticate(student_profile.user),
+            f"{ERASURE}{erasure_id}/cancel/",
+            host,
+            {"password": PASSWORD},
+        )
+
+        assert response.status_code == 404
+
+    def test_cancelling_needs_the_password(self, authenticate, tenant, host):
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+
+        response = post(authenticate(tenant), f"{ERASURE}{erasure_id}/cancel/", host, {})
+
+        assert response.status_code == 400
+
+    def test_a_completed_request_cannot_be_cancelled(self, authenticate, tenant, host):
+        from accounts.retention import execute_erasure
+
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+        execute_erasure(erasure_id)
+
+        response = post(
+            authenticate(tenant),
+            f"{ERASURE}{erasure_id}/cancel/",
+            host,
+            {"password": PASSWORD},
+        )
+
+        assert response.status_code >= 400
 
     def test_reviews_survive_the_erasure(
         self, authenticate, tenant, host, tenancy_factory, unit_factory
@@ -176,7 +272,10 @@ class TestErasure:
         )
         review = create_review(tenancy, rating=1, comment="The gate never worked.")
 
-        post(authenticate(tenant), ERASURE, host, self.payload())
+        from accounts.retention import execute_erasure
+
+        erasure_id = post(authenticate(tenant), ERASURE, host, self.payload()).json()["id"]
+        execute_erasure(erasure_id)
 
         review.refresh_from_db()
         assert Review.all_objects.filter(pk=review.pk).exists()
@@ -249,8 +348,10 @@ class TestErasure:
     def test_the_subject_can_see_their_requests(self, authenticate, tenant, host):
         post(authenticate(tenant), ERASURE, host, self.payload())
 
-        # The account is tombstoned, so a fresh token is needed to read back.
-        assert ErasureRequest.objects.filter(user=tenant).count() == 1
+        body = get(authenticate(tenant), ERASURE, host).json()
+
+        assert len(body) == 1
+        assert body[0]["status"] == "cooling_off"
 
 
 # ---------------------------------------------------------------------------
@@ -381,3 +482,104 @@ class TestUniversityPolicy:
         university.refresh_from_db()
 
         assert university.verification_methods_enabled == [VerificationMethod.EMAIL_DOMAIN]
+
+
+class TestTheErasureSweep:
+    """A request that enters cooling-off and never executes is a Data
+    Protection Act breach that looks like nothing at all: the subject was told
+    a date, the date passed, and the record still says `cooling_off`.
+    """
+
+    def cooling_off(self, authenticate, tenant, host):
+        return post(
+            authenticate(tenant),
+            ERASURE,
+            host,
+            {"password": PASSWORD, "confirm_understanding": True},
+        ).json()["id"]
+
+    def test_a_request_inside_its_window_is_not_due(self, authenticate, tenant, host):
+        from accounts.retention import erasures_due, sweep_due_erasures
+
+        self.cooling_off(authenticate, tenant, host)
+
+        assert erasures_due().count() == 0
+        assert sweep_due_erasures() == 0
+
+    def test_it_becomes_due_when_the_window_closes(self, authenticate, tenant, host):
+        import datetime as dt
+
+        from django.utils import timezone
+
+        from accounts.retention import sweep_due_erasures
+
+        erasure_id = self.cooling_off(authenticate, tenant, host)
+        ErasureRequest.objects.filter(pk=erasure_id).update(
+            executes_after=timezone.now() - dt.timedelta(hours=1)
+        )
+
+        assert sweep_due_erasures() == 1
+
+    def test_a_cancelled_request_is_never_due(self, authenticate, tenant, host):
+        """`executes_after` is nulled on cancel, and the sweep filters on
+        `__lte` -- so the null is excluded regardless of where it would sort."""
+        from accounts.retention import erasures_due
+
+        erasure_id = self.cooling_off(authenticate, tenant, host)
+        post(
+            authenticate(tenant),
+            f"{ERASURE}{erasure_id}/cancel/",
+            host,
+            {"password": PASSWORD},
+        )
+
+        assert erasures_due().count() == 0
+
+    def test_execution_rechecks_the_blockers(
+        self,
+        authenticate,
+        landlord_profile,
+        host,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+    ):
+        """A landlord with no running tenancies a week ago may have one now.
+        Erasing them mid-tenancy would leave those students with nobody to
+        call, so the check runs again at execution rather than only at
+        request time."""
+        from accounts.retention import execute_erasure
+
+        erasure_id = post(
+            authenticate(landlord_profile.user),
+            ERASURE,
+            host,
+            {"password": PASSWORD, "confirm_understanding": True},
+        ).json()["id"]
+
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant, current=True)
+
+        assert execute_erasure(erasure_id) is False
+        landlord_profile.user.refresh_from_db()
+        assert landlord_profile.user.erased_at is None
+
+    def test_the_job_tolerates_a_deleted_row(self):
+        from accounts.retention import execute_erasure
+
+        assert execute_erasure(999999) is True
+
+    def test_there_is_no_approval_step(self):
+        """Asserted structurally, because somebody will want to add one.
+
+        An approval gate would give the platform discretion to REFUSE a
+        data-subject erasure request, which is a worse problem than the one it
+        solves: the cooling-off window protects the subject from coercion,
+        whereas an approver protects nobody and creates a party who can say no.
+        """
+
+        statuses = set(ErasureRequest.Status.values)
+
+        assert not statuses & {"pending_approval", "awaiting_review", "approved", "refused"}
+        assert statuses == {"cooling_off", "completed", "blocked", "cancelled"}

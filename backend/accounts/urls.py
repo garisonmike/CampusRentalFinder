@@ -2,7 +2,7 @@ from django.urls import include, path
 
 from config.api.routers import Router
 
-from .privacy_api import DataExportView, ErasureRequestView
+from .privacy_api import DataExportView, ErasureCancelView, ErasureRequestView
 from .verification_api import (
     DocumentAccessView,
     DocumentSubmitView,
@@ -78,5 +78,10 @@ urlpatterns = [
     # Privacy (ADR-008)
     path("privacy/export/", DataExportView.as_view(), name="privacy-export"),
     path("privacy/erasure/", ErasureRequestView.as_view(), name="privacy-erasure"),
+    path(
+        "privacy/erasure/<int:pk>/cancel/",
+        ErasureCancelView.as_view(),
+        name="privacy-erasure-cancel",
+    ),
     path("", include(router.urls)),
 ]

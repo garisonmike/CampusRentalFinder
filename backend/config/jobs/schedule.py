@@ -61,6 +61,18 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="accounts.retention.sweep_due_erasures",
+        cron="30 * * * *",
+        queue="default",
+        on_failure=(
+            "Erasure requests enter cooling-off and never execute. The subject "
+            "was told a date, the date passed, and the record still says "
+            "cooling_off -- a Data Protection Act breach that looks like "
+            "nothing at all, because nothing errored and the request is right "
+            "there in the table looking orderly."
+        ),
+    ),
+    ScheduledJob(
         func="accounts.retention.sweep_expired_documents",
         cron="0 2 * * *",
         queue="default",

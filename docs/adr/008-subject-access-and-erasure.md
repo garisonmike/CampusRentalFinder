@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-26
 **Amended:** 2026-08-26 — access log pseudonymised rather than linked; landlord erasure added
+**Amended:** 2026-08-27 — erasure runs through a cooling-off window, with no approval step
 **Deciders:** Tech lead
 
 ## Context
@@ -235,3 +236,67 @@ true.
 
 The block clears on its own as the tenancies end — currency is derived from the
 dates (ADR-004), so no job has to run for yesterday's blocker to be gone today.
+
+
+---
+
+## Amendment (2026-08-27): the cooling-off window, and why there is no approver
+
+Erasure is irreversible and refuses to run twice. Two failure modes follow, and
+they need different answers:
+
+**An accidental request.** Somebody taps the wrong thing. Recoverable only
+before it executes.
+
+**A coerced or compromised request.** This is the one that shapes the design. A
+landlord has leverage over a student who reviewed them badly. A shared phone,
+a borrowed laptop, a session left open. In every case the person who asked is
+not the person whose account it is, and the real owner has no idea.
+
+**Resolved: a cancellable window, notified out of band.**
+
+A confirmed request enters `cooling_off` for
+`settings.ERASURE_COOLING_OFF_DAYS` (7) and an email goes to the account's
+address immediately. That mail is the whole mechanism: a request made from a
+stolen session is invisible to the real owner unless something reaches them by
+a route the attacker does not control.
+
+Only the subject may cancel, and cancelling re-authenticates. Not support, not
+an administrator — a third party who could cancel could also be leaned on,
+which is the situation the window exists for.
+
+**The account is not suspended while it cools off.** Suspending it would be the
+obvious "safety" measure and it is exactly wrong: a suspended account cannot
+sign in, and an account that cannot sign in cannot cancel its own request. The
+protection would become a trap.
+
+### There is deliberately no approval step
+
+Somebody will propose one. It looks like a safeguard, and it is the opposite.
+
+**An approval gate gives the platform discretion to refuse a data-subject
+erasure request.** That is a worse problem than the one it solves:
+
+- The window protects *the subject*, from someone else acting in their name.
+- An approver protects *nobody*, and creates a party who can say no — to a
+  right the subject has under §26(e), not a favour we grant.
+- Under pressure — a landlord disputing a review, a university objecting to a
+  student leaving, our own reluctance to lose a record — a discretionary gate
+  is where the pressure lands. A clock cannot be leaned on.
+
+The only thing that legitimately stops an erasure is the landlord blocker in
+§2.2, and that is not discretion: it is a stated condition, checked
+mechanically, re-checked at execution because a landlord with no running
+tenancies last week may have one now, and reported to the subject with the
+specific tenancies that must end first.
+
+`tests/test_api_privacy_and_admin.py::TestTheErasureSweep::test_there_is_no_approval_step`
+asserts the status vocabulary contains no approval state, so adding one is a
+deliberate act against a test that says why not.
+
+### The failure that looks like nothing
+
+A request that enters `cooling_off` and never executes is a compliance breach
+with no symptom. The subject was told a date, the date passed, and the record
+still says `cooling_off` — orderly, unalarming, and wrong. `docs/OPERATIONS.md`
+carries the alert.

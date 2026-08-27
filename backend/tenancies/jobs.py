@@ -20,6 +20,8 @@ import django_rq
 import structlog
 from django.utils import timezone
 
+from config.jobs.sweeps import oldest_overdue_age
+
 from .constants import ClaimStatus, ConfirmationSource
 from .models import TenancyClaim
 from .services import confirm_claim
@@ -40,17 +42,6 @@ logger = structlog.get_logger("campusrental.jobs")
 # deadline is excluded by `__lte` regardless of where it would have sorted. If
 # a future sweep orders on a nullable column WITHOUT such a filter, it must say
 # `nulls_first=True` explicitly.
-
-
-def _oldest_overdue_age(queryset, field: str) -> dt.timedelta | None:
-    """How long the oldest overdue row has been waiting.
-
-    The alerting signal. A count tells you the queue is big; this tells you
-    whether anything has been abandoned, which is the failure that matters
-    when a worker dies quietly.
-    """
-    oldest = queryset.order_by(field).values_list(field, flat=True).first()
-    return None if oldest is None else timezone.now() - oldest
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +95,7 @@ def sweep_overdue_claims(limit: int = 500, now: dt.datetime | None = None) -> in
     now = now or timezone.now()
     queryset = overdue_claims(now)
 
-    waiting = _oldest_overdue_age(queryset, "confirmation_deadline")
+    waiting = oldest_overdue_age(queryset, "confirmation_deadline")
     claim_ids = list(
         queryset.order_by("confirmation_deadline").values_list("pk", flat=True)[:limit]
     )
@@ -176,7 +167,7 @@ def sweep_overdue_disputes(limit: int = 500, now: dt.datetime | None = None) -> 
     now = now or timezone.now()
     queryset = overdue_disputes(now)
 
-    waiting = _oldest_overdue_age(queryset, "escalation_deadline")
+    waiting = oldest_overdue_age(queryset, "escalation_deadline")
     claim_ids = list(queryset.order_by("escalation_deadline").values_list("pk", flat=True)[:limit])
 
     for claim_id in claim_ids:
@@ -248,7 +239,7 @@ def sweep_overdue_terminations(limit: int = 500, now: dt.datetime | None = None)
     now = now or timezone.now()
     queryset = overdue_terminations(now)
 
-    waiting = _oldest_overdue_age(queryset, "confirmation_deadline")
+    waiting = oldest_overdue_age(queryset, "confirmation_deadline")
     request_ids = list(
         queryset.order_by("confirmation_deadline").values_list("pk", flat=True)[:limit]
     )
