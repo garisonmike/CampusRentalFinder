@@ -2,6 +2,17 @@ from django.urls import include, path
 
 from config.api.routers import Router
 
+from .privacy_api import DataExportView, ErasureRequestView
+from .verification_api import (
+    DocumentAccessView,
+    DocumentSubmitView,
+    EmailVerificationConfirmView,
+    EmailVerificationRequestView,
+    MyVerificationRequestsView,
+    ReviewerQueueView,
+    VerificationApproveView,
+    VerificationRejectView,
+)
 from .views import (
     AdminUserViewSet,
     PasswordChangeView,
@@ -35,5 +46,37 @@ urlpatterns = [
     # Platform staff
     path("admin/verify/<int:user_id>/", verify_user, name="verify-user"),
     path("admin/statistics/", user_statistics, name="user-statistics"),
+    # Verification (ADR-003)
+    path(
+        "verification/email/request/",
+        EmailVerificationRequestView.as_view(),
+        name="verify-email-request",
+    ),
+    path(
+        "verification/email/confirm/",
+        EmailVerificationConfirmView.as_view(),
+        name="verify-email-confirm",
+    ),
+    path("verification/document/", DocumentSubmitView.as_view(), name="verify-document"),
+    path("verification/mine/", MyVerificationRequestsView.as_view(), name="verify-mine"),
+    path("verification/queue/", ReviewerQueueView.as_view(), name="verify-queue"),
+    path(
+        "verification/queue/<int:pk>/document/",
+        DocumentAccessView.as_view(),
+        name="verify-document-access",
+    ),
+    path(
+        "verification/queue/<int:pk>/approve/",
+        VerificationApproveView.as_view(),
+        name="verify-approve",
+    ),
+    path(
+        "verification/queue/<int:pk>/reject/",
+        VerificationRejectView.as_view(),
+        name="verify-reject",
+    ),
+    # Privacy (ADR-008)
+    path("privacy/export/", DataExportView.as_view(), name="privacy-export"),
+    path("privacy/erasure/", ErasureRequestView.as_view(), name="privacy-erasure"),
     path("", include(router.urls)),
 ]

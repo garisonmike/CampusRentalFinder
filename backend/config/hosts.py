@@ -120,11 +120,30 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "engagement:inquiry-list": HostClass.TENANT_SCOPED,
     "engagement:inquiry-respond": HostClass.TENANT_SCOPED,
     "engagement:inquiry-close": HostClass.TENANT_SCOPED,
+    # -- Tenant-scoped: verification (ADR-003) -----------------------------
+    # The reviewer queue scopes from the STAFF PROFILE rather than the host, so
+    # its safety does not depend on this classification -- but it is still
+    # tenant-scoped, because a school's verification queue is not a
+    # tenant-neutral resource.
+    "accounts:verify-email-request": HostClass.TENANT_SCOPED,
+    "accounts:verify-email-confirm": HostClass.TENANT_SCOPED,
+    "accounts:verify-document": HostClass.TENANT_SCOPED,
+    "accounts:verify-mine": HostClass.TENANT_SCOPED,
+    "accounts:verify-queue": HostClass.TENANT_SCOPED,
+    "accounts:verify-document-access": HostClass.TENANT_SCOPED,
+    "accounts:verify-approve": HostClass.TENANT_SCOPED,
+    "accounts:verify-reject": HostClass.TENANT_SCOPED,
+    # -- Tenant-scoped: privacy (ADR-008) ----------------------------------
+    "accounts:privacy-export": HostClass.TENANT_SCOPED,
+    "accounts:privacy-erasure": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The
     # neutral host has no tenant and correctly gets a 404 here.
     "universities:tenant-config": HostClass.TENANT_SCOPED,
+    # Administered by the school itself. Scoped from the STAFF PROFILE rather
+    # than the host, so a header cannot reach another school's settings.
+    "universities:policy": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: authentication ------------------------------------
     "accounts:api-root": HostClass.TENANT_SCOPED,
     "accounts:register": HostClass.TENANT_SCOPED,

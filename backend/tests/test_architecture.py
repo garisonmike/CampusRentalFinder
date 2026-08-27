@@ -389,6 +389,14 @@ NOT_TENANT_SCOPED: dict[str, str] = {
         "A regulator-facing audit trail, not tenant data. Append-only, and it "
         "outlives both the document and the tenancy."
     ),
+    # A subject access or erasure request is about a PERSON, not about a
+    # university. A student may hold relationships to more than one, a
+    # landlord serves several, and a regulator asking "did you honour this
+    # request" is not asking on behalf of any of them.
+    "accounts.ErasureRequest": (
+        "A data-subject request is about a person, not a tenant. Scoping it "
+        "would make a regulator's question answerable only per university."
+    ),
     # Reached only by its own secret hash, never listed, and the profile it
     # points at carries the tenant -- so a scoped manager would be ceremony
     # around a table nobody queries by university. The per-address rate limit

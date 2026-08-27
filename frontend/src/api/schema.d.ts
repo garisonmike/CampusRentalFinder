@@ -179,6 +179,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/privacy/erasure/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your erasure requests and their outcomes
+         * @description Erasure.
+         */
+        get: operations["auth_privacy_erasure_retrieve"];
+        put?: never;
+        /**
+         * Request erasure of your personal data
+         * @description Kenya's Data Protection Act §26(e).
+         *
+         *     **Recorded as a request with a decision, not an immediate delete.** Erasure is irreversible and cannot run twice, so an accidental one cannot be undone -- and a coerced one is a real risk where a landlord has leverage over a student who reviewed them badly. The record puts a person and a timestamp between the button and the tombstone.
+         *
+         *     **Your reviews survive**, with your name replaced by 'Former student'. Deleting them would make erasure a suppression tool: a landlord wanting a bad review gone would need one cooperating student and one support ticket. The right to be forgotten is not a right to unpublish what you said about someone else.
+         *
+         *     A landlord with running or upcoming tenancies **cannot complete erasure** -- they are a party to a contract other people are relying on. The response says which, so it can be cleared.
+         */
+        post: operations["auth_privacy_erasure_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/privacy/export/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export everything held about you
+         * @description Kenya's Data Protection Act §26(a).
+         *
+         *     Requires your password, not just a session: this is everything the platform knows about you in one payload, and a bearer token proves the session rather than the person.
+         *
+         *     Two deliberate omissions. **Verification document images are never included** -- returning one would re-expose an identity document to whatever channel this travels over, and the decision is the record. **The reviewer's identity is never included** -- naming the member of staff who refused your ID, in a document handed to you, is how a policy decision becomes a personal one.
+         */
+        post: operations["auth_privacy_export_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/profile/": {
         parameters: {
             query?: never;
@@ -241,8 +295,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * @description Takes a refresh type JSON web token and returns an access type JSON web
-         *     token if the refresh token is valid.
+         * @description simplejwt's refresh, with our policy attached.
+         *
+         *     Subclassed rather than exempted: a refresh endpoint with no throttle is
+         *     the one an attacker holding a stolen refresh token uses fastest, and
+         *     "third party" is not a reason for it to be the only unthrottled write on
+         *     the API.
          */
         post: operations["auth_token_refresh_create"];
         delete?: never;
@@ -261,10 +319,794 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * @description Takes a token and indicates if it is valid.  This view provides no
-         *     information about a token's fitness for a particular use.
+         * @description simplejwt's verify, with our policy attached.
+         *
+         *     Also an oracle: it answers "is this token valid" for anything presented,
+         *     so it is throttled on the same scope as login.
          */
         post: operations["auth_token_verify_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/document/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an identity document for review
+         * @description For schools that issue no student addresses.
+         *
+         *     The content type is sniffed from the **leading bytes** -- the declared header and the file extension are both attacker-controlled. JPEG, PNG, WebP and PDF only.
+         *
+         *     **EXIF is stripped on ingest.** A photo of a student ID carries the GPS coordinates of wherever it was taken, which is usually where that student lives.
+         *
+         *     The image is deleted 7 days after a decision, or 30 days after upload whether or not anyone reviewed it. The decision is retained; the image is not.
+         */
+        post: operations["auth_verification_document_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/email/confirm/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm an email verification token
+         * @description Single use, consumed atomically -- a replayed token loses the race rather than winning it.
+         *
+         *     Unknown, expired and already-used tokens return one identical error. The three are different to us and identical to anyone probing.
+         */
+        post: operations["auth_verification_email_confirm_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/email/request/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request an email verification link
+         * @description The automated path. No human reviews anything and no reviewer is recorded -- a domain decided it, not a person.
+         *
+         *     **The response is deliberately identical whether or not the address is known**, and whether or not you are already verified. Anything else tells an attacker which students exist at a university.
+         *
+         *     Rate-limited per user AND per address, independently: per user alone lets several accounts mail-bomb one address, per address alone lets one account grind through a university's namespace.
+         */
+        post: operations["auth_verification_email_request_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/mine/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your own verification requests
+         * @description Outcomes only. The document image is never returned here.
+         */
+        get: operations["auth_verification_mine_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/queue/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The reviewer queue for your university
+         * @description **Scoped to the reviewer's own university.** Staff at one school never see another's requests, and that is the isolation failure with the worst consequences in the product: the data behind it is national ID numbers belonging to people who never agreed to show them to another institution.
+         */
+        get: operations["auth_verification_queue_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/queue/{id}/approve/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a verification request
+         * @description The student earns the badge. The reviewer is recorded internally and never shown.
+         */
+        post: operations["auth_verification_queue_approve_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/queue/{id}/document/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A short-lived signed URL for one document
+         * @description Generated per request and **never stored** -- a stored URL is a permanent bearer capability that would outlive both the review and the reviewer's employment. Expiry is minutes.
+         *
+         *     **Every call writes a `DocumentAccessLog` row before the URL is returned.** If the log write fails there is no URL: an unlogged read is worse than a blocked one.
+         */
+        get: operations["auth_verification_queue_document_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/queue/{id}/reject/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a verification request
+         * @description The reason is shown to the student and is required -- a blurry photo is the common case and they need to know that is what it was.
+         *
+         *     **Not terminal.** They may resubmit, up to `VERIFICATION_MAX_SUBMISSIONS`. A dead end here would be an accessibility failure dressed as a security control.
+         */
+        post: operations["auth_verification_queue_reject_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/engagement/inquiries/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inquiries you sent, or that concern property you manage
+         * @description One endpoint, scoped by relationship rather than by role: a student sees what they sent, a landlord or assigned caretaker sees what was sent about their property. Nobody sees anything else.
+         *
+         *     **No contact details appear in either direction.** The conversation stays on-platform so that a resulting stay is one the platform witnessed -- an off-platform arrangement arrives later as a claim, which is a dispute surface and a queue entry the application path never creates (ADR-004 §1.1).
+         */
+        get: operations["engagement_inquiries_list"];
+        put?: never;
+        /**
+         * Ask about a unit
+         * @description Rate-limited per user and per unit. An inquiry is an unsolicited message to a stranger, so the limit is part of the feature.
+         *
+         *     Phone numbers, email addresses and messaging handles are rejected. Invite them to apply instead.
+         */
+        post: operations["engagement_inquiries_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/engagement/inquiries/{id}/close/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close an inquiry without answering
+         * @description Not a rejection: an inquiry is not an application, and there is nothing to reject. Either party may close their own exchange.
+         */
+        post: operations["engagement_inquiries_close_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/engagement/inquiries/{id}/respond/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer an inquiry
+         * @description The landlord always; an assigned caretaker only with the `respond_inquiries` permission (ADR-003).
+         *
+         *     One response, and it closes the exchange. Deliberately not a thread: a thread is a messaging product, and a messaging product is where the conversation stops producing an application.
+         */
+        post: operations["engagement_inquiries_respond_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/engagement/saved/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your saved properties
+         * @description Only ever your own. There is no endpoint that lists another user's saved properties, and there will not be one -- what somebody is considering is not public.
+         */
+        get: operations["engagement_saved_list"];
+        put?: never;
+        /**
+         * Save a property
+         * @description Idempotent: saving twice returns the existing row rather than erroring. A double tap on a phone is not a conflict.
+         */
+        post: operations["engagement_saved_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/engagement/saved/{slug}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unsave a property
+         * @description Idempotent: unsaving something not saved is a 204, not a 404.
+         */
+        delete: operations["engagement_saved_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search published properties
+         * @description Properties joined to a campus of the university resolved from the request host (ADR-002). Only published listings appear.
+         *
+         *     Ordering by `distance` annotates `nearest_campus_km`, which is a STRAIGHT-LINE figure -- label it as such. Walking figures live on the property detail and are legitimately null.
+         */
+        get: operations["properties_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{slug}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One property, with its units and campus distances
+         * @description `straight_line_km` is as the crow flies. `walking_minutes` and `walking_distance_km` come from a routing provider and are legitimately null -- render an em dash, never a zero and never the straight-line figure (ADR-002).
+         */
+        get: operations["properties_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/units/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One unit, with its photos
+         * @description `vacant_count` is authoritative for availability, not the absence of a tenancy: a Unit row may represent a POOL of identical rooms (forty bedsitters as one row), so several students hold the same unit concurrently and that is correct.
+         */
+        get: operations["properties_units_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a review
+         * @description Requires a confirmed tenancy of your own, at least REVIEW_MINIMUM_STAY_DAYS long and not already reviewed. A week in a room tells you about the viewing; the water going off every third Thursday takes a month to notice (ADR-004).
+         */
+        post: operations["reviews_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit your review, inside its window
+         * @description Editable for REVIEW_EDIT_WINDOW_DAYS after posting, then frozen. A review that can be rewritten for ever can be rewritten under pressure, and the pressure would come from the party with more of it (ADR-004).
+         */
+        patch: operations["reviews_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/reviews/{id}/response/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Respond to a review, once
+         * @description The landlord's single public reply. Never a caretaker's: a caretaker can confirm that somebody lived somewhere, but speaking for the business in public is the owner's own act (ADR-003).
+         */
+        post: operations["reviews_response_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/properties/{slug}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reviews of one property
+         * @description `dispute_annotation` is neutral and must be rendered as a plain factual line. Never grey the review out, collapse it, badge it amber or exclude it from the average -- styling it as a warning restores the veto ADR-004 removed.
+         */
+        get: operations["reviews_properties_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/properties/{slug}/rating/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rating for one property
+         * @description `average_rating: null` means **no verified reviews yet** and must render as those words -- never 0, never an empty star row.
+         *
+         *     `student_count` is the public denominator ('from N students'). It is deliberately smaller than `review_count` whenever anyone reviewed more than one stay in the same property; that divergence IS the de-duplication (ADR-004).
+         *
+         *     A property with no reviews of its own may show `landlord` as a secondary signal, **labelled as being about the landlord**, never about this property.
+         */
+        get: operations["reviews_properties_rating_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/units/{id}/rating/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rating for one unit
+         * @description Unit ratings are NOT de-duplicated per student, unlike property ratings: one stay is one review, and a tenant cannot hold overlapping stays in the same unit, so there is nothing to collapse. `student_count` and `review_count` differ here only when someone genuinely returned to the same room years later.
+         */
+        get: operations["reviews_units_rating_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your tenancies
+         * @description **Currency is derived, not stored.** There is no status value meaning 'current' -- filter with `?currency=current|past|upcoming`, which is computed from start_date and end_date at query time.
+         *
+         *     A null `end_date` means the tenancy is OPEN-ENDED AND STILL RUNNING, not that it ended at an unknown time. Most Kenyan student lets are month-to-month with no written end, so this is the common case rather than an edge one.
+         */
+        get: operations["tenancies_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/applications/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Applications you sent, or for property you manage
+         * @description Scoped by relationship: an applicant sees their own, a landlord or assigned caretaker sees those for their property.
+         */
+        get: operations["tenancies_applications_list"];
+        put?: never;
+        /**
+         * Apply for a unit
+         * @description The on-platform path. When this is accepted a confirmed tenancy is created **directly** -- no claim, no confirmation window, no dispute surface. That is ADR-004's primary control on dispute volume, and it is why applying is worth preferring over arranging off-platform and claiming later.
+         */
+        post: operations["tenancies_applications_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/applications/{id}/accept/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an application
+         * @description Creates a confirmed tenancy in the same transaction. An accepted application with no tenancy is a stay the platform witnessed and cannot vouch for -- exactly the gap the tenancy record closes.
+         *
+         *     Omit `end_date` for an open-ended tenancy. Null there means no agreed end and currently running.
+         */
+        post: operations["tenancies_applications_accept_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/applications/{id}/reject/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject an application
+         * @description Creates nothing. The reason is shown to the applicant.
+         */
+        post: operations["tenancies_applications_reject_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/applications/{id}/withdraw/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw your own application
+         * @description The applicant's own act, so no decider is recorded -- withdrawing is not a decision made about them.
+         */
+        post: operations["tenancies_applications_withdraw_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Claims you raised, or that concern property you manage
+         * @description Claims the caller is a party to.
+         */
+        get: operations["tenancies_claims_list"];
+        put?: never;
+        /**
+         * Claim a stay the platform did not witness
+         * @description For off-platform arrangements and pre-platform history **only**. An accepted application creates a confirmed tenancy directly and must never come through here.
+         *
+         *     The landlord has `TENANCY_CONFIRMATION_WINDOW_DAYS` to confirm or dispute. **Silence auto-confirms**: landlord silence is a signal, not a veto (ADR-004).
+         *
+         *     Rate-limited per user over a rolling 30 days, and refused with an explanation rather than silently dropped -- a genuine flood needs somewhere to go.
+         */
+        post: operations["tenancies_claims_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/accept-correction/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the disputer's corrected dates
+         * @description Normally settles the dispute with no administrator involved.
+         *
+         *     **Unless the correction would make the stay too short to review.** Then it escalates as `correction_defeats_review` even though you agreed, because a tenant who misremembers by a week -- or who simply wants the argument over -- may not realise that what they accepted also deletes their review. Your acceptance is recorded as evidence for the administrator, who will usually find the correction honest (ADR-004 §2b).
+         */
+        post: operations["tenancies_claims_accept_correction_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/accept-counter/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept the tenant's counter-dates
+         * @description The same review-defeating guard applies: a correction laundered through a counter is still a correction.
+         */
+        post: operations["tenancies_claims_accept_counter_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/confirm/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a claim
+         * @description The landlord or an assigned caretaker agreeing the stay happened. Creates the tenancy.
+         */
+        post: operations["tenancies_claims_confirm_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/counter/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Counter the correction, once
+         * @description Once, because an unbounded exchange between two people who disagree is an indefinite block by another name.
+         */
+        post: operations["tenancies_claims_counter_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/dispute/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispute a claim, with a typed reason
+         * @description The reason is enumerated because an untyped dispute cannot be routed and can therefore only go to a human -- and most disputes must not reach one, or the queue is unbounded (ADR-004 §2).
+         *
+         *     `dates_incorrect` stays between the parties. `duplicate` auto-resolves against the same predicate the exclusion constraint enforces. `never_tenanted` goes straight to an administrator, because an identity question is not something the parties can settle.
+         *
+         *     **A correction that would drop the stay below the review minimum cannot auto-resolve at all**, even with the tenant's acceptance.
+         */
+        post: operations["tenancies_claims_dispute_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/claims/{id}/reject-counter/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject the counter
+         * @description Two parties, no agreement. Escalates as `counter_unresolved`.
+         */
+        post: operations["tenancies_claims_reject_counter_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/disputes/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dispute queue
+         * @description Escalated claims awaiting a decision, oldest first.
+         *
+         *     **Filter by `escalation_reason`.** Working a mixed queue oldest-first is right; working it without knowing which kind of question each item is means gathering the wrong evidence first. An identity dispute and a fortnight's disagreement about dates need completely different evidence (ADR-004 §2a).
+         *
+         *     `dispute_reason` is what the disputer claimed and is never rewritten; `escalation_reason` is what you have to decide.
+         */
+        get: operations["tenancies_disputes_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenancies/disputes/{id}/resolve/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide an escalated claim
+         * @description Upholding it confirms the claim as an administrator decision.
+         */
+        post: operations["tenancies_disputes_resolve_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -289,6 +1131,30 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenant/policy/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your university's policy and theme
+         * @description University staff only, and only for their own institution.
+         */
+        get: operations["tenant_policy_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update your university's policy or theme
+         * @description **The lockout guard runs here.** Setting `signup_policy` to `verification_required` is refused until at least one student at this university is verified -- the guard checks an outcome, not configuration, because 'are any methods enabled?' returns yes in exactly the case that locks out an intake (ADR-003).
+         */
+        patch: operations["tenant_policy_partial_update"];
         trace?: never;
     };
     "/health/live/": {
@@ -361,12 +1227,7 @@ export interface components {
             readonly is_staff: boolean;
             /** Format: date-time */
             readonly date_joined: string;
-            /**
-             * @description The shape ``/auth/me/`` returns.
-             *
-             *     Explicit rather than derived client-side, so the client never has to know
-             *     what a LandlordProfile is.
-             */
+            /** @description What this user may do right now. **Per-student, not per-university: do NOT cache these against the university.** Gating reads the policy frozen at each student's own registration intersected with the live one, so two students at the same university can legitimately have different capabilities, and a policy change only ever widens what an existing student may do. */
             readonly capabilities: {
                 is_student: boolean;
                 is_landlord: boolean;
@@ -392,20 +1253,469 @@ export interface components {
             /** Active */
             is_active?: boolean;
         };
+        /** @description An application, as either party sees it. */
+        Application: {
+            readonly id: number;
+            unit: number;
+            readonly unit_label: string;
+            readonly property_name: string;
+            readonly property_slug: string;
+            readonly applicant_name: string;
+            /**
+             * Requested move-in date
+             * Format: date
+             */
+            move_in_date: string;
+            /** Intended stay (months) */
+            intended_months: number;
+            message?: string;
+            /**
+             * @description submitted | under_review | accepted | rejected | withdrawn | expired. An accepted application creates a confirmed tenancy directly -- no claim, no confirmation window, no dispute surface (ADR-004 §1.1).
+             *
+             *     * `submitted` - Submitted
+             *     * `under_review` - Under review
+             *     * `accepted` - Accepted
+             *     * `rejected` - Rejected
+             *     * `withdrawn` - Withdrawn
+             *     * `expired` - Expired
+             */
+            readonly status: components["schemas"]["ApplicationStatusEnum"];
+            readonly decision_note: string;
+            /** Format: date-time */
+            readonly decided_at: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** @description The inquiry this application came from, if any. Optional, and its only purpose is to make the on-platform path traceable end to end. */
+            inquiry?: number | null;
+        };
+        /** @description Applying for a unit. */
+        ApplicationCreateRequest: {
+            unit: number;
+            /**
+             * Requested move-in date
+             * Format: date
+             */
+            move_in_date: string;
+            /** Intended stay (months) */
+            intended_months: number;
+            message?: string;
+            inquiry?: number | null;
+        };
+        /** @description Accepting or rejecting one. */
+        ApplicationDecisionRequest: {
+            /** @description Shown to the applicant. A rejection with no reason gives them nothing to act on. */
+            note?: string;
+            /**
+             * Format: date
+             * @description Agreed start, if different from the applied-for move-in date.
+             */
+            start_date?: string | null;
+            /**
+             * Format: date
+             * @description Agreed end. **Omit for an open-ended tenancy** -- null means no agreed end and currently running, not unknown.
+             */
+            end_date?: string | null;
+            /**
+             * Format: decimal
+             * @description Agreed rent, if different from the unit's advertised rent.
+             */
+            monthly_rent_kes?: string | null;
+        };
+        /**
+         * @description * `submitted` - Submitted
+         *     * `under_review` - Under review
+         *     * `accepted` - Accepted
+         *     * `rejected` - Rejected
+         *     * `withdrawn` - Withdrawn
+         *     * `expired` - Expired
+         * @enum {string}
+         */
+        ApplicationStatusEnum: "submitted" | "under_review" | "accepted" | "rejected" | "withdrawn" | "expired";
+        /**
+         * @description How far a property is from one campus.
+         *
+         *     Both numbers are here on purpose and they are not interchangeable.
+         */
+        CampusDistance: {
+            readonly campus_name: string;
+            readonly university_name: string;
+            /**
+             * Format: decimal
+             * @description STRAIGHT-LINE distance to the campus, in kilometres. Not a walking distance and never presented as one -- label it 'as the crow flies'. Real walking distance is walking_distance_km, which may be null.
+             */
+            readonly straight_line_km: string;
+            /**
+             * Format: decimal
+             * @description Routed walking distance in kilometres. Null for the same reasons as walking_minutes; never substituted with the straight line.
+             */
+            readonly walking_distance_km: string | null;
+            /** @description Walking time from the routing provider, in minutes. **Legitimately null**, and null must render as an em dash rather than a zero or a guess: the provider may have no route, be out of quota, or be down. A fabricated walking time erodes exactly the trust the platform sells, so the API will never substitute the straight-line estimate here. */
+            readonly walking_minutes: number | null;
+            readonly route_provider: string;
+            /** Format: date-time */
+            readonly routed_at: string | null;
+        };
+        /** @description Raising a claim for a stay the platform did not witness. */
+        ClaimCreateRequest: {
+            /** @description Id of the unit you stayed in. */
+            unit: number;
+            /** Format: date */
+            start_date: string;
+            /**
+             * Format: date
+             * @description Omit if you are still living there.
+             */
+            end_date?: string | null;
+            /** Format: decimal */
+            monthly_rent_kes: string;
+            /**
+             * @description The stay predates this property's presence on the platform. Runs through identical machinery with no lower evidentiary bar.
+             * @default false
+             */
+            is_retrospective: boolean;
+        };
+        /**
+         * @description * `application` - Accepted on-platform application
+         *     * `landlord` - Confirmed by the landlord
+         *     * `caretaker` - Confirmed by a caretaker
+         *     * `auto` - Auto-confirmed: the confirmation window elapsed
+         *     * `admin` - Resolved by a platform administrator
+         *     * `dispute_timeout` - Auto-resolved: the dispute window elapsed
+         * @enum {string}
+         */
+        ConfirmationSourceEnum: "application" | "landlord" | "caretaker" | "auto" | "admin" | "dispute_timeout";
+        /** @description The tenant's single counter-offer on a dates dispute. */
+        CorrectionRequest: {
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date?: string | null;
+        };
+        /**
+         * @description * `baringo` - Baringo
+         *     * `bomet` - Bomet
+         *     * `bungoma` - Bungoma
+         *     * `busia` - Busia
+         *     * `elgeyo_marakwet` - Elgeyo-Marakwet
+         *     * `embu` - Embu
+         *     * `garissa` - Garissa
+         *     * `homa_bay` - Homa Bay
+         *     * `isiolo` - Isiolo
+         *     * `kajiado` - Kajiado
+         *     * `kakamega` - Kakamega
+         *     * `kericho` - Kericho
+         *     * `kiambu` - Kiambu
+         *     * `kilifi` - Kilifi
+         *     * `kirinyaga` - Kirinyaga
+         *     * `kisii` - Kisii
+         *     * `kisumu` - Kisumu
+         *     * `kitui` - Kitui
+         *     * `kwale` - Kwale
+         *     * `laikipia` - Laikipia
+         *     * `lamu` - Lamu
+         *     * `machakos` - Machakos
+         *     * `makueni` - Makueni
+         *     * `mandera` - Mandera
+         *     * `marsabit` - Marsabit
+         *     * `meru` - Meru
+         *     * `migori` - Migori
+         *     * `mombasa` - Mombasa
+         *     * `muranga` - Murang'a
+         *     * `nairobi` - Nairobi
+         *     * `nakuru` - Nakuru
+         *     * `nandi` - Nandi
+         *     * `narok` - Narok
+         *     * `nyamira` - Nyamira
+         *     * `nyandarua` - Nyandarua
+         *     * `nyeri` - Nyeri
+         *     * `samburu` - Samburu
+         *     * `siaya` - Siaya
+         *     * `taita_taveta` - Taita-Taveta
+         *     * `tana_river` - Tana River
+         *     * `tharaka_nithi` - Tharaka-Nithi
+         *     * `trans_nzoia` - Trans Nzoia
+         *     * `turkana` - Turkana
+         *     * `uasin_gishu` - Uasin Gishu
+         *     * `vihiga` - Vihiga
+         *     * `wajir` - Wajir
+         *     * `west_pokot` - West Pokot
+         * @enum {string}
+         */
+        CountyEnum: "baringo" | "bomet" | "bungoma" | "busia" | "elgeyo_marakwet" | "embu" | "garissa" | "homa_bay" | "isiolo" | "kajiado" | "kakamega" | "kericho" | "kiambu" | "kilifi" | "kirinyaga" | "kisii" | "kisumu" | "kitui" | "kwale" | "laikipia" | "lamu" | "machakos" | "makueni" | "mandera" | "marsabit" | "meru" | "migori" | "mombasa" | "muranga" | "nairobi" | "nakuru" | "nandi" | "narok" | "nyamira" | "nyandarua" | "nyeri" | "samburu" | "siaya" | "taita_taveta" | "tana_river" | "tharaka_nithi" | "trans_nzoia" | "turkana" | "uasin_gishu" | "vihiga" | "wajir" | "west_pokot";
+        /** @enum {string} */
+        CurrencyEnum: "current" | "past" | "upcoming";
+        /**
+         * @description * `dates_incorrect` - The stay happened; the dates are wrong
+         *     * `never_tenanted` - This person never lived here
+         *     * `duplicate` - Already covered by an existing tenancy
+         * @enum {string}
+         */
+        DisputeReasonEnum: "dates_incorrect" | "never_tenanted" | "duplicate";
+        /** @description Disputing a claim, with a typed reason. */
+        DisputeRequest: {
+            /**
+             * @description Enumerated, because an untyped dispute cannot be routed and can therefore only go to a human. Free text belongs in `note` as additional context, never as a substitute.
+             *
+             *     * `dates_incorrect` - dates_incorrect
+             *     * `never_tenanted` - never_tenanted
+             *     * `duplicate` - duplicate
+             */
+            reason: components["schemas"]["ReasonEnum"];
+            note?: string;
+            /**
+             * Format: date
+             * @description Required for `dates_incorrect`: the dates you say are right.
+             */
+            proposed_start_date?: string | null;
+            /** Format: date */
+            proposed_end_date?: string | null;
+        };
+        /** @description Consuming the link. */
+        EmailVerificationConfirmRequest: {
+            /** @description The token from the emailed link. Single use, and expires. */
+            token: string;
+        };
+        /** @description Asking for a verification link. */
+        EmailVerificationRequestRequest: {
+            /**
+             * Format: email
+             * @description An address at one of your university's configured student domains. Matched EXACTLY on the full domain -- a lookalike like `evil-kyu.ac.ke` is refused.
+             */
+            student_email: string;
+        };
+        /** @description Asking to be erased. */
+        ErasureRequestRequest: {
+            /** @description Your current password. Required to confirm it is you. */
+            password: string;
+            /** @description Optional. Recorded with the request; not required to grant it. */
+            reason?: string;
+            /** @description You must pass true. Erasure is irreversible, and your reviews SURVIVE with your name replaced by a tombstone -- deleting them would let anyone remove criticism by deleting an account (ADR-008). */
+            confirm_understanding: boolean;
+        };
+        /**
+         * @description * `counter_unresolved` - Which set of dates is right
+         *     * `correction_defeats_review` - Whether a review-defeating correction is honest
+         *     * `identity_disputed` - Whether this person lived here at all
+         *     * `duplicate_unmatched` - Whether an existing tenancy covers this
+         * @enum {string}
+         */
+        EscalationReasonEnum: "counter_unresolved" | "correction_defeats_review" | "identity_disputed" | "duplicate_unmatched";
+        /**
+         * @description * `unfurnished` - Unfurnished
+         *     * `semi_furnished` - Semi Furnished
+         *     * `furnished` - Furnished
+         * @enum {string}
+         */
+        FurnishedEnum: "unfurnished" | "semi_furnished" | "furnished";
+        /**
+         * @description Re-authentication before anything irreversible or wholesale.
+         *
+         *     A bearer token proves the session; it does not prove the person is still
+         *     at the keyboard. For an export -- everything we hold about somebody, in one
+         *     payload -- and for erasure, that difference matters.
+         */
+        IdentityConfirmationRequest: {
+            /** @description Your current password. Required to confirm it is you. */
+            password: string;
+        };
+        /**
+         * @description An inquiry, as either party sees it.
+         *
+         *     The sender's name is shown to the landlord because they are being asked to
+         *     reply to a person. Nobody's **contact details** appear, in either
+         *     direction.
+         */
+        Inquiry: {
+            readonly id: number;
+            readonly unit: number;
+            readonly unit_label: string;
+            readonly property_name: string;
+            readonly property_slug: string;
+            /** @description 'Former student' for an erased account (ADR-008). */
+            readonly sender_name: string;
+            readonly message: string;
+            /** Format: date */
+            readonly preferred_move_in_date: string | null;
+            readonly status: components["schemas"]["InquiryStatusEnum"];
+            readonly response: string;
+            /** @description Who replied -- the landlord or an assigned caretaker. Shown because the student is owed the knowledge that a person answered, and which. */
+            readonly responded_by_name: string | null;
+            /** Format: date-time */
+            readonly responded_at: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description Sending one.
+         *
+         *     An inquiry is an unsolicited message to a stranger, so the rate limit is
+         *     part of the feature rather than a later hardening pass -- enforced here at
+         *     the boundary AND in the service layer, which is what a management command
+         *     or a future job would go through.
+         */
+        InquiryCreateRequest: {
+            /** @description Id of the unit you are asking about. */
+            unit: number;
+            /** @description What you want to ask. **Do not include phone numbers, email addresses or messaging handles** -- they are rejected. Keeping the conversation here is what lets the platform confirm a resulting stay without anyone having to prove it later (ADR-004 §1.1). */
+            message: string;
+            /**
+             * Format: date
+             * @description Optional. When you would want to move in.
+             */
+            preferred_move_in_date?: string | null;
+        };
+        /**
+         * @description The landlord's or caretaker's reply.
+         *
+         *     Same contact-details rule, in the other direction. A landlord answering
+         *     "call me on 07..." is the same leak with the same consequence.
+         */
+        InquiryResponseRequest: {
+            /** @description Your reply. **Do not include phone numbers, email addresses or messaging handles** -- they are rejected in this direction too. Invite them to apply instead; that is the path the platform can witness. */
+            response: string;
+        };
+        /**
+         * @description * `sent` - Sent
+         *     * `answered` - Answered
+         *     * `closed` - Closed
+         *     * `expired` - Expired unanswered
+         * @enum {string}
+         */
+        InquiryStatusEnum: "sent" | "answered" | "closed" | "expired";
         PaginatedAdminUserList: {
-            /** @example 123 */
+            /** @example 340 */
             count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
             next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
+            /** Format: uri */
             previous?: string | null;
             results: components["schemas"]["AdminUser"][];
+        };
+        PaginatedApplicationList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["Application"][];
+        };
+        PaginatedInquiryList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["Inquiry"][];
+        };
+        PaginatedPropertySummaryList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["PropertySummary"][];
+        };
+        PaginatedReviewList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["Review"][];
+        };
+        PaginatedSavedPropertyList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["SavedProperty"][];
+        };
+        PaginatedTenancyClaimList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["TenancyClaim"][];
+        };
+        PaginatedTenancyList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["Tenancy"][];
+        };
+        PaginatedVerificationRequestList: {
+            /** @example 340 */
+            count: number;
+            /** @example 1 */
+            page: number;
+            /** @example 20 */
+            page_size: number;
+            /** @example 17 */
+            total_pages: number;
+            /** Format: uri */
+            next?: string | null;
+            /** Format: uri */
+            previous?: string | null;
+            results: components["schemas"]["VerificationRequest"][];
         };
         PasswordChangeRequest: {
             current_password: string;
@@ -425,6 +1735,44 @@ export interface components {
             /** Active */
             is_active?: boolean;
         };
+        /** @description The settings a school administers about itself. */
+        PatchedUniversityPolicyRequest: {
+            /** @description Short form used in the interface, e.g. "KyU". */
+            display_name?: string;
+            /**
+             * @description `open` (verification not mentioned at signup), `verification_encouraged` (prompted, can skip), or `verification_required`.
+             *
+             *     **Cannot be set to `verification_required` until at least one student here is verified.** A school that sets it before issuing student addresses locks out an entire intake in the week they most need the platform.
+             *
+             *     Raising this affects NEW signups only. Existing students keep what they had -- gating reads the policy frozen at each student's own registration (ADR-003).
+             *
+             *     * `open` - Open — verification is not mentioned at signup
+             *     * `verification_encouraged` - Encouraged — the student is prompted and can skip
+             *     * `verification_required` - Required — signup completes only for a verified student
+             */
+            signup_policy?: components["schemas"]["SignupPolicyEnum"];
+            /** @description Which paths this school offers. Empty means none, which is the default. A school with no document reviewers should not enable `student_id_upload`: uploads would arrive into a queue nobody works, and since the retention clock starts at upload that means collecting national IDs purely to delete them thirty days later. */
+            verification_methods_enabled?: components["schemas"]["VerificationMethodsEnabledEnum"][];
+            /** @description Domains that prove enrolment, e.g. `["s.kyu.ac.ke"]`. Matched EXACTLY on the full domain -- list every subdomain you want accepted, because `alumni.kyu.ac.ke` is not `kyu.ac.ke` and the platform will not infer enrolment from DNS hierarchy. Blank entries are dropped; whitespace and case are normalised. */
+            student_email_domains?: string[];
+            /**
+             * Verification grace period (days)
+             * @description How long a new student may use gated actions before verifying. Verification waits on a registry or a human reviewer, neither of which the student controls.
+             */
+            verification_grace_period_days?: number;
+            verification_required_to_review?: boolean;
+            /**
+             * Format: date
+             * @description Announce a change before it bites. Until this date the policy is treated as `open` for new signups.
+             */
+            verification_enforced_from?: string | null;
+            /** Primary colour */
+            primary_hsl?: string;
+            /** Secondary colour */
+            secondary_hsl?: string;
+            /** Accent colour */
+            accent_hsl?: string;
+        };
         /**
          * @description The fields a user may change about themselves.
          *
@@ -439,6 +1787,354 @@ export interface components {
             /** Format: uri */
             avatar_url?: string;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `ready` - Ready
+         *     * `failed` - Failed
+         * @enum {string}
+         */
+        ProcessingStatusEnum: "pending" | "ready" | "failed";
+        /** @description One property, with its units and campus distances. */
+        PropertyDetail: {
+            readonly id: number;
+            readonly name: string;
+            readonly slug: string;
+            readonly property_type: components["schemas"]["PropertyTypeEnum"];
+            readonly county: components["schemas"]["CountyEnum"];
+            readonly town: string;
+            /** @description e.g. "Kahawa Wendani" */
+            readonly estate: string;
+            /** @description e.g. "opposite Naivas" */
+            readonly landmark: string;
+            /**
+             * Format: double
+             * @description Map pins and distance computation only. Never queried directly (ADR-006).
+             */
+            readonly latitude: number | null;
+            /** Format: double */
+            readonly longitude: number | null;
+            /** Water tank */
+            readonly has_water_tank: boolean;
+            /** Borehole */
+            readonly has_borehole: boolean;
+            /** Backup power */
+            readonly has_backup_power: boolean;
+            /** Perimeter wall */
+            readonly has_perimeter_wall: boolean;
+            /** Security guard */
+            readonly has_security_guard: boolean;
+            /** Wifi */
+            readonly has_wifi: boolean;
+            readonly caretaker_on_site: boolean;
+            /** Format: date-time */
+            readonly published_at: string | null;
+            /**
+             * Format: decimal
+             * @description Straight-line kilometres to the nearest campus of the current university. Present only when ordering by distance.
+             */
+            readonly nearest_campus_km: string;
+            /** Format: decimal */
+            readonly cheapest_rent_kes: string | null;
+            readonly cover_photo_url: string | null;
+            readonly description: string;
+            readonly street: string;
+            /** CCTV */
+            readonly has_cctv: boolean;
+            /** Parking */
+            readonly has_parking: boolean;
+            readonly units: components["schemas"]["UnitSummary"][];
+            readonly campus_distances: components["schemas"]["CampusDistance"][];
+            /** @description Display name of the owner. Reads 'Former landlord' for an erased account (ADR-008) -- the listing survives the person. */
+            readonly landlord_name: string;
+            readonly view_count: number;
+        };
+        /**
+         * @description A property in a search result.
+         *
+         *     `nearest_campus_km` is annotated by the ordering helper and is present only
+         *     when the queryset was ordered by distance. Absent, not null, otherwise --
+         *     so a client can tell "not requested" from "no campus".
+         */
+        PropertySummary: {
+            readonly id: number;
+            readonly name: string;
+            readonly slug: string;
+            readonly property_type: components["schemas"]["PropertyTypeEnum"];
+            readonly county: components["schemas"]["CountyEnum"];
+            readonly town: string;
+            /** @description e.g. "Kahawa Wendani" */
+            readonly estate: string;
+            /** @description e.g. "opposite Naivas" */
+            readonly landmark: string;
+            /**
+             * Format: double
+             * @description Map pins and distance computation only. Never queried directly (ADR-006).
+             */
+            readonly latitude: number | null;
+            /** Format: double */
+            readonly longitude: number | null;
+            /** Water tank */
+            readonly has_water_tank: boolean;
+            /** Borehole */
+            readonly has_borehole: boolean;
+            /** Backup power */
+            readonly has_backup_power: boolean;
+            /** Perimeter wall */
+            readonly has_perimeter_wall: boolean;
+            /** Security guard */
+            readonly has_security_guard: boolean;
+            /** Wifi */
+            readonly has_wifi: boolean;
+            readonly caretaker_on_site: boolean;
+            /** Format: date-time */
+            readonly published_at: string | null;
+            /**
+             * Format: decimal
+             * @description Straight-line kilometres to the nearest campus of the current university. Present only when ordering by distance.
+             */
+            readonly nearest_campus_km: string;
+            /** Format: decimal */
+            readonly cheapest_rent_kes: string | null;
+            readonly cover_photo_url: string | null;
+        };
+        /**
+         * @description * `bedsitter` - Bedsitter
+         *     * `single_room` - Single Room
+         *     * `one_bedroom` - One Bedroom
+         *     * `two_bedroom` - Two Bedroom
+         *     * `three_bedroom` - Three Bedroom
+         *     * `hostel_block` - Hostel Block
+         *     * `shared_house` - Shared House
+         *     * `maisonette` - Maisonette
+         *     * `other` - Other
+         * @enum {string}
+         */
+        PropertyTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
+        /**
+         * @description * `dates_incorrect` - dates_incorrect
+         *     * `never_tenanted` - never_tenanted
+         *     * `duplicate` - duplicate
+         * @enum {string}
+         */
+        ReasonEnum: "dates_incorrect" | "never_tenanted" | "duplicate";
+        /**
+         * @description One review, as a reader sees it.
+         *
+         *     The reviewer is read through the tenancy and never stored on the review, so
+         *     there is no author field to leak; what is exposed is a display name and a
+         *     verified badge, both derived at render time.
+         */
+        Review: {
+            readonly id: number;
+            /** Overall rating */
+            readonly rating: number;
+            /** Cleanliness */
+            readonly cleanliness_rating: number | null;
+            /** Security */
+            readonly security_rating: number | null;
+            /** Water reliability */
+            readonly water_reliability_rating: number | null;
+            /** Landlord */
+            readonly landlord_rating: number | null;
+            /** Value for money */
+            readonly value_rating: number | null;
+            readonly comment: string;
+            readonly would_recommend: boolean | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly editable_until: string;
+            /** @description 'Former student' for an erased account (ADR-008). */
+            readonly author_name: string;
+            /** @description Whether the author carries the verification badge, read from their profile at render time. Absent verification is NOT a discredit -- most universities do not require it (ADR-003). */
+            readonly is_verified_author: boolean;
+            /** @description Neutral note that the landlord disputed this stay, or null. **Render it as a plain factual line. Never as a warning.** Do not grey the review out, collapse it, badge it amber, or exclude it from the average. A landlord who disputes honestly and one who disputes tactically produce the identical annotation, which is exactly why it must not read as a verdict -- styling it as one restores the veto ADR-004 removed. */
+            readonly dispute_annotation: string | null;
+            readonly response: components["schemas"]["ReviewResponse"];
+            readonly unit_label: string;
+            /** @description Length of the stay behind this review, in whole months. */
+            readonly stay_months: number;
+        };
+        /** @description The landlord's single reply. */
+        ReviewResponse: {
+            readonly id: number;
+            /** Response */
+            readonly body: string;
+            readonly author_name: string;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description Saving one, by slug.
+         *
+         *     By slug rather than id, because the slug is what a client already holds
+         *     from the listing it is looking at.
+         */
+        SavePropertyRequest: {
+            /** @description Slug of the property to save. Idempotent -- saving twice is not an error. */
+            property_slug: string;
+            /** @description A private reminder to yourself. Never shown to the landlord. */
+            note?: string;
+        };
+        /** @description A saved listing, as it appears in the student's own list. */
+        SavedProperty: {
+            readonly id: number;
+            readonly property_slug: string;
+            readonly property_name: string;
+            readonly property_town: string;
+            note?: string;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description **Cannot be set to `verification_required` until at least one student here is verified.** A school that sets it before issuing student addresses locks out an entire intake in the week they most need the platform.
+         *
+         *     Raising this affects NEW signups only. Existing students keep what they had -- gating reads the policy frozen at each student's own registration (ADR-003).
+         *
+         *     * `open` - Open — verification is not mentioned at signup
+         *     * `verification_encouraged` - Encouraged — the student is prompted and can skip
+         *     * `verification_required` - Required — signup completes only for a verified student
+         * @enum {string}
+         */
+        SignupPolicyEnum: "open" | "verification_encouraged" | "verification_required";
+        /**
+         * @description A tenancy record.
+         *
+         *     Read the three currency notes below before rendering anything from this.
+         */
+        Tenancy: {
+            readonly id: number;
+            readonly unit: number;
+            readonly unit_label: string;
+            readonly property_name: string;
+            readonly property_slug: string;
+            readonly tenant_name: string;
+            /** Format: date */
+            readonly start_date: string;
+            /**
+             * Format: date
+             * @description The agreed or actual last day. **null means the tenancy is OPEN-ENDED AND STILL RUNNING** -- a real arrangement with no agreed end -- and must NOT be rendered as a finished or unknown stay. A stay that has ended always has a date here.
+             */
+            readonly end_date: string | null;
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            readonly monthly_rent_kes: string;
+            /**
+             * @description Where the tenancy stands as a RECORD: pending, confirmed, disputed, rejected or withdrawn. **There is no value here meaning 'current' or 'active'.** Whether a confirmed tenancy is running is derived from start_date and end_date, never stored -- a stored currency flag needs a job to stay true, and when the job stops the data lies silently. Filter with ?currency=current|past|upcoming instead.
+             *
+             *     * `confirmed` - Confirmed
+             *     * `disputed` - Disputed after confirmation
+             *     * `withdrawn` - Withdrawn by the parties
+             *     * `rejected` - Rejected by an administrator
+             */
+            readonly status: components["schemas"]["TenancyStatusEnum"];
+            /** @description DERIVED from start_date and end_date at read time: `current`, `past` or `upcoming`. There is no stored field behind this and there must not be -- a stored currency flag needs a job to stay true and lies silently when the job stops. Filter lists with ?currency= rather than by status. */
+            readonly currency: components["schemas"]["CurrencyEnum"];
+            readonly confirmation_source: components["schemas"]["ConfirmationSourceEnum"];
+            /** @description A dispute occurred, whatever its outcome. A fact, not a display decision. */
+            readonly was_disputed: boolean;
+            /** @description The stay ended before its agreed end date. end_date has been rewritten to the actual last day and remains authoritative for currency; this flag is context, not a currency signal. */
+            readonly terminated_early: boolean;
+            readonly termination_reason: string;
+            /** @description Whether this stay is long enough to review and has not been reviewed yet. Derived, because the minimum-stay rule compares against today (ADR-004). */
+            readonly is_reviewable: boolean;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /** @description A claim, as the claimant or the landlord sees it. */
+        TenancyClaim: {
+            readonly id: number;
+            readonly unit: number;
+            readonly unit_label: string;
+            readonly property_name: string;
+            readonly claimant_name: string;
+            /** Format: date */
+            readonly start_date: string;
+            /** Format: date */
+            readonly end_date: string | null;
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            readonly monthly_rent_kes: string;
+            /**
+             * @description pending | confirmed | disputed | escalated | withdrawn | expired. Silence past `confirmation_deadline` auto-confirms: landlord silence is a signal, not a veto (ADR-004).
+             *
+             *     * `pending` - Awaiting confirmation
+             *     * `confirmed` - Confirmed
+             *     * `disputed` - Disputed between the parties
+             *     * `escalated` - Escalated to platform admins
+             *     * `withdrawn` - Withdrawn by the claimant
+             *     * `expired` - Expired
+             */
+            readonly status: components["schemas"]["TenancyClaimStatusEnum"];
+            /**
+             * Retrospective
+             * @description The stay predates the property's presence on the platform. **For analytics and the operations queue only -- never for display and never for weighting.** A flag that reaches the UI becomes a second class of review.
+             */
+            readonly is_retrospective: boolean;
+            /**
+             * Format: date-time
+             * @description Silence past this point auto-confirms the claim.
+             */
+            readonly confirmation_deadline: string;
+            /**
+             * @description Enumerated, because an untyped dispute can only be routed to a human.
+             *
+             *     * `dates_incorrect` - The stay happened; the dates are wrong
+             *     * `never_tenanted` - This person never lived here
+             *     * `duplicate` - Already covered by an existing tenancy
+             */
+            readonly dispute_reason: components["schemas"]["DisputeReasonEnum"];
+            /** @description Additional context. Never a substitute for the enumerated reason. */
+            readonly dispute_note: string;
+            /** Format: date */
+            readonly proposed_start_date: string | null;
+            /** Format: date */
+            readonly proposed_end_date: string | null;
+            /** Format: date */
+            readonly counter_start_date: string | null;
+            /** Format: date */
+            readonly counter_end_date: string | null;
+            /**
+             * @description What an administrator has to decide, distinct from why the dispute was raised. counter_unresolved | correction_defeats_review | identity_disputed | duplicate_unmatched.
+             *
+             *     * `counter_unresolved` - Which set of dates is right
+             *     * `correction_defeats_review` - Whether a review-defeating correction is honest
+             *     * `identity_disputed` - Whether this person lived here at all
+             *     * `duplicate_unmatched` - Whether an existing tenancy covers this
+             */
+            readonly escalation_reason: components["schemas"]["EscalationReasonEnum"];
+            /**
+             * Format: date-time
+             * @description The deadline binds the PLATFORM, not the tenant. Past it the claim confirms in the tenant's favour (ADR-004).
+             */
+            readonly escalation_deadline: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly resolved_at: string | null;
+        };
+        /**
+         * @description * `pending` - Awaiting confirmation
+         *     * `confirmed` - Confirmed
+         *     * `disputed` - Disputed between the parties
+         *     * `escalated` - Escalated to platform admins
+         *     * `withdrawn` - Withdrawn by the claimant
+         *     * `expired` - Expired
+         * @enum {string}
+         */
+        TenancyClaimStatusEnum: "pending" | "confirmed" | "disputed" | "escalated" | "withdrawn" | "expired";
+        /**
+         * @description * `confirmed` - Confirmed
+         *     * `disputed` - Disputed after confirmation
+         *     * `withdrawn` - Withdrawn by the parties
+         *     * `rejected` - Rejected by an administrator
+         * @enum {string}
+         */
+        TenancyStatusEnum: "confirmed" | "disputed" | "withdrawn" | "rejected";
         /**
          * @description The public tenant configuration (ADR-005).
          *
@@ -480,6 +2176,146 @@ export interface components {
         TokenVerifyRequest: {
             token: string;
         };
+        /** @description One unit, with its photos and its property's identity. */
+        UnitDetail: {
+            readonly id: number;
+            /** @description "B12" for one unit, or "Bedsitters" for a pool of identical ones. */
+            readonly label: string;
+            readonly unit_type: components["schemas"]["UnitTypeEnum"];
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            readonly rent_kes: string;
+            /**
+             * Deposit (KES)
+             * Format: decimal
+             */
+            readonly deposit_kes: string | null;
+            /** Furnishing */
+            readonly furnished: components["schemas"]["FurnishedEnum"];
+            /** @description 0 for a bedsitter or single room. */
+            readonly bedrooms: number;
+            /**
+             * Size (m²)
+             * @description Square metres, not feet.
+             */
+            readonly size_sqm: number | null;
+            /**
+             * Total units
+             * @description How many identical units exist.
+             */
+            readonly total_count: number;
+            /**
+             * Vacant units
+             * @description How many are free right now.
+             */
+            readonly vacant_count: number;
+            /** @description Whether any of this unit's rooms are free. Derived from vacant_count -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy' is not the same question. */
+            readonly is_available: boolean;
+            /** Format: date */
+            readonly available_from: string | null;
+            /**
+             * Minimum stay (months)
+             * @description One semester. The draft defaulted to a 12-month lease.
+             */
+            readonly min_stay_months: number;
+            readonly water_included: boolean;
+            /** @description Token metering is the norm otherwise. */
+            readonly electricity_included: boolean;
+            readonly wifi_included: boolean;
+            /**
+             * Private bathroom
+             * @description Replaces the draft's bathrooms>=1, which made a hostel block with shared ablutions impossible to list.
+             */
+            readonly has_private_bathroom: boolean;
+            /** Kitchenette */
+            readonly has_kitchenette: boolean;
+            readonly floor: number | null;
+            readonly photos: components["schemas"]["UnitPhoto"][];
+            readonly property_id: number;
+            readonly property_name: string;
+        };
+        /**
+         * @description One photo, with whichever variants exist.
+         *
+         *     Variants are generated by a background job (ADR-007), so a freshly uploaded
+         *     photo has none. `url` always resolves -- to a variant when one exists, to
+         *     the original otherwise -- so a slow queue costs page weight rather than a
+         *     broken image.
+         */
+        UnitPhoto: {
+            readonly id: number;
+            readonly caption: string;
+            readonly sort_order: number;
+            /** Primary photo */
+            readonly is_primary: boolean;
+            /** @description Best available rendition. Never null for a ready photo. */
+            readonly url: string | null;
+            /** @description Available renditions by name. May be empty while the resize job is still queued; fall back to `url`. */
+            readonly variants: {
+                [key: string]: string;
+            };
+            readonly processing_status: components["schemas"]["ProcessingStatusEnum"];
+        };
+        /** @description A unit as it appears inside a property listing. */
+        UnitSummary: {
+            readonly id: number;
+            /** @description "B12" for one unit, or "Bedsitters" for a pool of identical ones. */
+            readonly label: string;
+            readonly unit_type: components["schemas"]["UnitTypeEnum"];
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            readonly rent_kes: string;
+            /**
+             * Deposit (KES)
+             * Format: decimal
+             */
+            readonly deposit_kes: string | null;
+            /** Furnishing */
+            readonly furnished: components["schemas"]["FurnishedEnum"];
+            /** @description 0 for a bedsitter or single room. */
+            readonly bedrooms: number;
+            /**
+             * Size (m²)
+             * @description Square metres, not feet.
+             */
+            readonly size_sqm: number | null;
+            /**
+             * Total units
+             * @description How many identical units exist.
+             */
+            readonly total_count: number;
+            /**
+             * Vacant units
+             * @description How many are free right now.
+             */
+            readonly vacant_count: number;
+            /** @description Whether any of this unit's rooms are free. Derived from vacant_count -- a Unit row may represent a POOL of identical rooms, so 'has a tenancy' is not the same question. */
+            readonly is_available: boolean;
+            /** Format: date */
+            readonly available_from: string | null;
+            /**
+             * Minimum stay (months)
+             * @description One semester. The draft defaulted to a 12-month lease.
+             */
+            readonly min_stay_months: number;
+        };
+        /**
+         * @description * `bedsitter` - Bedsitter
+         *     * `single_room` - Single Room
+         *     * `one_bedroom` - One Bedroom
+         *     * `two_bedroom` - Two Bedroom
+         *     * `three_bedroom` - Three Bedroom
+         *     * `hostel_block` - Hostel Block
+         *     * `shared_house` - Shared House
+         *     * `maisonette` - Maisonette
+         *     * `other` - Other
+         * @enum {string}
+         */
+        UnitTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
         /** @description A user's own identity, with their capability set. */
         User: {
             readonly id: number;
@@ -500,12 +2336,7 @@ export interface components {
             readonly is_active: boolean;
             /** Format: date-time */
             readonly date_joined: string;
-            /**
-             * @description The shape ``/auth/me/`` returns.
-             *
-             *     Explicit rather than derived client-side, so the client never has to know
-             *     what a LandlordProfile is.
-             */
+            /** @description What this user may do right now. **Per-student, not per-university: do NOT cache these against the university.** Gating reads the policy frozen at each student's own registration intersected with the live one, so two students at the same university can legitimately have different capabilities, and a policy change only ever widens what an existing student may do. */
             readonly capabilities: {
                 is_student: boolean;
                 is_landlord: boolean;
@@ -562,6 +2393,52 @@ export interface components {
             /** Format: uri */
             avatar_url?: string;
         };
+        /** @description Approving or rejecting one. */
+        VerificationDecisionRequest: {
+            /** @description Shown to the student. **Required for a rejection** -- a student told 'no' with nothing to act on cannot resubmit successfully. */
+            reason?: string;
+        };
+        /**
+         * @description * `email_domain` - Student email domain
+         *     * `student_id_upload` - Student ID document upload
+         * @enum {string}
+         */
+        VerificationMethodsEnabledEnum: "email_domain" | "student_id_upload";
+        /**
+         * @description A document review request, as the student or the reviewer sees it.
+         *
+         *     **No reviewer identity, in either direction.** Not a field, not a name, not
+         *     an id.
+         */
+        VerificationRequest: {
+            readonly id: number;
+            readonly student_name: string;
+            readonly university_name: string;
+            /**
+             * @description pending | approved | rejected.
+             *
+             *     * `pending` - Awaiting review
+             *     * `approved` - Approved
+             *     * `rejected` - Rejected
+             */
+            readonly status: components["schemas"]["VerificationStatusEnum"];
+            /** @description Why the request was approved or rejected, written for the student. **The reviewer's identity is deliberately absent from every payload and will not be added.** A named individual refusing a student's ID at their own institution is a person who can be found in a corridor. A screen that wants 'reviewed by' does not get one. */
+            readonly decision_reason: string;
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+            readonly attempt: number;
+            /** @description Whether the image still exists. False once retention has deleted it -- the DECISION is retained, the image is not (ADR-003). */
+            readonly document_available: boolean;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description * `pending` - Awaiting review
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        VerificationStatusEnum: "pending" | "approved" | "rejected";
     };
     responses: never;
     parameters: never;
@@ -592,12 +2469,10 @@ export interface operations {
     auth_admin_users_list: {
         parameters: {
             query?: {
-                /** @description Which field to use when ordering the results. */
-                ordering?: string;
                 /** @description A page number within the paginated result set. */
                 page?: number;
-                /** @description A search term. */
-                search?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -873,6 +2748,72 @@ export interface operations {
             };
         };
     };
+    auth_privacy_erasure_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_privacy_erasure_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ErasureRequestRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ErasureRequestRequest"];
+                "multipart/form-data": components["schemas"]["ErasureRequestRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_privacy_export_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityConfirmationRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["IdentityConfirmationRequest"];
+                "multipart/form-data": components["schemas"]["IdentityConfirmationRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     auth_profile_retrieve: {
         parameters: {
             query?: never;
@@ -1016,6 +2957,968 @@ export interface operations {
             };
         };
     };
+    auth_verification_document_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    document?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_verification_email_confirm_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationConfirmRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["EmailVerificationConfirmRequest"];
+                "multipart/form-data": components["schemas"]["EmailVerificationConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_verification_email_request_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationRequestRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["EmailVerificationRequestRequest"];
+                "multipart/form-data": components["schemas"]["EmailVerificationRequestRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_verification_mine_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedVerificationRequestList"];
+                };
+            };
+        };
+    };
+    auth_verification_queue_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                status?: "approved" | "pending" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedVerificationRequestList"];
+                };
+            };
+        };
+    };
+    auth_verification_queue_approve_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["VerificationDecisionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["VerificationDecisionRequest"];
+                "multipart/form-data": components["schemas"]["VerificationDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_verification_queue_document_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url?: string;
+                    };
+                };
+            };
+        };
+    };
+    auth_verification_queue_reject_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["VerificationDecisionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["VerificationDecisionRequest"];
+                "multipart/form-data": components["schemas"]["VerificationDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    engagement_inquiries_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedInquiryList"];
+                };
+            };
+        };
+    };
+    engagement_inquiries_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InquiryCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["InquiryCreateRequest"];
+                "multipart/form-data": components["schemas"]["InquiryCreateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inquiry"];
+                };
+            };
+        };
+    };
+    engagement_inquiries_close_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    engagement_inquiries_respond_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InquiryResponseRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["InquiryResponseRequest"];
+                "multipart/form-data": components["schemas"]["InquiryResponseRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    engagement_saved_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSavedPropertyList"];
+                };
+            };
+        };
+    };
+    engagement_saved_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavePropertyRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SavePropertyRequest"];
+                "multipart/form-data": components["schemas"]["SavePropertyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedProperty"];
+                };
+            };
+        };
+    };
+    engagement_saved_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    properties_list: {
+        parameters: {
+            query?: {
+                /** @description Only properties with a vacant unit */
+                available_only?: boolean;
+                /** @description Campus id */
+                campus?: number;
+                caretaker_on_site?: boolean;
+                county?: string;
+                estate?: string;
+                furnished?: string;
+                has_backup_power?: boolean;
+                has_borehole?: boolean;
+                has_security_guard?: boolean;
+                has_water_tank?: boolean;
+                has_wifi?: boolean;
+                /** @description Direct distance, not walking distance. */
+                max_distance_km?: number;
+                /** @description Maximum rent (KES) */
+                max_rent?: number;
+                /** @description Minimum rent (KES) */
+                min_rent?: number;
+                /** @description `distance` (nearest campus first), `rent` (cheapest first), or `-published_at` (newest first, the default). */
+                ordering?: "-published_at" | "distance" | "rent";
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description Search */
+                q?: string;
+                town?: string;
+                /**
+                 * @description Unit type
+                 *
+                 *     * `bedsitter` - Bedsitter
+                 *     * `single_room` - Single Room
+                 *     * `one_bedroom` - One Bedroom
+                 *     * `two_bedroom` - Two Bedroom
+                 *     * `three_bedroom` - Three Bedroom
+                 *     * `hostel_block` - Hostel Block
+                 *     * `shared_house` - Shared House
+                 *     * `maisonette` - Maisonette
+                 *     * `other` - Other
+                 */
+                unit_type?: ("bedsitter" | "hostel_block" | "maisonette" | "one_bedroom" | "other" | "shared_house" | "single_room" | "three_bedroom" | "two_bedroom")[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedPropertySummaryList"];
+                };
+            };
+        };
+    };
+    properties_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"];
+                };
+            };
+        };
+    };
+    properties_units_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitDetail"];
+                };
+            };
+        };
+    };
+    reviews_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reviews_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reviews_response_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reviews_properties_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedReviewList"];
+                };
+            };
+        };
+    };
+    reviews_properties_rating_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reviews_units_rating_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_list: {
+        parameters: {
+            query?: {
+                /** @description Derived from the dates. Omit for all live tenancies. */
+                currency?: "current" | "past" | "upcoming";
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTenancyList"];
+                };
+            };
+        };
+    };
+    tenancies_applications_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedApplicationList"];
+                };
+            };
+        };
+    };
+    tenancies_applications_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ApplicationCreateRequest"];
+                "multipart/form-data": components["schemas"]["ApplicationCreateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Application"];
+                };
+            };
+        };
+    };
+    tenancies_applications_accept_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApplicationDecisionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ApplicationDecisionRequest"];
+                "multipart/form-data": components["schemas"]["ApplicationDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_applications_reject_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApplicationDecisionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ApplicationDecisionRequest"];
+                "multipart/form-data": components["schemas"]["ApplicationDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_applications_withdraw_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTenancyClaimList"];
+                };
+            };
+        };
+    };
+    tenancies_claims_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ClaimCreateRequest"];
+                "multipart/form-data": components["schemas"]["ClaimCreateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenancyClaim"];
+                };
+            };
+        };
+    };
+    tenancies_claims_accept_correction_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_accept_counter_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_confirm_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_counter_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["CorrectionRequest"];
+                "multipart/form-data": components["schemas"]["CorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_dispute_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisputeRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DisputeRequest"];
+                "multipart/form-data": components["schemas"]["DisputeRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_claims_reject_counter_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenancies_disputes_list: {
+        parameters: {
+            query?: {
+                escalation_reason?: "correction_defeats_review" | "counter_unresolved" | "duplicate_unmatched" | "identity_disputed";
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTenancyClaimList"];
+                };
+            };
+        };
+    };
+    tenancies_disputes_resolve_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     tenant_config_retrieve: {
         parameters: {
             query?: never;
@@ -1035,6 +3938,48 @@ export interface operations {
             };
             /** @description No response body */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenant_policy_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenant_policy_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedUniversityPolicyRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedUniversityPolicyRequest"];
+                "multipart/form-data": components["schemas"]["PatchedUniversityPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

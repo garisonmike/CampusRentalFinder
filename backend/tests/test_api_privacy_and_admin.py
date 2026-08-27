@@ -1,0 +1,383 @@
+"""
+Privacy and university-administration endpoints (ADR-003, ADR-008).
+
+Two rules do most of the work here.
+
+**Identity is confirmed before anything wholesale or irreversible.** A bearer
+token proves the session, not the person. For an export — everything the
+platform knows about somebody, in one payload — and for erasure, that
+difference matters, and a stolen phone should be able to do neither.
+
+**The lockout guard is enforced at the boundary.** A school setting
+`verification_required` before it has issued student addresses locks out an
+entire intake in the week they most need the platform.
+"""
+
+from __future__ import annotations
+
+import pytest
+from django.test import override_settings
+
+from accounts.privacy_api import ErasureRequest
+from universities.constants import SignupPolicy, VerificationMethod
+
+pytestmark = pytest.mark.django_db
+
+EXPORT = "/api/v1/auth/privacy/export/"
+ERASURE = "/api/v1/auth/privacy/erasure/"
+POLICY = "/api/v1/tenant/policy/"
+
+PASSWORD = "test-password-123"
+
+
+@pytest.fixture
+def host(university):
+    return f"{university.subdomain}.example.co.ke"
+
+
+def get(client, url, host):
+    with override_settings(ALLOWED_HOSTS=["*"], SITE_DOMAIN="example.co.ke"):
+        return client.get(url, HTTP_HOST=host)
+
+
+def post(client, url, host, payload=None):
+    with override_settings(ALLOWED_HOSTS=["*"], SITE_DOMAIN="example.co.ke"):
+        return client.post(url, payload or {}, format="json", HTTP_HOST=host)
+
+
+def patch(client, url, host, payload):
+    with override_settings(ALLOWED_HOSTS=["*"], SITE_DOMAIN="example.co.ke"):
+        return client.patch(url, payload, format="json", HTTP_HOST=host)
+
+
+# ---------------------------------------------------------------------------
+# Subject access
+# ---------------------------------------------------------------------------
+
+
+class TestExport:
+    def test_it_needs_the_password(self, authenticate, tenant, host):
+        """A bearer token proves the session, not the person. This is
+        everything we hold about somebody in one payload."""
+        response = post(authenticate(tenant), EXPORT, host, {})
+
+        assert response.status_code == 400
+
+    def test_a_wrong_password_is_403_not_401(self, authenticate, tenant, host):
+        """401 would make a client discard a perfectly good token and log the
+        user out over a typo."""
+        response = post(authenticate(tenant), EXPORT, host, {"password": "wrong"})
+
+        assert response.status_code == 403
+
+    def test_the_right_password_returns_the_export(self, authenticate, tenant, host):
+        response = post(authenticate(tenant), EXPORT, host, {"password": PASSWORD})
+
+        assert response.status_code == 200
+        assert "account" in response.json()
+        assert "reviews" in response.json()
+
+    def test_it_carries_no_document_image(self, authenticate, student_profile, host):
+        """Returning one would re-expose an identity document to whatever
+        channel this travels over."""
+        import io
+
+        from PIL import Image
+
+        from accounts.documents import submit_verification_document
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16)).save(buffer, format="JPEG")
+        submit_verification_document(student_profile, buffer.getvalue())
+
+        body = str(
+            post(authenticate(student_profile.user), EXPORT, host, {"password": PASSWORD}).json()
+        )
+
+        assert "verification/" not in body
+        assert "storage_key" not in body
+
+    def test_anonymous_cannot_export(self, api_client, host):
+        assert post(api_client, EXPORT, host, {"password": PASSWORD}).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Erasure
+# ---------------------------------------------------------------------------
+
+
+class TestErasure:
+    def payload(self, **overrides):
+        return {"password": PASSWORD, "confirm_understanding": True, **overrides}
+
+    def test_it_needs_the_password(self, authenticate, tenant, host):
+        response = post(authenticate(tenant), ERASURE, host, {"confirm_understanding": True})
+
+        assert response.status_code == 400
+
+    def test_it_needs_explicit_confirmation(self, authenticate, tenant, host):
+        """Irreversible, and it cannot run twice. A misclick has no undo."""
+        response = post(
+            authenticate(tenant),
+            ERASURE,
+            host,
+            {"password": PASSWORD, "confirm_understanding": False},
+        )
+
+        assert response.status_code == 400
+
+    def test_it_is_recorded_as_a_request_with_a_decision(self, authenticate, tenant, host):
+        """Not an immediate delete. A coerced erasure is a real risk where a
+        landlord has leverage over a student who reviewed them badly, and the
+        record puts a person and a timestamp between the button and the
+        tombstone."""
+        response = post(authenticate(tenant), ERASURE, host, self.payload())
+
+        assert response.status_code == 200
+        assert ErasureRequest.objects.filter(user=tenant).count() == 1
+        assert response.json()["status"] == "completed"
+        assert response.json()["completed_at"] is not None
+
+    def test_it_tombstones_the_account(self, authenticate, tenant, host):
+        original = tenant.email
+
+        post(authenticate(tenant), ERASURE, host, self.payload())
+        tenant.refresh_from_db()
+
+        assert tenant.email != original
+        assert tenant.erased_at is not None
+
+    def test_the_response_says_what_survives(self, authenticate, tenant, host):
+        """The subject is told what is retained and why, not just that
+        something happened."""
+        body = post(authenticate(tenant), ERASURE, host, self.payload()).json()
+
+        retained = " ".join(body["retained"]).lower()
+        assert "former student" in retained
+        assert "landlord" in retained
+
+    def test_reviews_survive_the_erasure(
+        self, authenticate, tenant, host, tenancy_factory, unit_factory
+    ):
+        """Deleting them would make erasure a suppression tool: a landlord
+        wanting a bad review gone would need one cooperating student and one
+        support ticket."""
+        import datetime as dt
+
+        from reviews.models import Review
+        from reviews.services import create_review
+
+        end = dt.date.today() - dt.timedelta(days=1)
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            tenant=tenant,
+            start_date=end - dt.timedelta(days=90),
+            end_date=end,
+        )
+        review = create_review(tenancy, rating=1, comment="The gate never worked.")
+
+        post(authenticate(tenant), ERASURE, host, self.payload())
+
+        review.refresh_from_db()
+        assert Review.all_objects.filter(pk=review.pk).exists()
+        assert review.comment == "The gate never worked."
+        assert review.is_published is True
+
+    def test_a_landlord_with_a_running_tenancy_is_blocked(
+        self,
+        authenticate,
+        landlord_profile,
+        host,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+    ):
+        """A party to a running contract. Erasing their contact details
+        mid-tenancy leaves those students with nobody to call."""
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant, current=True)
+
+        response = post(authenticate(landlord_profile.user), ERASURE, host, self.payload())
+
+        assert response.status_code == 409
+        assert response.json()["status"] == "blocked"
+        assert response.json()["blockers"]
+
+    def test_an_upcoming_tenancy_blocks_too(
+        self,
+        authenticate,
+        landlord_profile,
+        host,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+    ):
+        """The student has not needed their counterparty yet, which makes it
+        worse rather than better."""
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant, upcoming=True)
+
+        response = post(authenticate(landlord_profile.user), ERASURE, host, self.payload())
+
+        assert response.status_code == 409
+        assert "due to start" in " ".join(response.json()["blockers"])
+
+    def test_a_blocked_erasure_changes_nothing(
+        self,
+        authenticate,
+        landlord_profile,
+        host,
+        property_factory,
+        unit_factory,
+        tenancy_factory,
+        tenant,
+    ):
+        """Flag, never silently partial: the subject believing they are erased
+        while the platform believes it complied is the worst outcome."""
+        prop = property_factory(landlord=landlord_profile)
+        tenancy_factory(unit=unit_factory(property=prop), tenant=tenant, current=True)
+        original = landlord_profile.user.email
+
+        post(authenticate(landlord_profile.user), ERASURE, host, self.payload())
+        landlord_profile.user.refresh_from_db()
+
+        assert landlord_profile.user.email == original
+        assert landlord_profile.user.erased_at is None
+
+    def test_the_subject_can_see_their_requests(self, authenticate, tenant, host):
+        post(authenticate(tenant), ERASURE, host, self.payload())
+
+        # The account is tombstoned, so a fresh token is needed to read back.
+        assert ErasureRequest.objects.filter(user=tenant).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# University administration
+# ---------------------------------------------------------------------------
+
+
+class TestUniversityPolicy:
+    def test_staff_can_read_their_own_policy(self, authenticate, university_staff, host):
+        response = get(authenticate(university_staff), POLICY, host)
+
+        assert response.status_code == 200
+        assert response.json()["signup_policy"] == SignupPolicy.OPEN
+
+    def test_a_student_cannot(self, authenticate, tenant, host):
+        assert get(authenticate(tenant), POLICY, host).status_code == 403
+
+    def test_a_landlord_cannot(self, authenticate, landlord, host):
+        assert get(authenticate(landlord), POLICY, host).status_code == 403
+
+    def test_staff_can_change_the_theme(self, authenticate, university_staff, host):
+        response = patch(
+            authenticate(university_staff), POLICY, host, {"primary_hsl": "210 90% 40%"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["primary_hsl"] == "210 90% 40%"
+
+    def test_the_lockout_guard_refuses_a_premature_requirement(
+        self, authenticate, university_staff, host
+    ):
+        """The specific failure: a school enables verification, sets the
+        policy, and only then discovers it has not issued addresses to its
+        first-years."""
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"signup_policy": SignupPolicy.REQUIRED},
+        )
+
+        assert response.status_code == 400
+
+    def test_it_is_allowed_once_someone_is_verified(
+        self, authenticate, university_staff, host, verified_student_profile
+    ):
+        """The guard checks an OUTCOME -- has anyone actually got through --
+        not configuration, because 'are any methods enabled?' returns yes in
+        exactly the case that locks out an intake."""
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"signup_policy": SignupPolicy.REQUIRED},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["signup_policy"] == SignupPolicy.REQUIRED
+
+    def test_encouraged_is_allowed_with_nobody_verified(self, authenticate, university_staff, host):
+        """Encouraged prompts and lets the student skip, so it cannot lock
+        anyone out."""
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"signup_policy": SignupPolicy.ENCOURAGED},
+        )
+
+        assert response.status_code == 200
+
+    def test_an_unknown_verification_method_is_refused(self, authenticate, university_staff, host):
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"verification_methods_enabled": ["telepathy"]},
+        )
+
+        assert response.status_code == 400
+
+    def test_domains_are_normalised(self, authenticate, university_staff, host):
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"student_email_domains": ["  S.KYU.AC.KE ", ""]},
+        )
+
+        assert response.json()["student_email_domains"] == ["s.kyu.ac.ke"]
+
+    def test_an_address_is_not_a_domain(self, authenticate, university_staff, host):
+        """A stray `@` here would silently accept nobody."""
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"student_email_domains": ["someone@s.kyu.ac.ke"]},
+        )
+
+        assert response.status_code == 400
+
+    def test_staff_cannot_edit_another_universitys_policy(
+        self, authenticate, university_staff, university_factory
+    ):
+        """Scoped from the staff profile, not the host -- otherwise changing
+        one header would reach another school's settings."""
+        other = university_factory()
+
+        response = patch(
+            authenticate(university_staff),
+            POLICY,
+            f"{other.subdomain}.example.co.ke",
+            {"primary_hsl": "0 100% 50%"},
+        )
+        other.refresh_from_db()
+
+        assert response.status_code == 200
+        assert other.primary_hsl != "0 100% 50%"
+
+    def test_enabling_a_method_takes_effect(self, authenticate, university_staff, host, university):
+        patch(
+            authenticate(university_staff),
+            POLICY,
+            host,
+            {"verification_methods_enabled": [VerificationMethod.EMAIL_DOMAIN]},
+        )
+        university.refresh_from_db()
+
+        assert university.verification_methods_enabled == [VerificationMethod.EMAIL_DOMAIN]

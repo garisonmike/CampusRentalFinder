@@ -477,4 +477,5 @@ from .documents import (  # noqa: E402,F401
     VerificationDocument,
     VerificationRequest,
 )
+from .privacy_api import ErasureRequest  # noqa: E402,F401
 from .verification import EmailVerificationToken  # noqa: E402,F401

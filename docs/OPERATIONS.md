@@ -278,6 +278,85 @@ they would have sorted. The filter is what makes them safe, not the ordering.
 | `Property.Meta.ordering` | `published_at` | yes | explicit `nulls_first=True` — drafts lead a landlord's own list, which is intended and now stated rather than inherited from the sort direction |
 | `order_by_campus_distance` | `nearest_campus_km` | no in practice | tenant scoping reaches properties *through* `campus_distances`, so `Min()` is never taken over an empty set |
 
+## Checks that can pass without checking
+
+**This has been the most productive bug class in the project.** Three instances
+so far, none of which failed anything, and each was found by someone asking
+"would this have caught it?" rather than by a test going red.
+
+### The shape
+
+A check that reports success is not the same as a check that ran. The failure
+is always the same one:
+
+> The mechanism is present, the output is green, and **the thing it was
+> supposed to look at was never in scope.**
+
+It is worse than no check at all. No check is an obvious gap. A check that
+cannot fail is a gap wearing a badge that says it is covered, and it stops
+anyone looking again.
+
+### The three we have produced
+
+**1. Coverage flags that measured a subset.** `--cov=` named four packages and
+was never updated as apps were added, so `properties`, `tenancies` and
+`universities` were never measured at all. The number was real; the denominator
+was not. The report said 84% and there was no way to tell it meant "84% of a
+little over half the code". *Fixed by deriving the measured set from
+`LOCAL_APPS + PROJECT_APPS`, so a new app is covered without anyone
+remembering.*
+
+**2. A sweep that reported success while its backlog grew.**
+`route_stale_distances` ordered a nullable `routed_at` ascending. PostgreSQL
+sorts NULLs **last**, so it handed back rows that already had an answer and left
+the never-routed ones permanently at the back. The job logged a healthy
+`enqueued` count every run. *Fixed with `nulls_first=True`, and the audit table
+above records every other ordering in the codebase.*
+
+**3. Compliance tests that would have skipped silently in CI.** The verified
+delete cannot be tested against `InMemoryStorage` — it is a dict whose
+`delete()` always works and whose `exists()` always tells the truth, so those
+tests pass whether or not the verification does anything. They were moved to
+MinIO, and then the MinIO service container failed to start, which showed as
+*skipped*, which shows as a green build. *Fixed by a test that fails when MinIO
+is unreachable and `CI` is set.*
+
+### What to look for
+
+Four questions, in the order they are worth asking:
+
+**Would this fail if the thing it checks were broken?** Break it and watch. This
+is the only one that gives a definite answer, and it is cheap: comment out the
+guard, run the test, put it back. The re-read in
+`delete_verification_document` was confirmed this way — four tests fail without
+it.
+
+**Is the scope derived, or written down?** Any hand-maintained list of things to
+check — apps, packages, models, routes — drifts the moment something is added.
+Derive it from a fact that cannot drift: what is installed, where the code
+lives, what the router exposes.
+
+**Can it skip?** A skipped test and a passing test look identical in a summary
+line. If a skip is legitimate locally but not in CI, assert that distinction
+rather than trusting it.
+
+**Does the fixture contain the case?** A suite whose fixtures are all
+currently-running tenancies cannot see a bug that needs history — which is
+exactly how the `vacant_count` bug survived eleven filters with the same shape.
+`docs/ENGINEERING.md` records why the default factory shape is the awkward case
+rather than the convenient one.
+
+### Where this is already enforced
+
+| Guard | Fails when |
+|---|---|
+| `config/jobs/schedule.py` + architecture test | A scheduled job names a function that does not exist, a queue that is not configured, or is missing from this document |
+| `ScopedThrottle` | A view names a throttle scope with no configured rate — DRF's own class silently applies no throttle |
+| `tools/check_field_shadowing.py` | Run from pre-commit **before** Django imports, because the defect it catches kills the import |
+| `test_the_contract_notes_reach_the_generated_schema` | A frontend-facing contract note stops being emitted into the schema |
+| `test_every_api_view_declares_its_permission_classes` | A view inherits DRF's default without anyone choosing it |
+| `test_minio_is_reachable_in_ci` | A compliance test would skip rather than run |
+
 ## Alerting
 
 **Alert on the age of the oldest unresolved item, never on queue volume.**

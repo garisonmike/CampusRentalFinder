@@ -151,7 +151,7 @@ omit = [
 # Deleting tested code must never let this drop: a floor that falls when code
 # is removed is a ratchet running backwards, and it would let a future deletion
 # of well-tested code quietly buy slack for poorly-tested code.
-fail_under = 88
+fail_under = 89
 show_missing = true
 skip_covered = true
 exclude_lines = [
