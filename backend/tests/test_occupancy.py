@@ -1,5 +1,5 @@
 """
-Vacancy provenance (ADR-002).
+Vacancy provenance and the occupancy cross-check (ADR-002).
 
 `vacant_count` is stated by the landlord and never derived. That is the right
 choice — they know about the room let off-platform last week and we do not —
@@ -11,6 +11,11 @@ and it has one consequence that shapes everything here:
 
 So every write stamps provenance, staleness is banded server-side, and a stale
 count is shown with its age rather than hidden or zeroed.
+
+The cross-check exists to notice contradictions, not to replace the number. Its
+asymmetry is the design: derived-above-stated is impossible and worth flagging;
+derived-below-stated is the normal case for the whole seeding period and
+alerting on it would train everyone to ignore the alert.
 """
 
 from __future__ import annotations
@@ -26,6 +31,9 @@ from django.utils import timezone
 from properties.constants import PropertyStatus, VacancyFreshness
 from properties.models import Unit
 from properties.services import (
+    compare_occupancy,
+    cross_check_coverage,
+    occupancy_contradictions,
     state_vacancy,
     units_with_stale_vacancy,
     vacancy_age_days,
@@ -240,3 +248,126 @@ class TestStalenessPrompts:
         prompt_stale_vacancies()
 
         assert len(mailoutbox) == 0
+
+
+# ---------------------------------------------------------------------------
+# The cross-check
+# ---------------------------------------------------------------------------
+
+
+class TestTheCrossCheck:
+    def test_it_never_writes_to_vacant_count(self, unit_factory, landlord, tenancy_factory, tenant):
+        """Comparison only. It is not an alternative source of truth."""
+        unit = state_vacancy(unit_factory(total_count=40), vacant_count=30, stated_by=landlord)
+        tenancy_factory(unit=unit, tenant=tenant, current=True)
+
+        compare_occupancy()
+        unit.refresh_from_db()
+
+        assert unit.vacant_count == 30
+
+    def test_it_counts_only_current_tenancies(
+        self, unit_factory, tenancy_factory, tenant, student_profile
+    ):
+        """A stay that ended is not occupancy. This is the bug my own phase 7
+        summary described in a function that never existed -- worth having a
+        real test for the real thing."""
+        unit = unit_factory(total_count=40, vacant_count=10)
+        tenancy_factory(unit=unit, tenant=tenant, current=True)
+        tenancy_factory(unit=unit, tenant=student_profile.user)  # past, by default
+
+        row = next(r for r in compare_occupancy() if r.unit_id == unit.pk)
+
+        assert row.derived_occupied == 1
+
+    def test_more_confirmed_than_rooms_is_a_contradiction(
+        self, unit_factory, tenancy_factory, student_profile_factory
+    ):
+        """A physical impossibility: the capacity is wrong, a tenancy that
+        ended was never closed, or somebody is letting more rooms than they
+        have. All three are worth a person looking."""
+        unit = unit_factory(total_count=2, vacant_count=0)
+        for _ in range(3):
+            tenancy_factory(unit=unit, tenant=student_profile_factory().user, current=True)
+
+        contradictions = occupancy_contradictions()
+
+        assert [row.unit_id for row in contradictions] == [unit.pk]
+
+    def test_fewer_confirmed_than_stated_is_never_flagged(
+        self, unit_factory, landlord, tenancy_factory, tenant
+    ):
+        """The normal case for the entire seeding period, and for ever after
+        wherever a landlord lets rooms off-platform. Alerting on it would train
+        everyone to ignore the alert, which costs more than the alert is
+        worth."""
+        unit = state_vacancy(unit_factory(total_count=40), vacant_count=2, stated_by=landlord)
+        tenancy_factory(unit=unit, tenant=tenant, current=True)
+
+        assert occupancy_contradictions() == []
+
+    def test_a_unit_with_no_tenancies_is_never_flagged(self, unit_factory):
+        unit_factory(total_count=40, vacant_count=0)
+
+        assert occupancy_contradictions() == []
+
+    def test_a_pooled_unit_at_exactly_capacity_is_not_a_contradiction(
+        self, unit_factory, tenancy_factory, student_profile_factory
+    ):
+        """Forty bedsitters with forty tenants is a full block, not an error."""
+        unit = unit_factory(total_count=3, vacant_count=0)
+        for _ in range(3):
+            tenancy_factory(unit=unit, tenant=student_profile_factory().user, current=True)
+
+        assert occupancy_contradictions() == []
+
+
+class TestCrossCheckCoverage:
+    """ "No contradictions found" must never be mistaken for "everything checks
+    out". Early on, almost nothing is checkable at all.
+    """
+
+    def test_a_unit_with_no_current_tenancies_is_uninformative(self, unit_factory):
+        unit_factory(total_count=40, vacant_count=10)
+
+        coverage = cross_check_coverage()
+
+        assert coverage["units"] == 1
+        assert coverage["informative"] == 0
+
+    def test_a_unit_with_a_current_tenancy_is_informative(
+        self, unit_factory, tenancy_factory, tenant
+    ):
+        unit = unit_factory(total_count=40, vacant_count=10)
+        tenancy_factory(unit=unit, tenant=tenant, current=True)
+
+        assert cross_check_coverage()["informative"] == 1
+
+    def test_a_past_tenancy_does_not_make_a_unit_informative(
+        self, unit_factory, tenancy_factory, tenant
+    ):
+        """The default fixture is a finished stay, which is the seeding case:
+        history everywhere, current occupancy nowhere."""
+        unit = unit_factory(total_count=40, vacant_count=10)
+        tenancy_factory(unit=unit, tenant=tenant)
+
+        assert cross_check_coverage()["informative"] == 0
+
+    def test_coverage_is_reported_beside_the_finding(
+        self, unit_factory, tenancy_factory, tenant, student_profile_factory
+    ):
+        """So an operator reading "0 contradictions" can see whether that is
+        reassuring or vacuous."""
+        # Scoped to the units this test made. `tenancy_factory` builds an
+        # Application, which builds a Unit of its own -- so a count over the
+        # whole table measures the fixtures as much as the subject.
+        mine = [unit_factory(total_count=40, vacant_count=10) for _ in range(4)]
+        checked = unit_factory(total_count=40, vacant_count=10)
+        mine.append(checked)
+        tenancy_factory(unit=checked, tenant=tenant, current=True)
+
+        coverage = cross_check_coverage(Unit.all_objects.filter(pk__in=[unit.pk for unit in mine]))
+
+        assert coverage["units"] == 5
+        assert coverage["informative"] == 1
+        assert coverage["contradictions"] == 0

@@ -8,6 +8,7 @@ depends on related rows, which a PostgreSQL check constraint cannot see.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
@@ -158,3 +159,115 @@ def units_with_stale_vacancy(now: dt.datetime | None = None):
     return Unit.all_objects.filter(
         is_active=True, property__status=PropertyStatus.PUBLISHED
     ).filter(Q(vacant_count_updated_at__isnull=True) | Q(vacant_count_updated_at__lt=cutoff))
+
+
+# ---------------------------------------------------------------------------
+# Occupancy cross-check (ADR-002)
+# ---------------------------------------------------------------------------
+#
+# A derived count, computed FOR COMPARISON ONLY. It never writes to
+# `vacant_count`, never appears as an availability figure, and is not an
+# alternative source of truth -- it is a way of noticing that the stated number
+# and the tenancy records contradict each other.
+#
+# The asymmetry below is the whole design. Derived ABOVE stated is impossible
+# and therefore a real signal. Derived BELOW stated is the normal case for the
+# entire seeding period, and for ever after wherever a landlord lets rooms
+# off-platform -- alerting on it would train everyone to ignore the alert,
+# which costs more than the alert was ever worth.
+
+
+@dataclass(frozen=True)
+class OccupancyComparison:
+    """What the tenancy records say about one unit, beside what it claims."""
+
+    unit_id: int
+    total_count: int
+    stated_vacant: int
+    #: Confirmed tenancies currently running in this unit.
+    derived_occupied: int
+
+    @property
+    def stated_occupied(self) -> int:
+        return self.total_count - self.stated_vacant
+
+    @property
+    def is_contradiction(self) -> bool:
+        """More people confirmed in residence than the unit has rooms.
+
+        Not "more than are stated occupied" -- that is merely the landlord
+        being behind. This is a physical impossibility, and physical
+        impossibilities are worth someone's attention.
+        """
+        return self.derived_occupied > self.total_count
+
+    @property
+    def is_informative(self) -> bool:
+        """Whether the cross-check can say anything at all about this unit.
+
+        A unit with no confirmed current tenancies tells us nothing: the rooms
+        may be empty, or fully let off-platform, and the derived figure cannot
+        distinguish those. Reported separately so "no contradictions found"
+        is never mistaken for "everything checks out".
+        """
+        return self.derived_occupied > 0
+
+
+def compare_occupancy(units=None, *, today: dt.date | None = None) -> list[OccupancyComparison]:
+    """Derived-versus-stated occupancy, for every unit.
+
+    One grouped query rather than one per unit: this runs over the whole
+    catalogue and a per-unit count would make it quadratic in listings.
+    """
+    from django.db.models import Count
+
+    from tenancies.models import Tenancy
+
+    queryset = units if units is not None else Unit.all_objects.filter(is_active=True)
+    unit_ids = list(queryset.values_list("pk", flat=True))
+
+    occupied = dict(
+        Tenancy.all_objects.filter(unit_id__in=unit_ids)
+        .current(today=today)
+        .values("unit_id")
+        .annotate(total=Count("pk"))
+        .values_list("unit_id", "total")
+    )
+
+    return [
+        OccupancyComparison(
+            unit_id=unit.pk,
+            total_count=unit.total_count,
+            stated_vacant=unit.vacant_count,
+            derived_occupied=occupied.get(unit.pk, 0),
+        )
+        for unit in queryset
+    ]
+
+
+def occupancy_contradictions(units=None, *, today: dt.date | None = None):
+    """Units where confirmed current tenancies exceed stated capacity.
+
+    The only direction worth flagging. It means one of three things and all of
+    them are worth a person looking: the capacity is wrong, a tenancy that
+    ended was never closed, or somebody is letting more rooms than they have.
+    """
+    return [row for row in compare_occupancy(units, today=today) if row.is_contradiction]
+
+
+def cross_check_coverage(units=None, *, today: dt.date | None = None) -> dict[str, int]:
+    """How much of the catalogue the cross-check can speak to at all.
+
+    **Reported rather than assumed.** Early on this is close to zero: almost
+    no unit has a confirmed on-platform tenancy, so "no contradictions found"
+    means "nothing was checked", and reporting the first as though it were a
+    clean bill of health is exactly the shape `docs/OPERATIONS.md` catalogues.
+    """
+    rows = compare_occupancy(units, today=today)
+    informative = [row for row in rows if row.is_informative]
+
+    return {
+        "units": len(rows),
+        "informative": len(informative),
+        "contradictions": len([row for row in informative if row.is_contradiction]),
+    }
