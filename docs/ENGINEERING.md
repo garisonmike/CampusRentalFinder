@@ -480,6 +480,38 @@ under `backend/` is ours — a fact about the repository, not about a settings
 file, so no new slot can route around it. A separate test asserts every app
 declared in any slot is in fact walked.
 
+### Frontend design constraints (ADR-005)
+
+Three tokens are overridden by a university, four derived, two adjusted.
+Everything else is fixed. That has one consequence that shapes every layout:
+
+> **The design may not depend on any particular colour.** It was built while
+> looking at green, and everything looks deliberate in green. The second tenant
+> is a navy so dark it swallows a primary button, or a yellow so light that
+> white text on it is invisible, or a grey with so little chroma that "primary"
+> and "muted" become the same thing.
+
+Hierarchy therefore comes from type scale, weight, spacing and structure —
+things a tenant cannot override. What is machine-checkable is checked:
+
+| Test | Asserts |
+|---|---|
+| `src/theme/contrast.test.ts` | Every derived foreground meets **WCAG AA** against its background, swept across ~30k points of HSL space |
+| `src/theme/hostile-palettes.test.tsx` | The shell renders, keeps its heading structure, and passes axe under four deliberately hostile brands |
+| `scripts/check-bundle-budget.mjs` | Initial JS and CSS stay inside a gzipped budget, run in CI after the build |
+
+**The contrast floor is 4.5826:1**, at roughly `166 16% 42%` — a desaturated
+teal. Picking the better of black and white has a mathematical worst case where
+both are equally bad, and that crossover sits just above AA's 4.5:1. There is
+almost no margin, which is why it is a swept property test rather than a few
+spot checks.
+
+**AAA is not reachable** by this mechanism: about 21% of the colour space
+cannot hit 7:1 with black or white text. Nothing is broken — AA is the
+target — but a future ticket asking for AAA needs to know it is *unreachable*
+rather than merely unimplemented, because reaching it would mean overriding the
+tenant's own colour, which is the one thing ADR-005 does not allow.
+
 ### The one rule that is not a pytest test
 
 `backend/tools/check_field_shadowing.py` catches `property = ForeignKey(...)`

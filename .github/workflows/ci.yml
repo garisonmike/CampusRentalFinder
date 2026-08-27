@@ -186,3 +186,13 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # After the build, because it measures what was actually produced. A
+      # budget written in a README and never measured is the same shape as the
+      # four bugs in docs/OPERATIONS.md: a check that cannot fail.
+      #
+      # The user is a student on a mid-range Android on mobile data. Every
+      # kilobyte here is time they wait, and on a slow CPU it is parse time as
+      # well as download time -- the part a fast laptop never shows you.
+      - name: Performance budget
+        run: npm run check:budget
