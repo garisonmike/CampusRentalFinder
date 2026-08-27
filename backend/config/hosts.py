@@ -95,6 +95,31 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "reviews:review-create": HostClass.TENANT_SCOPED,
     "reviews:review-edit": HostClass.TENANT_SCOPED,
     "reviews:review-response": HostClass.TENANT_SCOPED,
+    # -- Tenant-scoped: the on-platform path --------------------------------
+    "tenancies:application-list": HostClass.TENANT_SCOPED,
+    "tenancies:application-accept": HostClass.TENANT_SCOPED,
+    "tenancies:application-reject": HostClass.TENANT_SCOPED,
+    "tenancies:application-withdraw": HostClass.TENANT_SCOPED,
+    "tenancies:tenancy-list": HostClass.TENANT_SCOPED,
+    "tenancies:claim-list": HostClass.TENANT_SCOPED,
+    "tenancies:claim-confirm": HostClass.TENANT_SCOPED,
+    "tenancies:claim-dispute": HostClass.TENANT_SCOPED,
+    "tenancies:claim-accept-correction": HostClass.TENANT_SCOPED,
+    "tenancies:claim-counter": HostClass.TENANT_SCOPED,
+    "tenancies:claim-accept-counter": HostClass.TENANT_SCOPED,
+    "tenancies:claim-reject-counter": HostClass.TENANT_SCOPED,
+    # The dispute queue is worked by PLATFORM staff across every university,
+    # so it is internal rather than tenant-scoped: an escalation missed because
+    # it belonged to a school nobody was looking at is the indefinite block
+    # ADR-004's timeout exists to remove.
+    "tenancies:dispute-queue": HostClass.API_INTERNAL,
+    "tenancies:dispute-resolve": HostClass.API_INTERNAL,
+    # -- Tenant-scoped: engagement ------------------------------------------
+    "engagement:saved-list": HostClass.TENANT_SCOPED,
+    "engagement:saved-delete": HostClass.TENANT_SCOPED,
+    "engagement:inquiry-list": HostClass.TENANT_SCOPED,
+    "engagement:inquiry-respond": HostClass.TENANT_SCOPED,
+    "engagement:inquiry-close": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The

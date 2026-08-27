@@ -24,6 +24,7 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsPropertyOwner
 from config.api.throttling import Scope
+from config.api.views import SchemaSafeQuerysetMixin
 from config.middleware import get_current_university
 from properties.constants import PropertyStatus
 from properties.models import Property, Unit
@@ -165,14 +166,18 @@ class UnitRatingView(APIView):
         ),
     )
 )
-class PropertyReviewListView(ListAPIView):
+class PropertyReviewListView(SchemaSafeQuerysetMixin, ListAPIView):
     """Published reviews of one property, newest first."""
 
     serializer_class = ReviewSerializer
     permission_classes = [AllowAny]
     throttle_scope = Scope.PUBLIC_READ
+    schema_queryset = Review.all_objects
 
     def get_queryset(self):
+        if self.is_schema_generation():
+            return self.empty_queryset()
+
         prop = _visible_property(self.kwargs["slug"])
         return (
             Review.objects.for_tenant(_tenant())

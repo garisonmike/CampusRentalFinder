@@ -46,6 +46,7 @@ from .constants import (
     ConfirmationSource,
     DisputeReason,
     EscalationReason,
+    TenancyCurrency,
     TenancyStatus,
 )
 
@@ -432,6 +433,29 @@ class Tenancy(TenantScopedModel):
         if self.status not in LIVE_TENANCY_STATUSES:
             return False
         return self.start_date <= today and (self.end_date is None or self.end_date >= today)
+
+    def currency(self, *, today: dt.date | None = None) -> str:
+        """Whether this stay is ``current``, ``past`` or ``upcoming``.
+
+        The single-row form of the queryset methods above, and it must stay
+        consistent with them -- `tests/test_tenancy_currency.py` asserts the two
+        agree for every case, because two implementations of one derivation is
+        two chances to disagree and the disagreement would be invisible.
+
+        Never stored. A tenancy that is current today is past tomorrow with no
+        write in between, which is exactly why there is no field here.
+        """
+        today = today or dt.date.today()
+
+        if self.status not in LIVE_TENANCY_STATUSES:
+            # A rejected or withdrawn record is not a stay that happened at
+            # another time; it is a stay that did not happen.
+            return TenancyCurrency.NOT_A_STAY
+        if self.start_date > today:
+            return TenancyCurrency.UPCOMING
+        if self.end_date is not None and self.end_date < today:
+            return TenancyCurrency.PAST
+        return TenancyCurrency.CURRENT
 
     def is_witnessed(self) -> bool:
         """Whether the platform saw the agreement rather than being told of it."""

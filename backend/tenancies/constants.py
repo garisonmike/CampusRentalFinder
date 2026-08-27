@@ -188,3 +188,21 @@ DISPUTE_TRANSITIONS: dict[str, DisputeTransition] = {
         auto_resolves=True,
     ),
 }
+
+
+class TenancyCurrency(models.TextChoices):
+    """Whether a stay is running, over, or not yet started.
+
+    **Derived, never stored.** Named here so the API, the serializer and the
+    filter all spell it the same way -- but there is no model field with these
+    values and there must not be one. A stored currency needs a job to keep it
+    true, and when the job stops the data lies silently rather than erroring
+    (ADR-004).
+    """
+
+    CURRENT = "current", _("Currently running")
+    PAST = "past", _("Over")
+    UPCOMING = "upcoming", _("Agreed, not yet started")
+    #: A rejected or withdrawn record. Not a stay at another time -- a stay
+    #: that did not happen.
+    NOT_A_STAY = "not_a_stay", _("Not a stay")

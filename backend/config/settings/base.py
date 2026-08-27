@@ -181,11 +181,12 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "config.api.pagination.StandardPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    "DEFAULT_FILTER_BACKENDS": [
-        "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.SearchFilter",
-        "rest_framework.filters.OrderingFilter",
-    ],
+    # No default filter backends. A backend applied globally is introspected
+    # on EVERY view during schema generation -- including the tenant-scoped
+    # list endpoints, whose querysets refuse to resolve without a request --
+    # and it silently offers `?search=` and `?ordering=` on endpoints nobody
+    # designed them for. The one view with a FilterSet names its backend.
+    "DEFAULT_FILTER_BACKENDS": [],
     # One error shape for the whole API. The frontend branches on it, so it
     # must not vary by endpoint (config/api/errors.py).
     "EXCEPTION_HANDLER": "config.api.errors.api_exception_handler",
@@ -231,6 +232,15 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/api/v1/",
+    # Schema generation reaches for a model's manager to build filter
+    # parameters. The default is `objects`, which on every tenant-scoped model
+    # RAISES rather than returning rows (ADR-001) -- so generating the schema
+    # failed for the whole API because one endpoint has a FilterSet.
+    #
+    # `all_objects` is the project's unscoped manager, which exists for exactly
+    # this kind of internal use. Introspection is not a request and has no
+    # tenant, so there is nothing to scope to.
+    "DEFAULT_QUERY_MANAGER": "all_objects",
 }
 
 # --------------------------------------------------------------------------

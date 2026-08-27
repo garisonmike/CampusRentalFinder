@@ -811,13 +811,23 @@ def test_every_api_view_declares_its_permission_classes() -> None:
     where someone can judge whether it is correct.
     """
     from rest_framework.settings import api_settings
+    from rest_framework.views import APIView
 
     default = tuple(api_settings.DEFAULT_PERMISSION_CLASSES)
     undeclared = []
 
     for name, view_class in _api_view_classes():
-        declared = view_class.__dict__.get("permission_classes")
-        if declared is None and tuple(getattr(view_class, "permission_classes", ())) == default:
+        # Declared anywhere in the project's own MRO counts. A shared base
+        # like `ClaimActionView` choosing the policy for its six subclasses is
+        # one decision made once, which is what this test asks for -- what it
+        # exists to catch is a view inheriting DRF's default without anyone
+        # having considered it.
+        chosen = any(
+            "permission_classes" in klass.__dict__
+            for klass in view_class.__mro__
+            if klass not in (APIView, object)
+        )
+        if not chosen and tuple(getattr(view_class, "permission_classes", ())) == default:
             undeclared.append(f"{view_class.__name__} ({name})")
 
     assert not undeclared, (

@@ -163,26 +163,49 @@ CONTRACT_NOTES: dict[str, str] = {
     "walking_minutes": WALKING_MINUTES,
 }
 
-#: Serializers where a listed field name means something else entirely.
+#: Schema components where a listed field name means something else entirely.
 #:
-#: `status` is the obvious collision -- an Application, an Inquiry and a
-#: VerificationRequest all have one, and none of them is a tenancy. Listed
-#: explicitly so the exemption is a decision rather than a silently missing
-#: note.
+#: Keyed by **OpenAPI component name**, not serializer class name -- which are
+#: not the same thing: drf-spectacular strips the `Serializer` suffix and
+#: appends `Request` for write components, so `ApplicationDecisionSerializer`
+#: appears as `ApplicationDecisionRequest`.
+#:
+#: `status` is the obvious collision: an Application, an Inquiry and a
+#: VerificationRequest all have one and none of them is a tenancy. `end_date`
+#: collides on every model with a date range. Listed explicitly so each
+#: exemption is a decision somebody made rather than a note that quietly went
+#: missing.
 NOTE_EXEMPT: dict[str, frozenset[str]] = {
     "status": frozenset(
         {
-            "ApplicationSerializer",
-            "InquirySerializer",
-            "TenancyClaimSerializer",
-            "VerificationRequestSerializer",
-            "PropertySerializer",
-            "PropertyDetailSerializer",
-            "PropertySummarySerializer",
-            "UnitPhotoSerializer",
-            "ErasureRequestSerializer",
+            "Application",
+            "ApplicationRequest",
+            "Inquiry",
+            "InquiryRequest",
+            "TenancyClaim",
+            "VerificationRequest",
+            "VerificationRequestRequest",
+            "Property",
+            "PropertyDetail",
+            "PropertySummary",
+            "UnitPhoto",
+            "ErasureRequest",
         }
     ),
-    "end_date": frozenset({"TenancyClaimSerializer"}),
-    "decision_reason": frozenset({"ApplicationSerializer", "TenancyClaimSerializer"}),
+    "end_date": frozenset(
+        {
+            # A claim ASSERTS dates; it is not a tenancy and has no currency.
+            "TenancyClaim",
+            "ClaimCreate",
+            "ClaimCreateRequest",
+            # The correction exchange proposes dates, likewise.
+            "Correction",
+            "CorrectionRequest",
+            # Accepting an application SETS the dates rather than reporting
+            # them; the note about what null means lives on its own help_text.
+            "ApplicationDecision",
+            "ApplicationDecisionRequest",
+        }
+    ),
+    "decision_reason": frozenset({"Application", "ApplicationRequest", "TenancyClaim"}),
 }

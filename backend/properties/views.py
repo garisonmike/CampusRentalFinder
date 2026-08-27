@@ -22,6 +22,7 @@ from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 
 from config.api.throttling import Scope
+from config.api.views import SchemaSafeQuerysetMixin
 from config.middleware import get_current_university
 
 from .constants import PropertyStatus
@@ -88,13 +89,14 @@ class PublishedPropertyMixin:
         ],
     )
 )
-class PropertyListView(PublishedPropertyMixin, ListAPIView):
+class PropertyListView(SchemaSafeQuerysetMixin, PublishedPropertyMixin, ListAPIView):
     """Listing search."""
 
     serializer_class = PropertySummarySerializer
     permission_classes = [AllowAny]
     filterset_class = PropertyFilter
     throttle_scope = Scope.PUBLIC_READ
+    schema_queryset = Property.all_objects
     # The FilterSet owns filtering. SearchFilter and OrderingFilter are dropped
     # here deliberately: leaving them on would give the API a second,
     # differently-spelled way to do the same thing, and `?search=` and `?q=`
@@ -102,6 +104,9 @@ class PropertyListView(PublishedPropertyMixin, ListAPIView):
     filter_backends = [DjangoFilterBackend]
 
     def get_queryset(self):
+        if self.is_schema_generation():
+            return self.empty_queryset()
+
         queryset = (
             self.base_queryset()
             .select_related("landlord__user")

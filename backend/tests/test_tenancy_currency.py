@@ -21,6 +21,7 @@ from django.db import IntegrityError, transaction
 from tenancies.constants import (
     LIVE_TENANCY_STATUSES,
     VOID_TENANCY_STATUSES,
+    TenancyCurrency,
     TenancyStatus,
 )
 from tenancies.models import Tenancy
@@ -405,3 +406,91 @@ class TestTheFixtureDefaultShape:
         assert past.pk in buckets["past"]
         assert current.pk in buckets["current"]
         assert upcoming.pk in buckets["upcoming"]
+
+
+class TestTheRowAndTheQuerysetAgree:
+    """Two implementations of one derivation is two chances to disagree.
+
+    `Tenancy.currency()` answers for a single row; `.current()`, `.past()` and
+    `.upcoming()` answer for a set. Both exist because both are needed -- a
+    serializer has an instance, a list endpoint has a queryset -- and a
+    disagreement between them would be invisible: the list would show a stay
+    the detail page called past, or the other way round, and neither would
+    error.
+    """
+
+    def cases(self, tenancy_factory):
+        return {
+            "past": tenancy_factory(),
+            "current_open_ended": tenancy_factory(current=True),
+            "current_fixed_term": tenancy_factory(current_fixed_term=True),
+            "upcoming": tenancy_factory(upcoming=True),
+        }
+
+    def test_every_row_lands_in_the_bucket_it_reports(self, tenancy_factory):
+        rows = self.cases(tenancy_factory)
+
+        buckets = {
+            TenancyCurrency.CURRENT: set(
+                Tenancy.all_objects.current().values_list("pk", flat=True)
+            ),
+            TenancyCurrency.PAST: set(Tenancy.all_objects.past().values_list("pk", flat=True)),
+            TenancyCurrency.UPCOMING: set(
+                Tenancy.all_objects.upcoming().values_list("pk", flat=True)
+            ),
+        }
+
+        for name, tenancy in rows.items():
+            reported = tenancy.currency()
+            assert tenancy.pk in buckets[reported], (
+                f"{name}: currency() says {reported!r} but the {reported} "
+                f"queryset does not contain it"
+            )
+
+    def test_a_row_appears_in_no_other_bucket(self, tenancy_factory):
+        rows = self.cases(tenancy_factory)
+
+        for name, tenancy in rows.items():
+            reported = tenancy.currency()
+            for bucket in (
+                TenancyCurrency.CURRENT,
+                TenancyCurrency.PAST,
+                TenancyCurrency.UPCOMING,
+            ):
+                if bucket == reported:
+                    continue
+                queryset = getattr(Tenancy.all_objects, bucket)()
+                assert tenancy.pk not in queryset.values_list("pk", flat=True), (
+                    f"{name} reports {reported!r} but also appears in {bucket}"
+                )
+
+    def test_a_dead_record_is_in_no_bucket_at_all(self, tenancy_factory):
+        """A rejected or withdrawn record is not a stay that happened at
+        another time. It is a stay that did not happen."""
+        dead = tenancy_factory(status=TenancyStatus.WITHDRAWN)
+
+        assert dead.currency() == TenancyCurrency.NOT_A_STAY
+        for bucket in ("current", "past", "upcoming"):
+            assert dead.pk not in getattr(Tenancy.all_objects, bucket)().values_list(
+                "pk", flat=True
+            )
+
+    def test_they_agree_on_a_boundary_day(self, tenancy_factory):
+        """A stay whose end date is today is still current, not past. Off by
+        one here silently ends every tenancy a day early."""
+        today = dt.date.today()
+        ending_today = tenancy_factory(start_date=today - dt.timedelta(days=60), end_date=today)
+
+        assert ending_today.currency(today=today) == TenancyCurrency.CURRENT
+        assert ending_today.pk in Tenancy.all_objects.current(today=today).values_list(
+            "pk", flat=True
+        )
+
+    def test_they_agree_on_the_first_day(self, tenancy_factory):
+        today = dt.date.today()
+        starting_today = tenancy_factory(start_date=today, end_date=None)
+
+        assert starting_today.currency(today=today) == TenancyCurrency.CURRENT
+        assert starting_today.pk in Tenancy.all_objects.current(today=today).values_list(
+            "pk", flat=True
+        )
