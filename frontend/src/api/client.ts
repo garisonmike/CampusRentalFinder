@@ -159,9 +159,24 @@ export async function getPage<T>(
   return get<Paginated<T>>(url, { params });
 }
 
-/** An empty page, for rendering before the first fetch resolves. */
+/**
+ * An empty page, for rendering before the first fetch resolves.
+ *
+ * Every field the envelope carries, because a skeleton that omits
+ * `total_pages` makes a pager render "of undefined" for one frame. Typed
+ * against the generated envelope, so a backend change to the shape fails to
+ * compile here rather than showing up as a blank pager.
+ */
 export function emptyPage<T>(): Paginated<T> {
-  return { count: 0, next: null, previous: null, results: [] };
+  return {
+    count: 0,
+    page: 1,
+    page_size: 20,
+    total_pages: 0,
+    next: null,
+    previous: null,
+    results: [],
+  };
 }
 
 export default api;

@@ -26,24 +26,31 @@ export type PostBody<P extends keyof Paths> = Paths[P] extends {
   : never;
 
 /**
- * DRF's PageNumberPagination envelope.
+ * The pagination envelope (`config/api/pagination.py`).
  *
  * The previous client typed every list endpoint as a bare array and called
- * .map() on it, which is why no list view ever rendered. Every paginated
- * response goes through this type.
+ * `.map()` on it, which is why no list view ever rendered.
+ *
+ * Then this type was written by hand and **drifted**: it described
+ * `{count, next, previous, results}` while the API had added `page`,
+ * `page_size` and `total_pages`. Nothing caught it, because a hand-written
+ * type cannot disagree with itself -- exactly the "declared in two places"
+ * shape `docs/OPERATIONS.md` warns about, with the schema as the copy that is
+ * actually true.
+ *
+ * So the envelope is now derived from a real generated response and the
+ * element type is substituted in. If the backend changes the envelope, this
+ * stops compiling.
  */
-export interface Paginated<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
-}
+type GeneratedEnvelope = GetResponse<"/api/v1/properties/">;
+
+export type Paginated<T> = Omit<GeneratedEnvelope, "results"> & { results: T[] };
 
 export interface PageParams {
   page?: number;
   page_size?: number;
-  ordering?: string;
-  search?: string;
+  /** Only the property list accepts this, and only these values. */
+  ordering?: "distance" | "rent" | "-published_at";
 }
 
 export interface AuthTokens {

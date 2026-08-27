@@ -40,11 +40,17 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
+          // `response.data.detail` and `data.detail` only. Scoped to the
+          // object, not the property name: `queryKeys.properties.detail` is a
+          // key builder and has nothing to do with DRF's field, and a rule
+          // that cries wolf on it gets switched off.
           selector:
-            "MemberExpression[property.name=/^(detail|non_field_errors)$/]",
+            "MemberExpression[property.name='detail']:matches(" +
+            "[object.property.name='data'], [object.name='data'])",
           message:
             "Do not read DRF's default error shape. This API returns { error: " +
-            "{ code, message, field_errors, request_id } } from every endpoint. " +
+            "{ code, message, field_errors, request_id } } from every endpoint, " +
+            "so `.detail` is always undefined and renders an empty error box. " +
             "Use toApiError() from src/lib/api-error.ts.",
         },
         {
