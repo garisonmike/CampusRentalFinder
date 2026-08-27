@@ -245,3 +245,92 @@ def review_is_verified(review: Review) -> bool:
 
     profile = getattr(review.tenancy.tenant, "student_profile", None)
     return profile is not None and profile.verification_status == VerificationStatus.VERIFIED
+
+
+def dispute_annotations_for(reviews) -> dict[int, str | None]:
+    """Annotations for a whole page of reviews, in a fixed number of queries.
+
+    ADR-004 §2.1. The per-review function walks
+    ``review -> tenancy -> claim`` and, when the disputer-record hook is on,
+    counts that landlord's resolved disputes -- so rendering a page of fifty
+    costs fifty walks plus fifty counts. The annotation is derived rather than
+    stored precisely so the policy can change without a migration, and that
+    only stays affordable if deriving it is batched.
+
+    **Cost does not grow with the number of reviews.** Two queries when the
+    hook is off, three when it is on, whether the page holds one review or a
+    hundred. `tests/test_api_reviews.py` asserts exactly that, with the hook
+    both enabled and disabled.
+    """
+    from tenancies.models import TenancyClaim
+
+    reviews = list(reviews)
+    if not reviews:
+        return {}
+
+    # One query: every claim behind this page, with only the fields the
+    # decision reads.
+    claims = {
+        row["tenancies__review__pk"]: row
+        for row in TenancyClaim.all_objects.filter(
+            tenancies__review__pk__in=[review.pk for review in reviews]
+        ).values(
+            "tenancies__review__pk",
+            "disputed_at",
+            "dispute_withdrawn_at",
+            "disputed_by_id",
+        )
+    }
+
+    noisy: set[int] = set()
+    if settings.REVIEW_ANNOTATION_RESPECTS_DISPUTE_RECORD:
+        noisy = _noisy_disputers(
+            {row["disputed_by_id"] for row in claims.values() if row["disputed_by_id"] is not None}
+        )
+
+    annotations: dict[int, str | None] = {}
+    for review in reviews:
+        row = claims.get(review.pk)
+        if (
+            row is None
+            or row["disputed_at"] is None
+            or row["dispute_withdrawn_at"] is not None
+            or row["disputed_by_id"] in noisy
+        ):
+            annotations[review.pk] = None
+        else:
+            annotations[review.pk] = DisputeAnnotation.DISPUTED
+
+    return annotations
+
+
+def _noisy_disputers(disputer_ids: set[int]) -> set[int]:
+    """Which of these disputers' records make their disputes uninformative.
+
+    One grouped query for the whole set rather than two per landlord. Same two
+    guards as the single-claim version: a minimum sample AND a low upheld rate,
+    because a rate over three disputes says nothing.
+    """
+    from django.db.models import Count, Q
+
+    from tenancies.constants import ClaimStatus
+    from tenancies.models import TenancyClaim
+
+    if not disputer_ids:
+        return set()
+
+    rows = (
+        TenancyClaim.all_objects.filter(disputed_by_id__in=disputer_ids, resolved_at__isnull=False)
+        .values("disputed_by_id")
+        .annotate(
+            total=Count("pk"),
+            upheld=Count("pk", filter=Q(status=ClaimStatus.WITHDRAWN)),
+        )
+    )
+
+    return {
+        row["disputed_by_id"]
+        for row in rows
+        if row["total"] >= settings.REVIEW_ANNOTATION_MINIMUM_DISPUTE_SAMPLE
+        and (row["upheld"] / row["total"]) < settings.REVIEW_ANNOTATION_MINIMUM_UPHELD_RATE
+    }

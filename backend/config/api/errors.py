@@ -34,6 +34,7 @@ from typing import Any
 import structlog
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.http import Http404
 from rest_framework import exceptions as drf
 from rest_framework.response import Response
@@ -259,6 +260,27 @@ def api_exception_handler(exc: Exception, context: dict) -> Response | None:
                 message=str(exc) or "You do not have permission to perform this action.",
             ),
             status=403,
+        )
+
+    if isinstance(exc, IntegrityError):
+        # A database constraint refused the write. That is a 409, not a 500:
+        # the request was well-formed and the state disallows it, which is the
+        # caller's business rather than an incident.
+        #
+        # Mapped centrally because the constraints ARE the design here -- one
+        # review per stay, one response per review, one open claim per unit --
+        # so every endpoint that writes can hit one, and a 500 would page
+        # somebody for a user pressing a button twice.
+        logger.info("api_integrity_conflict", view=view_name, error=str(exc))
+        return Response(
+            error_body(
+                code=ErrorCode.CONFLICT,
+                message=(
+                    "That conflicts with something that already exists. It may "
+                    "already have been done."
+                ),
+            ),
+            status=409,
         )
 
     if isinstance(exc, Http404):

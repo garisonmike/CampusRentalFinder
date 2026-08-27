@@ -85,6 +85,16 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "properties:property-list": HostClass.TENANT_SCOPED,
     "properties:property-detail": HostClass.TENANT_SCOPED,
     "properties:unit-detail": HostClass.TENANT_SCOPED,
+    # -- Tenant-scoped: reviews and ratings --------------------------------
+    # Reading is public; writing is not. Both are tenant-scoped for the same
+    # reason listings are -- a review is about a property, and which properties
+    # exist depends on the university (ADR-002).
+    "reviews:property-reviews": HostClass.TENANT_SCOPED,
+    "reviews:property-rating": HostClass.TENANT_SCOPED,
+    "reviews:unit-rating": HostClass.TENANT_SCOPED,
+    "reviews:review-create": HostClass.TENANT_SCOPED,
+    "reviews:review-edit": HostClass.TENANT_SCOPED,
+    "reviews:review-response": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: the tenant's own configuration ---------------------
     # Unauthenticated and read-only, but NOT public canonical: the response is
     # the tenant's branding, so it is by definition not tenant-neutral. The

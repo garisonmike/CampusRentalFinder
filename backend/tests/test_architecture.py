@@ -866,3 +866,59 @@ def test_every_api_view_declares_a_throttle_scope() -> None:
         + "\n".join(f"  {entry}" for entry in sorted(set(unscoped)))
         + "\n\nPick one from config.api.throttling.Scope."
     )
+
+
+def test_the_contract_notes_reach_the_generated_schema() -> None:
+    """Every field in `CONTRACT_NOTES` still carries its note in the schema.
+
+    These six notes are the things a frontend gets wrong by default, and they
+    are kept as schema descriptions rather than as a markdown page for one
+    reason: `openapi-typescript` carries a description into the generated
+    `.d.ts` as a doc comment, so it appears in autocomplete at the moment
+    somebody reaches for the field. That is the only moment it can prevent the
+    mistake.
+
+    A note that silently stops being emitted -- a serializer refactored, a field
+    redeclared without its `help_text` -- fails here rather than being
+    discovered by the frontend getting it wrong.
+    """
+    from drf_spectacular.generators import SchemaGenerator
+
+    from config.api.contract import CONTRACT_NOTES, NOTE_EXEMPT
+
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+    components = schema.get("components", {}).get("schemas", {})
+
+    missing: list[str] = []
+    found: set[str] = set()
+
+    for component_name, definition in components.items():
+        for field_name, spec in definition.get("properties", {}).items():
+            if field_name not in CONTRACT_NOTES:
+                continue
+            if component_name in NOTE_EXEMPT.get(field_name, frozenset()):
+                continue
+
+            description = (spec.get("description") or "").strip()
+            # Compared on a distinctive fragment rather than the whole string:
+            # drf-spectacular reflows and appends enum documentation, so an
+            # equality check would fail on formatting rather than on meaning.
+            marker = CONTRACT_NOTES[field_name].split(".")[0][:40]
+
+            if marker not in description:
+                missing.append(f"{component_name}.{field_name}")
+            else:
+                found.add(field_name)
+
+    assert not missing, (
+        "These fields lost their contract note in the generated schema:\n"
+        + "\n".join(f"  {entry}" for entry in sorted(missing))
+        + "\n\nThe note is what the frontend sees in autocomplete. Restore the "
+        "help_text from config/api/contract.py, or add the serializer to "
+        "NOTE_EXEMPT there with a reason."
+    )
+
+    assert found, (
+        "No contract note was found anywhere in the schema. Either the "
+        "serializers stopped carrying them or this test stopped looking."
+    )

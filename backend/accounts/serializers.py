@@ -13,6 +13,7 @@ from rest_framework import serializers
 
 from accounts.capabilities import Capabilities, capabilities_for
 from accounts.gating import grace_period_end_for, initial_verification_status
+from config.api.contract import CAPABILITIES
 
 from .models import LandlordProfile, StudentProfile, UniversityStaffProfile, User
 
@@ -40,7 +41,7 @@ class UserSerializer(serializers.ModelSerializer):
     """A user's own identity, with their capability set."""
 
     full_name = serializers.CharField(source="get_full_name", read_only=True)
-    capabilities = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField(help_text=CAPABILITIES)
 
     class Meta:
         model = User
@@ -293,7 +294,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
     """
 
     full_name = serializers.CharField(source="get_full_name", read_only=True)
-    capabilities = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField(help_text=CAPABILITIES)
 
     class Meta:
         model = User

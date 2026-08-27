@@ -182,3 +182,31 @@ class IsPropertyManager(BasePermission):
             return obj.landlord_id
         owner = getattr(obj, "property", None)
         return getattr(owner, "landlord_id", None)
+
+
+class IsPropertyOwner(IsPropertyManager):
+    """The owning landlord **only**. A caretaker is not enough.
+
+    Distinct from `IsPropertyManager`, which admits an assigned caretaker.
+    ADR-003 draws the line at speaking publicly for the business: a caretaker
+    can confirm that somebody lived somewhere -- a fact they are well placed to
+    know -- but a public reply to a review is the owner's own act, and a
+    caretaker posting one under the landlord's name is the landlord being
+    misrepresented by someone they hired for a narrower job.
+
+    Platform staff are still admitted, as everywhere: they act on the
+    platform's behalf rather than the landlord's, and their actions are
+    attributable.
+    """
+
+    message = "Only the property's owner may do this."
+
+    def has_object_permission(self, request, view, obj) -> bool:
+        if request.method in SAFE_METHODS:
+            return True
+
+        if capabilities.is_platform_staff(request.user):
+            return True
+
+        landlord_profile = getattr(request.user, "landlord_profile", None)
+        return landlord_profile is not None and self._owner_id(obj) == landlord_profile.pk
