@@ -338,6 +338,39 @@ paths:
       responses:
         '200':
           description: No response body
+  /api/v1/auth/privacy/erasure/{id}/cancel/:
+    post:
+      operationId: auth_privacy_erasure_cancel_create
+      description: |-
+        Only during the cooling-off window, and **only by the subject**. Nobody else may cancel it -- not support, not an administrator. The window exists to protect the account owner from a coerced or compromised request, and a third party who could cancel could also be leaned on.
+
+        The account is **not suspended** while it cools off, for the same reason: a suspended account cannot cancel its own request.
+      summary: Cancel your erasure request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentityConfirmationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IdentityConfirmationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IdentityConfirmationRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          description: No response body
   /api/v1/auth/privacy/export/:
     post:
       operationId: auth_privacy_export_create
@@ -2329,11 +2362,13 @@ components:
       - dates_incorrect
       - never_tenanted
       - duplicate
+      - termination_date
       type: string
       description: |-
         * `dates_incorrect` - The stay happened; the dates are wrong
         * `never_tenanted` - This person never lived here
         * `duplicate` - Already covered by an existing tenancy
+        * `termination_date` - The stay ended; the proposed move-out date is wrong
     DisputeRequest:
       type: object
       description: Disputing a claim, with a typed reason.
@@ -2411,12 +2446,14 @@ components:
       - counter_unresolved
       - correction_defeats_review
       - identity_disputed
+      - termination_defeats_review
       - duplicate_unmatched
       type: string
       description: |-
         * `counter_unresolved` - Which set of dates is right
         * `correction_defeats_review` - Whether a review-defeating correction is honest
         * `identity_disputed` - Whether this person lived here at all
+        * `termination_defeats_review` - Whether an early termination that removes a review right is honest
         * `duplicate_unmatched` - Whether an existing tenancy covers this
     FurnishedEnum:
       enum:
@@ -3702,6 +3739,7 @@ components:
             * `dates_incorrect` - The stay happened; the dates are wrong
             * `never_tenanted` - This person never lived here
             * `duplicate` - Already covered by an existing tenancy
+            * `termination_date` - The stay ended; the proposed move-out date is wrong
         dispute_note:
           type: string
           readOnly: true
@@ -3736,6 +3774,7 @@ components:
             * `counter_unresolved` - Which set of dates is right
             * `correction_defeats_review` - Whether a review-defeating correction is honest
             * `identity_disputed` - Whether this person lived here at all
+            * `termination_defeats_review` - Whether an early termination that removes a review right is honest
             * `duplicate_unmatched` - Whether an existing tenancy covers this
         escalation_deadline:
           type: string

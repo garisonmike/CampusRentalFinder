@@ -209,6 +209,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/privacy/erasure/{id}/cancel/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel your erasure request
+         * @description Only during the cooling-off window, and **only by the subject**. Nobody else may cancel it -- not support, not an administrator. The window exists to protect the account owner from a coerced or compromised request, and a third party who could cancel could also be leaned on.
+         *
+         *     The account is **not suspended** while it cools off, for the same reason: a suspended account cannot cancel its own request.
+         */
+        post: operations["auth_privacy_erasure_cancel_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/privacy/export/": {
         parameters: {
             query?: never;
@@ -1448,9 +1470,10 @@ export interface components {
          * @description * `dates_incorrect` - The stay happened; the dates are wrong
          *     * `never_tenanted` - This person never lived here
          *     * `duplicate` - Already covered by an existing tenancy
+         *     * `termination_date` - The stay ended; the proposed move-out date is wrong
          * @enum {string}
          */
-        DisputeReasonEnum: "dates_incorrect" | "never_tenanted" | "duplicate";
+        DisputeReasonEnum: "dates_incorrect" | "never_tenanted" | "duplicate" | "termination_date";
         /** @description Disputing a claim, with a typed reason. */
         DisputeRequest: {
             /**
@@ -1496,10 +1519,11 @@ export interface components {
          * @description * `counter_unresolved` - Which set of dates is right
          *     * `correction_defeats_review` - Whether a review-defeating correction is honest
          *     * `identity_disputed` - Whether this person lived here at all
+         *     * `termination_defeats_review` - Whether an early termination that removes a review right is honest
          *     * `duplicate_unmatched` - Whether an existing tenancy covers this
          * @enum {string}
          */
-        EscalationReasonEnum: "counter_unresolved" | "correction_defeats_review" | "identity_disputed" | "duplicate_unmatched";
+        EscalationReasonEnum: "counter_unresolved" | "correction_defeats_review" | "identity_disputed" | "termination_defeats_review" | "duplicate_unmatched";
         /**
          * @description * `unfurnished` - Unfurnished
          *     * `semi_furnished` - Semi Furnished
@@ -2086,6 +2110,7 @@ export interface components {
              *     * `dates_incorrect` - The stay happened; the dates are wrong
              *     * `never_tenanted` - This person never lived here
              *     * `duplicate` - Already covered by an existing tenancy
+             *     * `termination_date` - The stay ended; the proposed move-out date is wrong
              */
             readonly dispute_reason: components["schemas"]["DisputeReasonEnum"];
             /** @description Additional context. Never a substitute for the enumerated reason. */
@@ -2104,6 +2129,7 @@ export interface components {
              *     * `counter_unresolved` - Which set of dates is right
              *     * `correction_defeats_review` - Whether a review-defeating correction is honest
              *     * `identity_disputed` - Whether this person lived here at all
+             *     * `termination_defeats_review` - Whether an early termination that removes a review right is honest
              *     * `duplicate_unmatched` - Whether an existing tenancy covers this
              */
             readonly escalation_reason: components["schemas"]["EscalationReasonEnum"];
@@ -2778,6 +2804,32 @@ export interface operations {
                 "application/json": components["schemas"]["ErasureRequestRequest"];
                 "application/x-www-form-urlencoded": components["schemas"]["ErasureRequestRequest"];
                 "multipart/form-data": components["schemas"]["ErasureRequestRequest"];
+            };
+        };
+        responses: {
+            /** @description No response body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    auth_privacy_erasure_cancel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityConfirmationRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["IdentityConfirmationRequest"];
+                "multipart/form-data": components["schemas"]["IdentityConfirmationRequest"];
             };
         };
         responses: {
