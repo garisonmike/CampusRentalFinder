@@ -303,10 +303,11 @@ they would have sorted. The filter is what makes them safe, not the ordering.
 
 ## Checks that can pass without checking
 
-**This has been the most productive bug class in the project.** Four instances
+**This has been the most productive bug class in the project.** Five instances
 so far, none of which failed anything. Each was found by someone asking "would
 this have caught it?" — or by reading a log line that disagreed with a commit
-message — rather than by a test going red.
+message, or by opening a diff instead of the summary of it — rather than by a
+test going red.
 
 ### The shape
 
@@ -325,7 +326,7 @@ That is worth grepping for directly. **Any value that appears twice is a
 candidate**, and the question is always: *which copy does the machine actually
 read?*
 
-### The four
+### The five
 
 | # | The two places | Which won | What it looked like |
 |---|---|---|---|
@@ -333,10 +334,32 @@ read?*
 | 2 | `order_by("routed_at")`; PostgreSQL's **unstated** `NULLS LAST` default | the default | a healthy `enqueued` count every run, backlog growing |
 | 3 | the test file's skip condition; the CI service-container config | the skip | a green build with the compliance test never executed |
 | 4 | `--cov-fail-under=88` in `addopts`; `fail_under = 89` in `[tool.coverage.report]` | the flag | CI printing "88% reached" on the commit that raised it to 89 |
+| 5 | a phase summary asserting a bug and its fix; the commit that supposedly contained them | **the summary** | a `vacant_count` reconciliation bug reported, accepted, and specced against — for a function that has never existed |
 
-**Number 2 is the variant to watch for**, because it is the one a grep for
-duplicated values will not find. There, the second "place" was not a line
-anywhere in the repository — it was a **library or database default that
+**Number 5 is the one with no code in it at all**, and it is the most dangerous
+because it is the fastest to propagate. A phase summary described a
+`Unit.vacant_count` reconciliation counting tenancies by `status='active'`, with
+a plausible consequence: pooled blocks reporting themselves full and vanishing
+from search. It was accepted, and the next round's brief carried a clause
+requiring the fix. **There is no such function.** The commit it was attributed
+to touches `vacant_count` in one test-fixture argument. `Unit.vacant_count` has
+one reader, one constraint, and zero writers.
+
+Nothing about the report was implausible — that is the point. It described a bug
+of a shape the codebase had genuinely produced elsewhere, in a place it could
+have been, with a consequence that follows. The check (the summary) and the
+checked thing (the diff) diverged, and the summary won because **the summary is
+what everyone reads**. A diff is read once by its author; a summary is read by
+everyone downstream and then built upon.
+
+> **Verify findings against the diff, not against the report of the diff —
+> including your own.** `git show <sha> | grep <symbol>` costs ten seconds and
+> is the only thing that distinguishes a finding from a plausible story about
+> one. A summary that names a function is asserting that function exists.
+
+**Number 2 is the variant to watch for** among the code-level ones, because it
+is the one a grep for duplicated values will not find. There, the second
+"place" was not a line anywhere in the repository — it was a **library or database default that
 nobody had written down**. The code said `order_by("routed_at")` and meant
 "oldest first, never-routed first of all"; PostgreSQL said "NULLs last" and
 nobody had stated which of those two the system was relying on.
