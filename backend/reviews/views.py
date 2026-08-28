@@ -14,8 +14,9 @@ a query-count test asserts one review and fifty cost the same.
 
 from __future__ import annotations
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema, extend_schema_view
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework.exceptions import NotFound
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -313,3 +314,95 @@ class ReviewResponseCreateView(APIView):
         )
 
         return Response(ReviewResponseSerializer(response).data, status=201)
+
+
+@extend_schema_view(
+    get=extend_schema(
+        summary="Reviews of properties you manage",
+        description=(
+            "Every published review across the properties you own or are "
+            "assigned to, newest first.\n\n"
+            "**Filter with `?answered=false` to find the actionable ones.** A "
+            "landlord with nine properties has one question worth asking of "
+            "this list -- what has not been replied to -- and making them page "
+            "through answered reviews to find it is how a reply surface goes "
+            "unused.\n\n"
+            "Caretakers may read this. Only the owner may reply: a caretaker "
+            "can confirm somebody lived somewhere, but speaking for the "
+            "business in public is the owner's own act (ADR-003), and the "
+            "reply endpoint enforces that rather than trusting a client to "
+            "hide a button.\n\n"
+            "`dispute_annotation` follows the same rule here as everywhere "
+            "else. **Render it as a plain factual line, in the landlord's own "
+            "view too.** A landlord seeing their disputed reviews greyed out "
+            "in their portal learns that disputing is how you make a review "
+            "look less credible, which is the veto ADR-004 removed."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="answered",
+                type=bool,
+                description=(
+                    "`false` for reviews with no response yet -- the ones "
+                    "worth your time. `true` for the rest. Omit for all."
+                ),
+            ),
+        ],
+        responses=ReviewSerializer(many=True),
+    )
+)
+class ManagedReviewListView(SchemaSafeQuerysetMixin, ListAPIView):
+    """Reviews across everything the caller manages."""
+
+    serializer_class = ReviewSerializer
+    permission_classes = [IsAuthenticated]
+    throttle_scope = Scope.AUTHENTICATED_READ
+    schema_queryset = Review.all_objects
+
+    def get_queryset(self):
+        if self.is_schema_generation():
+            return self.empty_queryset()
+
+        from accounts.capabilities import managed_property_ids
+
+        user = self.request.user
+
+        # Owned OR assigned. `managed_property_ids` means "as a caretaker" by
+        # design -- ownership is checked separately so an assignment's subset
+        # can never restrict the person who granted it.
+        owned = Q(tenancy__unit__property__landlord__user=user)
+        assigned = Q(tenancy__unit__property_id__in=managed_property_ids(user))
+
+        queryset = (
+            Review.objects.for_tenant(_tenant())
+            .filter(is_published=True)
+            .filter(owned | assigned)
+            .select_related(
+                "tenancy__unit__property",
+                "tenancy__tenant__student_profile",
+                "response__author",
+            )
+            .distinct()
+            .order_by("-created_at")
+        )
+
+        answered = self.request.query_params.get("answered")
+        if answered is not None:
+            # `response__isnull` rather than a boolean column: the reply is a
+            # row, and a denormalised flag would be a second place for the
+            # same fact.
+            queryset = queryset.filter(response__isnull=answered.lower() != "true")
+
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        page = getattr(self, "_annotated_page", None)
+        if page is not None:
+            context["dispute_annotations"] = dispute_annotations_for(page)
+        return context
+
+    def paginate_queryset(self, queryset):
+        page = super().paginate_queryset(queryset)
+        self._annotated_page = page if page is not None else list(queryset)
+        return page

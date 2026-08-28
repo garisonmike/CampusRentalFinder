@@ -105,6 +105,9 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     # reason listings are -- a review is about a property, and which properties
     # exist depends on the university (ADR-002).
     "reviews:property-reviews": HostClass.TENANT_SCOPED,
+    # Authenticated read of the caller's own properties: tenant-scoped, and
+    # never publicly cacheable.
+    "reviews:managed-reviews": HostClass.TENANT_SCOPED,
     "reviews:property-rating": HostClass.TENANT_SCOPED,
     "reviews:unit-rating": HostClass.TENANT_SCOPED,
     "reviews:review-create": HostClass.TENANT_SCOPED,

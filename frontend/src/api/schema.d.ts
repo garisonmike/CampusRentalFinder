@@ -1011,6 +1011,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reviews/manage/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reviews of properties you manage
+         * @description Every published review across the properties you own or are assigned to, newest first.
+         *
+         *     **Filter with `?answered=false` to find the actionable ones.** A landlord with nine properties has one question worth asking of this list -- what has not been replied to -- and making them page through answered reviews to find it is how a reply surface goes unused.
+         *
+         *     Caretakers may read this. Only the owner may reply: a caretaker can confirm somebody lived somewhere, but speaking for the business in public is the owner's own act (ADR-003), and the reply endpoint enforces that rather than trusting a client to hide a button.
+         *
+         *     `dispute_annotation` follows the same rule here as everywhere else. **Render it as a plain factual line, in the landlord's own view too.** A landlord seeing their disputed reviews greyed out in their portal learns that disputing is how you make a review look less credible, which is the veto ADR-004 removed.
+         */
+        get: operations["reviews_manage_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reviews/properties/{slug}/": {
         parameters: {
             query?: never;
@@ -4681,6 +4707,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewResponse"];
+                };
+            };
+        };
+    };
+    reviews_manage_list: {
+        parameters: {
+            query?: {
+                /** @description `false` for reviews with no response yet -- the ones worth your time. `true` for the rest. Omit for all. */
+                answered?: boolean;
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedReviewList"];
                 };
             };
         };

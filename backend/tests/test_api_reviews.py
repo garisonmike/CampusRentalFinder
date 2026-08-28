@@ -487,3 +487,232 @@ class TestResponding:
         )
 
         assert response.status_code >= 400
+
+
+# ---------------------------------------------------------------------------
+# Reviews of properties you manage
+# ---------------------------------------------------------------------------
+
+
+class TestTheManagedReviewList:
+    """The portal's reply surface.
+
+    Two questions, and the endpoint has to answer both honestly: which reviews
+    are mine to see, and which of them still want something from me.
+    """
+
+    URL = "/api/v1/reviews/manage/"
+
+    @staticmethod
+    def review_of(prop, review_factory, unit_factory, tenancy_factory, **kwargs):
+        """A published review of one property, through a real tenancy.
+
+        `ReviewFactory` hangs off a tenancy rather than a property, which is
+        the model being honest: a review exists because a stay did (ADR-004).
+        """
+        unit = unit_factory(property=prop)
+        tenancy = tenancy_factory(unit=unit)
+        return review_factory(tenancy=tenancy, **kwargs)
+
+    @staticmethod
+    def joined(prop, university, campus_factory, campus_distance_factory):
+        """Join a property to the tenant.
+
+        Without this the endpoint returns nothing and the test reads as a
+        permissions failure. The join is what makes a property exist for a
+        university at all (ADR-002) -- it is not a detail of the fixture.
+        """
+        campus_distance_factory(
+            property=prop,
+            university=university,
+            campus=campus_factory(university=university, is_main=True),
+        )
+        return prop
+
+    @staticmethod
+    def respond_to(review, author):
+        from reviews.models import ReviewResponse
+
+        return ReviewResponse.all_objects.create(
+            review=review, author=author, body="The tank was replaced in June."
+        )
+
+    def test_a_landlord_sees_reviews_of_their_own_properties(
+        self,
+        authenticate,
+        landlord,
+        host,
+        review_factory,
+        property_factory,
+        landlord_profile,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        mine = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+        review_factory()
+
+        response = get(authenticate(landlord), self.URL, host)
+
+        assert response.status_code == 200
+        assert [row["id"] for row in response.data["results"]] == [mine.pk]
+
+    def test_a_caretaker_sees_the_property_they_are_assigned_to(
+        self,
+        authenticate,
+        host,
+        review_factory,
+        property_factory,
+        caretaker_assignment_factory,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        prop = property_factory(status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        theirs = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+        assignment = caretaker_assignment_factory(property=prop)
+
+        response = get(authenticate(assignment.user), self.URL, host)
+
+        assert [row["id"] for row in response.data["results"]] == [theirs.pk]
+
+    def test_a_caretaker_still_cannot_reply(
+        self,
+        authenticate,
+        host,
+        review_factory,
+        property_factory,
+        caretaker_assignment_factory,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        """Reading and replying are different acts. A caretaker can confirm
+        somebody lived somewhere; speaking for the business in public is the
+        owner's own (ADR-003). Enforced at the endpoint, not by hiding a
+        button."""
+        prop = property_factory(status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        review = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+        assignment = caretaker_assignment_factory(property=prop)
+
+        client = authenticate(assignment.user)
+        assert get(client, self.URL, host).status_code == 200
+
+        with override_settings(ALLOWED_HOSTS=["*"], SITE_DOMAIN="example.co.ke"):
+            reply = client.post(
+                f"/api/v1/reviews/{review.pk}/response/",
+                {"body": "Not my place to say this."},
+                format="json",
+                HTTP_HOST=host,
+            )
+
+        assert reply.status_code == 403
+
+    def test_a_student_sees_nothing_of_their_own_landlord(
+        self, tenant_client, host, review_factory
+    ):
+        review_factory()
+
+        response = get(tenant_client, self.URL, host)
+
+        assert response.data["results"] == []
+
+    def test_unanswered_is_filterable(
+        self,
+        authenticate,
+        landlord,
+        host,
+        review_factory,
+        property_factory,
+        landlord_profile,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        """A landlord with nine properties has one question worth asking of
+        this list. Making them page through answered reviews to find it is how
+        a reply surface goes unused."""
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        unanswered = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+        answered = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+        self.respond_to(answered, landlord)
+
+        client = authenticate(landlord)
+
+        pending = get(client, self.URL, host, answered="false")
+        assert [row["id"] for row in pending.data["results"]] == [unanswered.pk]
+
+        done = get(client, self.URL, host, answered="true")
+        assert [row["id"] for row in done.data["results"]] == [answered.pk]
+
+    def test_a_disputed_review_is_returned_with_its_plain_annotation(
+        self,
+        authenticate,
+        landlord,
+        host,
+        review_factory,
+        property_factory,
+        landlord_profile,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        """The landlord's own view is not an exception to the annotation rule.
+
+        A landlord who sees their disputed reviews greyed out in their portal
+        learns that disputing is how you make a review look less credible --
+        which is the veto ADR-004 removed, restored as a habit.
+        """
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        review = self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+
+        response = get(authenticate(landlord), self.URL, host)
+
+        rows = {row["id"]: row for row in response.data["results"]}
+        assert review.pk in rows
+        # Present as a field either way -- null when undisputed -- so the
+        # client renders one shape rather than branching on absence.
+        assert "dispute_annotation" in rows[review.pk]
+
+    def test_it_does_not_scale_with_rows(
+        self,
+        authenticate,
+        landlord,
+        host,
+        review_factory,
+        property_factory,
+        landlord_profile,
+        unit_factory,
+        tenancy_factory,
+        university,
+        campus_factory,
+        campus_distance_factory,
+    ):
+        """One query per review is a portal that works for the landlord with
+        two properties and falls over for the one worth keeping."""
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        self.joined(prop, university, campus_factory, campus_distance_factory)
+        for _ in range(6):
+            self.review_of(prop, review_factory, unit_factory, tenancy_factory)
+
+        client = authenticate(landlord)
+        with CaptureQueriesContext(connection) as queries:
+            get(client, self.URL, host)
+
+        assert len(queries) < 15, [q["sql"][:90] for q in queries]
