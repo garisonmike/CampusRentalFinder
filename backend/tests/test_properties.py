@@ -701,6 +701,48 @@ class TestAnUploadIsJudgedByItsBytes:
 
         assert photo.original_key.endswith(".jpg")
 
+    def test_a_listing_photo_is_stored_without_its_gps(self, unit_factory):
+        """The original lives in the **public** bucket and is served whenever
+        the variants are not ready -- which is always, briefly, and for ever
+        for a photo that failed to resize.
+
+        Found by seeding a real phone photo and reading back what was stored.
+        """
+        import piexif
+        from django.core.files.storage import storages
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from config.management.commands._seed_images import generate
+        from properties.services import add_photo
+
+        raw, content_type, name = generate("phone_4mb", seed=1)
+        assert piexif.load(raw)["GPS"], "the fixture should carry GPS to begin with"
+
+        photo = add_photo(
+            unit=unit_factory(),
+            upload=SimpleUploadedFile(name, raw, content_type=content_type),
+        )
+
+        stored = storages["default"].open(photo.original_key).read()
+        assert not piexif.load(stored)["GPS"]
+
+    def test_the_recorded_size_matches_what_was_stored(self, unit_factory):
+        """Stripping changes the bytes, so recording the upload's size would
+        describe a file that no longer exists."""
+        from django.core.files.storage import storages
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from config.management.commands._seed_images import generate
+        from properties.services import add_photo
+
+        raw, content_type, name = generate("modest_200kb", seed=2)
+        photo = add_photo(
+            unit=unit_factory(),
+            upload=SimpleUploadedFile(name, raw, content_type=content_type),
+        )
+
+        assert photo.byte_size == len(storages["default"].open(photo.original_key).read())
+
     def test_the_file_is_still_readable_after_sniffing(self, unit_factory):
         """The sniff reads the head and must put the cursor back.
 

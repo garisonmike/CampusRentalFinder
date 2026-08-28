@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.files.storage import storages
 from django.db import transaction
 from django.db.models import Q
@@ -483,8 +484,27 @@ def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> Uni
             }
         )
 
+    # Metadata comes off before anything is stored.
+    #
+    # A landlord's phone photo carries GPS, a device make and model, and a
+    # timestamp. The variants drop all of it as a side effect of being
+    # re-encoded -- but `best_url` falls back to the **original** until the
+    # resize job has run, and permanently if it fails, and the original lives
+    # in the *public* bucket. So every listing photo was served with its
+    # EXIF intact for at least the length of the queue, and for ever for the
+    # ones that failed to resize.
+    #
+    # The identity-document path has stripped since ADR-003. This is the same
+    # tool, now cheap enough to use here: 0.28s on a 4 MB photo rather than
+    # the 15.7s it cost before 85dfab8.
+    from accounts.documents import strip_image_metadata
+
+    upload.seek(0)
+    clean = strip_image_metadata(upload.read(), content_type)
+    upload.seek(0)
+
     key = f"units/{unit.pk}/{uuid4().hex}.{extension}"
-    storages["default"].save(key, upload)
+    storages["default"].save(key, ContentFile(clean))
 
     last = UnitPhoto.all_objects.filter(unit=unit).order_by("-sort_order").first()
 
@@ -495,7 +515,9 @@ def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> Uni
         sort_order=(last.sort_order + 1) if last else 0,
         is_primary=last is None,
         processing_status=PhotoProcessingStatus.PENDING,
-        byte_size=upload.size,
+        # The stripped size, which is what is actually stored. Reporting the
+        # upload's size would describe a file that no longer exists.
+        byte_size=len(clean),
     )
 
     # After commit: enqueuing inside the transaction races the worker, which
