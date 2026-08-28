@@ -572,3 +572,14 @@ unverified claim about everything underneath it, and the commit a future bisect
 lands on is the one nobody ever built. Slow on purpose — it runs the real
 suites, because a faster version that skipped them would be a check whose scope
 is narrower than the belief attached to it (`docs/OPERATIONS.md`).
+
+## Before a launch date exists
+
+[docs/PRE_LAUNCH.md](PRE_LAUNCH.md) is the list of what has never been
+exercised — throttles under real traffic, the frontend in a browser, the
+scheduler over a week, email that actually leaves the building, and the fact
+that no user has ever seen this.
+
+It is deliberately not a backlog. Each entry says what would have to be
+*watched working* to remove it, because the standard everywhere else in this
+project is that a guarantee nobody has observed is a guarantee nobody has.
