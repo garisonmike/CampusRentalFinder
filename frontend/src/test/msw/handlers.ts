@@ -1,6 +1,6 @@
 import { HttpResponse, http } from "msw";
 
-import type { Paginated, PropertySummary } from "@/api/types";
+import type { Paginated, PropertySummary, Schemas } from "@/api/types";
 
 export const API = "http://api.test/api/v1";
 
@@ -84,6 +84,83 @@ export function page<T>(results: T[], overrides: Partial<Paginated<T>> = {}): Pa
     next: null,
     previous: null,
     results,
+    ...overrides,
+  };
+}
+
+/** A unit as it appears inside a property listing. */
+export function unitSummary(
+  overrides: Partial<Schemas["UnitSummary"]> = {},
+): Schemas["UnitSummary"] {
+  return {
+    id: 10,
+    label: "Bedsitters",
+    unit_type: "bedsitter",
+    rent_kes: "8500.00",
+    deposit_kes: "8500.00",
+    furnished: "unfurnished",
+    bedrooms: 0,
+    size_sqm: 18,
+    total_count: 40,
+    vacant_count: 6,
+    is_available: true,
+    vacancy_freshness: "fresh",
+    vacancy_age_days: 2,
+    available_from: "2026-09-01",
+    min_stay_months: 4,
+    ...overrides,
+  };
+}
+
+/** How far a property is from one campus. Walking figures default to null,
+ *  which is the case the UI is most likely to render dishonestly. */
+export function campusDistance(
+  overrides: Partial<Schemas["CampusDistance"]> = {},
+): Schemas["CampusDistance"] {
+  return {
+    campus_name: "Main Campus",
+    university_name: "Kenyatta University",
+    straight_line_km: "1.20",
+    walking_distance_km: null,
+    walking_minutes: null,
+    route_provider: "",
+    routed_at: null,
+    ...overrides,
+  };
+}
+
+export function propertyDetail(
+  overrides: Partial<Schemas["PropertyDetail"]> = {},
+): Schemas["PropertyDetail"] {
+  return {
+    ...propertySummary(),
+    nearest_campus_km: "1.20",
+    description: "Quiet block behind the shopping centre.",
+    street: "Wendani Road",
+    has_cctv: false,
+    has_parking: false,
+    units: [unitSummary()],
+    campus_distances: [campusDistance()],
+    landlord_name: "Grace Njoroge",
+    view_count: 12,
+    ...overrides,
+  };
+}
+
+export function unitDetail(
+  overrides: Partial<Schemas["UnitDetail"]> = {},
+): Schemas["UnitDetail"] {
+  return {
+    ...unitSummary(),
+    water_included: true,
+    electricity_included: false,
+    wifi_included: false,
+    has_private_bathroom: true,
+    has_kitchenette: false,
+    floor: 2,
+    photos: [],
+    property_id: 1,
+    property_name: "Wendani Court",
     ...overrides,
   };
 }

@@ -8,6 +8,8 @@ import { RootLayout } from "@/app/layout/RootLayout";
 // bundle carries the shell and nothing else.
 const HomeRoute = lazy(() => import("@/app/routes/HomeRoute"));
 const ListingsRoute = lazy(() => import("@/app/routes/ListingsRoute"));
+const PropertyRoute = lazy(() => import("@/app/routes/PropertyRoute"));
+const UnitRoute = lazy(() => import("@/app/routes/UnitRoute"));
 const LoginRoute = lazy(() => import("@/app/routes/LoginRoute"));
 const DashboardRoute = lazy(() => import("@/app/routes/DashboardRoute"));
 const AdminRoute = lazy(() => import("@/app/routes/AdminRoute"));
@@ -20,6 +22,8 @@ export function AppRoutes() {
       <Route element={<RootLayout />}>
         <Route index element={<HomeRoute />} />
         <Route path="listings" element={<ListingsRoute />} />
+        <Route path="listings/:slug" element={<PropertyRoute />} />
+        <Route path="listings/:slug/units/:id" element={<UnitRoute />} />
         <Route path="login" element={<LoginRoute />} />
 
         <Route

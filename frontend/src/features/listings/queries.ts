@@ -1,8 +1,8 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 
-import { getPage } from "@/api/client";
+import { get, getPage } from "@/api/client";
 import { queryKeys } from "@/api/queries";
-import type { Paginated, PropertySummary } from "@/api/types";
+import type { Paginated, PropertySummary, Schemas } from "@/api/types";
 import { activeFilters, describe, toParams, without, type Filters } from "./filters";
 
 /** One page of search results. */
@@ -83,4 +83,20 @@ export function useEmptyReason(filters: Filters, enabled: boolean) {
   blames.sort((left, right) => right.wouldShow - left.wouldShow);
 
   return { loading: false, blames };
+}
+
+/** One property, by slug. */
+export function useProperty(slug: string) {
+  return useQuery({
+    queryKey: queryKeys.properties.detail(slug),
+    queryFn: () => get<Schemas["PropertyDetail"]>(`/properties/${slug}/`),
+  });
+}
+
+/** One unit, with its own photos. */
+export function useUnit(id: number) {
+  return useQuery({
+    queryKey: queryKeys.units.detail(id),
+    queryFn: () => get<Schemas["UnitDetail"]>(`/properties/units/${id}/`),
+  });
 }
