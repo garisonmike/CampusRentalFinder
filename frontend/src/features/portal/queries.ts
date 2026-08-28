@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getPage, post } from "@/api/client";
+import { get, getPage, patch, post } from "@/api/client";
 import { queryKeys } from "@/api/queries";
 import type { Schemas } from "@/api/types";
 
@@ -90,5 +90,64 @@ export function useDisputeClaim() {
     mutationFn: ({ id, ...body }: { id: number } & Schemas["DisputeRequest"]) =>
       post<Schemas["TenancyClaim"]>(`/tenancies/claims/${id}/dispute/`, body),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.claims.all() }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The management surface (properties, units, vacancy, reviews)
+// ---------------------------------------------------------------------------
+
+/** Everything the caller manages, **including drafts**. */
+export function useManagedProperties(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.properties.managed(),
+    queryFn: () => get<Schemas["PropertyDetail"][]>("/properties/manage/"),
+    enabled,
+  });
+}
+
+/**
+ * Restate a unit's vacancy.
+ *
+ * The one write path for the count, and it stamps who said it and when. The
+ * mutation invalidates the managed list *and* the public property queries: the
+ * number the landlord just corrected is the number a student is looking at.
+ */
+export function useStateVacancy(slug: string) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ unitId, vacantCount }: { unitId: number; vacantCount: number }) =>
+      patch<Schemas["VacancyResult"]>(
+        `/properties/manage/${slug}/units/${unitId}/vacancy/`,
+        { vacant_count: vacantCount },
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: queryKeys.properties.all() });
+    },
+  });
+}
+
+/** Reviews across everything the caller manages. `answered` filters. */
+export function useManagedReviews(answered: boolean | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.reviews.managed(answered),
+    queryFn: () =>
+      getPage<Schemas["Review"]>(
+        "/reviews/manage/",
+        answered === undefined ? undefined : { answered },
+      ),
+    enabled,
+  });
+}
+
+/** The landlord's single public reply. Never a caretaker's (ADR-003). */
+export function useRespondToReview() {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: string }) =>
+      post<Schemas["ReviewResponse"]>(`/reviews/${id}/response/`, { body }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.reviews.all() }),
   });
 }

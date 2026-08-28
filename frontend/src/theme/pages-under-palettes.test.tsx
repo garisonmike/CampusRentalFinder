@@ -7,10 +7,12 @@ import { HOSTILE_PALETTES } from "./hostile-palettes";
 import { buildTokens } from "./tokens";
 import DashboardRoute from "@/app/routes/DashboardRoute";
 import ListingsRoute from "@/app/routes/ListingsRoute";
+import PortalReviewsRoute from "@/app/routes/PortalReviewsRoute";
 import PortalRoute from "@/app/routes/PortalRoute";
 import PropertyRoute from "@/app/routes/PropertyRoute";
 import SavedRoute from "@/app/routes/SavedRoute";
 import UnitRoute from "@/app/routes/UnitRoute";
+import VacancyRoute from "@/app/routes/VacancyRoute";
 import {
   API,
   page,
@@ -19,6 +21,7 @@ import {
   propertySummary,
   review,
   unitDetail,
+  unitSummary,
 } from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { NO_CAPABILITIES, useAuthStore } from "@/stores/auth";
@@ -80,6 +83,12 @@ beforeEach(() => {
     http.get(`${API}/tenancies/`, () => HttpResponse.json(page([]))),
     http.get(`${API}/tenancies/applications/`, () => HttpResponse.json(page([]))),
     http.get(`${API}/tenancies/claims/`, () => HttpResponse.json(page([]))),
+    http.get(`${API}/properties/manage/`, () =>
+      HttpResponse.json([
+        propertyDetail({ units: [unitSummary({ vacancy_freshness: "stale", vacancy_age_days: 90 })] }),
+      ]),
+    ),
+    http.get(`${API}/reviews/manage/`, () => HttpResponse.json(page([review()]))),
   );
 });
 
@@ -123,6 +132,18 @@ const PAGES = [
     render: () => renderWithProviders(<DashboardRoute />),
     settled: () => screen.findByText(/no current tenancy on record/i),
     facts: ["Where you live now", "Applications"],
+  },
+  {
+    name: "vacancy counts",
+    render: () => renderWithProviders(<VacancyRoute />),
+    settled: () => screen.findByRole("heading", { name: /worth updating first/i }),
+    facts: ["Worth updating first", "Rooms free of"],
+  },
+  {
+    name: "portal reviews",
+    render: () => renderWithProviders(<PortalReviewsRoute />),
+    settled: () => screen.findByText(/water goes off/i),
+    facts: ["Reviews of your properties", "Reply publicly"],
   },
   {
     name: "landlord portal",

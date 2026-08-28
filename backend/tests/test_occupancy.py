@@ -372,6 +372,52 @@ class TestTheAdminWritePath:
 # ---------------------------------------------------------------------------
 
 
+class TestThePromptLink:
+    """The prompt has to land on the screen that does the thing.
+
+    An email asking a landlord to update their vacancy counts, which drops
+    them on a home page, is an email that teaches them not to open the next
+    one -- and this is the only channel the freshness mechanism has.
+    """
+
+    def test_the_email_links_to_the_page_that_does_it(
+        self,
+        unit_factory,
+        property_factory,
+        landlord_profile,
+        campus_distance_factory,
+        university,
+        mailoutbox,
+    ):
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        campus_distance_factory(property=prop, university=university)
+        unit_factory(property=prop)
+
+        from properties.jobs import prompt_stale_vacancies
+
+        prompt_stale_vacancies()
+
+        assert len(mailoutbox) == 1
+        assert "/portal/vacancy" in mailoutbox[0].body
+        assert university.subdomain in mailoutbox[0].body
+
+    def test_no_link_rather_than_a_wrong_one(
+        self, unit_factory, property_factory, landlord_profile, mailoutbox
+    ):
+        """A landlord whose property is not joined to any campus has no tenant
+        host to be sent to. A broken link is worse than none: it spends the
+        same trust and returns nothing."""
+        prop = property_factory(landlord=landlord_profile, status=PropertyStatus.PUBLISHED)
+        unit_factory(property=prop)
+
+        from properties.jobs import prompt_stale_vacancies
+
+        prompt_stale_vacancies()
+
+        assert len(mailoutbox) == 1
+        assert "Update them here" not in mailoutbox[0].body
+
+
 class TestTheCrossCheck:
     def test_it_never_writes_to_vacant_count(self, unit_factory, landlord, tenancy_factory, tenant):
         """Comparison only. It is not an alternative source of truth."""

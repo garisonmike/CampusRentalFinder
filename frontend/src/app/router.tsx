@@ -14,6 +14,8 @@ const LoginRoute = lazy(() => import("@/app/routes/LoginRoute"));
 const DashboardRoute = lazy(() => import("@/app/routes/DashboardRoute"));
 const SavedRoute = lazy(() => import("@/app/routes/SavedRoute"));
 const PortalRoute = lazy(() => import("@/app/routes/PortalRoute"));
+const VacancyRoute = lazy(() => import("@/app/routes/VacancyRoute"));
+const PortalReviewsRoute = lazy(() => import("@/app/routes/PortalReviewsRoute"));
 const AdminRoute = lazy(() => import("@/app/routes/AdminRoute"));
 const ForbiddenRoute = lazy(() => import("@/app/routes/ForbiddenRoute"));
 const NotFoundRoute = lazy(() => import("@/app/routes/NotFoundRoute"));
@@ -53,6 +55,26 @@ export function AppRoutes() {
             // (ADR-003), so `manages_properties` is what admits them.
             <RoleGuard roles={["manager"]}>
               <PortalRoute />
+            </RoleGuard>
+          }
+        />
+
+        {/* Where the vacancy prompt email lands. One click from the message
+            to the screen that does the thing it asks for. */}
+        <Route
+          path="portal/vacancy"
+          element={
+            <RoleGuard roles={["manager"]}>
+              <VacancyRoute />
+            </RoleGuard>
+          }
+        />
+
+        <Route
+          path="portal/reviews"
+          element={
+            <RoleGuard roles={["manager"]}>
+              <PortalReviewsRoute />
             </RoleGuard>
           }
         />

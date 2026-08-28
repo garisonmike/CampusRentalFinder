@@ -242,6 +242,36 @@ def build_absolute_url(
     return f"{base_url(host_class, subdomain=subdomain)}{path}"
 
 
+def frontend_url(path: str, *, subdomain: str) -> str:
+    """An absolute URL to a page in the single-page app.
+
+    The SPA is served from the same tenant origin as the API, so this is
+    `base_url` plus a client-side path. It exists as its own function because
+    the argument is a **route in the frontend router**, which Django cannot
+    reverse and therefore cannot check -- a mistyped path here 404s in a
+    browser rather than raising, which is exactly why it should be written in
+    one place with the paths listed beside it.
+
+    Used by outgoing email. A message asking somebody to do something has to
+    land them on the screen where they do it: an email that says "update your
+    vacancy counts" and drops the reader on a home page is an email that
+    teaches them not to open the next one.
+    """
+    if not path.startswith("/"):
+        raise ValueError("A frontend path starts with a slash.")
+
+    return f"{base_url(HostClass.TENANT_SCOPED, subdomain=subdomain)}{path}"
+
+
+#: Frontend paths that email links to. Listed so the set is greppable from the
+#: backend, and so changing a route in the router is visibly a thing that
+#: breaks links people were sent last week.
+class FrontendPath:
+    VACANCY_REVIEW = "/portal/vacancy"
+    PORTAL = "/portal"
+    REVIEWS = "/portal/reviews"
+
+
 def canonical_url(route_name: str, *, args: tuple = (), kwargs: dict | None = None) -> str:
     """The ``rel=canonical`` URL for a public listing route.
 

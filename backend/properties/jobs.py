@@ -240,6 +240,29 @@ def prompt_stale_vacancies(limit: int = 200, now: dt.datetime | None = None) -> 
     return len(by_landlord)
 
 
+def _vacancy_link(landlord) -> str:
+    """Where the prompt sends them.
+
+    The tenant subdomain is taken from a property's own campus join rather
+    than guessed: a landlord may list near more than one university, and the
+    portal lives on a tenant host (ADR-001). Empty rather than wrong when
+    there is no join -- a broken link is worse than none.
+    """
+    from config.hosts import FrontendPath, frontend_url
+
+    distance = (
+        PropertyCampusDistance.all_objects.filter(property__landlord=landlord)
+        .select_related("university")
+        .order_by("-is_primary", "straight_line_km")
+        .first()
+    )
+    if distance is None:
+        return ""
+
+    url = frontend_url(FrontendPath.VACANCY_REVIEW, subdomain=distance.university.subdomain)
+    return f"Update them here: {url}"
+
+
 def _send_vacancy_prompt(units) -> None:
     """One message per landlord, listing their stale units."""
     from django.core.mail import send_mail
@@ -261,6 +284,12 @@ def _send_vacancy_prompt(units) -> None:
         for unit in units
     )
 
+    # One click to the screen that does the thing. An email asking somebody to
+    # update something, which lands them on a home page, is an email that
+    # teaches them not to open the next one -- and this is the only channel the
+    # freshness mechanism has.
+    link = _vacancy_link(landlord)
+
     send_mail(
         subject="Are these still available?",
         message=(
@@ -268,7 +297,8 @@ def _send_vacancy_prompt(units) -> None:
             "how old each one is. Updating them takes a moment and makes your "
             "listings rank as current:\n\n"
             f"{lines}\n\n"
-            "If nothing has changed, confirming that is enough."
+            "If nothing has changed, confirming that is enough.\n\n"
+            f"{link}"
         ),
         from_email=None,
         recipient_list=[landlord.user.email],

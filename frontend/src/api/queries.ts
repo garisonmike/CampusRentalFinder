@@ -44,6 +44,14 @@ export const queryKeys = {
     rating: (slug: string) => ["properties", "detail", slug, "rating"] as const,
     reviews: (slug: string, page: number) =>
       ["properties", "detail", slug, "reviews", page] as const,
+    /** Everything the caller manages, drafts included. Under `properties` so
+     *  a write to a property invalidates the management view too. */
+    managed: () => ["properties", "managed"] as const,
+  },
+  reviews: {
+    all: () => ["reviews"] as const,
+    managed: (answered?: boolean) =>
+      ["reviews", "managed", answered ?? "all"] as const,
   },
   units: {
     detail: (id: number) => ["units", "detail", id] as const,

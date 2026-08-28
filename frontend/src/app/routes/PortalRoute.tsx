@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,15 @@ export default function PortalRoute() {
           </p>
         )}
       </header>
+
+      <nav aria-label="Portal sections" className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" size="sm">
+          <Link to="/portal/vacancy">Vacancy counts</Link>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/portal/reviews">Reviews</Link>
+        </Button>
+      </nav>
 
       <section aria-labelledby="claims-heading">
         <h2 id="claims-heading" className="text-lg font-semibold">
