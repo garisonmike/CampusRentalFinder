@@ -422,9 +422,12 @@ def set_availability(unit: Unit, *, available_from=None, is_active: bool | None 
 # ---------------------------------------------------------------------------
 
 
-#: What a landlord may upload. Checked by content, not by filename: an
-#: extension is whatever the client typed, and the resize job is a decoder
-#: pointed at whatever arrives.
+#: What a landlord may upload.
+#:
+#: Checked against the file's **leading bytes**, never against what the client
+#: says it sent. `Content-Type` on a multipart part is supplied by the client
+#: exactly as the filename is, so trusting it is trusting the uploader -- and
+#: the earlier version of this did, while its comment claimed the opposite.
 ALLOWED_PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
@@ -440,17 +443,29 @@ def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> Uni
     a unit whose only photo is not primary has no cover, and the listing card
     then shows "No photos yet" beside a unit that plainly has one.
     """
-    content_type = getattr(upload, "content_type", "") or ""
+    # Sniffed, not asked. `upload.content_type` is a header the client wrote;
+    # a PDF announcing itself as `image/jpeg` passed the previous check and was
+    # stored under a `.jpg` key, to be served from the public bucket to
+    # whoever opened the listing. The identity-document path has sniffed since
+    # ADR-003 for the same reason -- this one only said it did.
+    from accounts.documents import sniff_content_type
+
+    head = upload.read(32)
+    upload.seek(0)
+
+    content_type = sniff_content_type(head) or ""
     extension = ALLOWED_PHOTO_TYPES.get(content_type)
 
     if extension is None:
+        claimed = getattr(upload, "content_type", "") or ""
         raise ValidationError(
             {
                 "image": _(
-                    "Upload a JPEG, PNG or WebP image. %(given)s is not one, "
-                    "and the resize step would fail later rather than here."
+                    "Upload a JPEG, PNG or WebP image. This file's contents "
+                    "are %(actual)s, whatever it is named, and the resize "
+                    "step would fail later rather than here."
                 )
-                % {"given": content_type or _("an unknown file type")}
+                % {"actual": content_type or claimed or _("not a recognised image")}
             }
         )
 

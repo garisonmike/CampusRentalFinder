@@ -650,3 +650,80 @@ class TestPublicationGate:
         first = publish(prop).published_at
 
         assert publish(prop).published_at == first
+
+
+class TestAnUploadIsJudgedByItsBytes:
+    """`add_photo` must sniff, not ask.
+
+    `Content-Type` on a multipart part is written by the client exactly as the
+    filename is. The earlier implementation read it and refused on that basis,
+    with a comment claiming it checked the contents -- so a PDF announcing
+    itself as `image/jpeg` was stored under a `.jpg` key in the **public**
+    bucket and served to whoever opened the listing.
+
+    Found by seeding a file whose extension lies and noticing it was refused
+    only because the fixture had told the truth about it.
+    """
+
+    def test_a_pdf_claiming_to_be_a_jpeg_is_refused(self, unit_factory):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from properties.services import add_photo
+
+        lying = SimpleUploadedFile(
+            "room.jpg", b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"0" * 512, content_type="image/jpeg"
+        )
+
+        with pytest.raises(ValidationError):
+            add_photo(unit=unit_factory(), upload=lying)
+
+    def test_a_real_jpeg_mislabelled_as_a_pdf_is_accepted(self, unit_factory):
+        """The other direction, and it matters as much.
+
+        A browser that guesses the type wrong, or a client that sends
+        `application/octet-stream`, is uploading a perfectly good photo. The
+        bytes decide both ways.
+        """
+        import io
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+
+        from properties.services import add_photo
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8), "white").save(buffer, format="JPEG")
+        mislabelled = SimpleUploadedFile(
+            "photo.dat", buffer.getvalue(), content_type="application/octet-stream"
+        )
+
+        photo = add_photo(unit=unit_factory(), upload=mislabelled)
+
+        assert photo.original_key.endswith(".jpg")
+
+    def test_the_file_is_still_readable_after_sniffing(self, unit_factory):
+        """The sniff reads the head and must put the cursor back.
+
+        Otherwise the stored object is the file minus its first 32 bytes --
+        which is still a file, still has a key, and is corrupt in a way only a
+        viewer would notice.
+        """
+        import io
+
+        from django.core.files.storage import storages
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+
+        from properties.services import add_photo
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16), "white").save(buffer, format="PNG")
+        original = buffer.getvalue()
+
+        photo = add_photo(
+            unit=unit_factory(),
+            upload=SimpleUploadedFile("room.png", original, content_type="image/png"),
+        )
+
+        stored = storages["default"].open(photo.original_key).read()
+        assert stored == original
