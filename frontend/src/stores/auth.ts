@@ -28,7 +28,16 @@ export interface CurrentUser {
   capabilities: Capabilities;
 }
 
-export type Role = "student" | "landlord" | "staff";
+/**
+ * Roles the client checks.
+ *
+ * `manager` is not a capability flag: it is a landlord **or** an assigned
+ * caretaker, read from `manages_properties`. A caretaker is not a landlord
+ * (ADR-003) -- they can confirm that somebody lived somewhere but cannot speak
+ * for the business in public -- and collapsing the two would hand a caretaker
+ * the review reply.
+ */
+export type Role = "student" | "landlord" | "staff" | "manager";
 
 type Status = "idle" | "loading" | "authenticated" | "anonymous";
 
@@ -117,6 +126,8 @@ export const useAuthStore = create<AuthState>((set, getState) => ({
     if (!capabilities) return false;
     if (role === "student") return capabilities.is_student;
     if (role === "landlord") return capabilities.is_landlord;
+    if (role === "manager")
+      return capabilities.is_landlord || capabilities.manages_properties.length > 0;
     return capabilities.is_staff;
   },
 }));

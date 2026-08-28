@@ -13,6 +13,7 @@ const UnitRoute = lazy(() => import("@/app/routes/UnitRoute"));
 const LoginRoute = lazy(() => import("@/app/routes/LoginRoute"));
 const DashboardRoute = lazy(() => import("@/app/routes/DashboardRoute"));
 const SavedRoute = lazy(() => import("@/app/routes/SavedRoute"));
+const PortalRoute = lazy(() => import("@/app/routes/PortalRoute"));
 const AdminRoute = lazy(() => import("@/app/routes/AdminRoute"));
 const ForbiddenRoute = lazy(() => import("@/app/routes/ForbiddenRoute"));
 const NotFoundRoute = lazy(() => import("@/app/routes/NotFoundRoute"));
@@ -42,6 +43,17 @@ export function AppRoutes() {
             <AuthGuard>
               <SavedRoute />
             </AuthGuard>
+          }
+        />
+
+        <Route
+          path="portal"
+          element={
+            // Landlord OR assigned caretaker. A caretaker is not a landlord
+            // (ADR-003), so `manages_properties` is what admits them.
+            <RoleGuard roles={["manager"]}>
+              <PortalRoute />
+            </RoleGuard>
           }
         />
 
