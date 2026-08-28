@@ -27,6 +27,15 @@ class ScheduledJob:
     #: What breaks when it stops. Written for whoever is reading this at 2am.
     on_failure: str
 
+    #: Registered but not installed. A job is held when running it would do
+    #: harm the code cannot prevent -- not when it is merely unfinished.
+    enabled: bool = True
+
+    #: Why it is held, and what would unblock it. Required when ``enabled`` is
+    #: False, because a disabled job with no reason gets re-enabled by the next
+    #: person who notices it is off and assumes somebody forgot.
+    held_because: str = ""
+
 
 SCHEDULE: tuple[ScheduledJob, ...] = (
     ScheduledJob(
@@ -107,6 +116,19 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         func="properties.jobs.prompt_stale_vacancies",
         cron="0 9 * * 1",
         queue="default",
+        enabled=False,
+        held_because=(
+            "There is no endpoint through which a landlord can restate a "
+            "vacancy count. The Django admin is the only write path and it "
+            "reaches platform staff, not landlords -- so this job emails "
+            "people asking them to do something the platform does not let "
+            "them do. Running it would spend the one channel the whole "
+            "freshness mechanism depends on: a prompt with no destination "
+            "teaches landlords that our email is safe to ignore, and that "
+            "lesson does not un-teach when the endpoint ships. Unblocked by "
+            "the landlord write surface (PATCH /properties/{slug}/units/"
+            "{id}/vacancy/). Enable in the same commit that lands it."
+        ),
         on_failure=(
             "Vacancy counts age and nobody is asked to refresh them. The "
             "listings quietly become misleading -- advertising last term's "

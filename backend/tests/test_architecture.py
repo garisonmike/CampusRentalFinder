@@ -664,6 +664,59 @@ class TestScheduledJobs:
         for job in SCHEDULE:
             assert job.queue in settings.RQ_QUEUES
 
+    def test_every_held_job_says_why_and_what_unblocks_it(self):
+        """A held job with no stated reason gets re-enabled by the next person
+        who notices it is off and assumes somebody forgot.
+
+        The reason has to name the blocker, not merely assert one, because the
+        person reading it is deciding whether the blocker still exists.
+        """
+        from config.jobs.schedule import SCHEDULE
+
+        for job in SCHEDULE:
+            if job.enabled:
+                continue
+
+            assert len(job.held_because) > 80, (
+                f"{job.func} is held with no usable reason. Say what would run "
+                f"wrong if it ran today, and what would unblock it."
+            )
+
+    def test_an_enabled_job_carries_no_stale_hold_reason(self):
+        """The reason is deleted when the hold is lifted.
+
+        Left behind, it reads as current on the next audit -- a job that looks
+        held while running on schedule, which is worse than either state.
+        """
+        from config.jobs.schedule import SCHEDULE
+
+        for job in SCHEDULE:
+            if job.enabled:
+                assert job.held_because == "", (
+                    f"{job.func} runs but still carries a hold reason: {job.held_because[:60]}..."
+                )
+
+    def test_held_jobs_are_named_in_the_operations_runbook(self):
+        """A hold is an operational fact, not a code comment.
+
+        Whoever is deciding whether the platform is healthy needs to know that
+        a documented job is deliberately not running, otherwise its silence
+        reads as the job working.
+        """
+        from config.jobs.schedule import SCHEDULE
+
+        runbook = (REPO_ROOT / "docs" / "OPERATIONS.md").read_text()
+
+        for job in SCHEDULE:
+            if job.enabled:
+                continue
+
+            _, _, name = job.func.rpartition(".")
+            assert name in runbook, (
+                f"{job.func} is held but the runbook does not say so. Its "
+                f"silence would read as the job working."
+            )
+
     def test_every_scheduled_job_appears_in_the_operations_runbook(self):
         """A job that runs but is not in OPERATIONS.md has no alert, and a job
         with no alert may as well not run: its failure is invisible."""
