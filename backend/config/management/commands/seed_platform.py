@@ -59,14 +59,26 @@ from reviews.aggregates import (
 )
 from reviews.models import Review, ReviewResponse
 from tenancies.constants import (
-    ApplicationStatus,
     ClaimStatus,
     ConfirmationSource,
     DisputeReason,
-    EscalationReason,
-    TenancyStatus,
 )
-from tenancies.models import Application, Tenancy, TenancyClaim
+from tenancies.jobs import sweep_overdue_claims, sweep_overdue_terminations
+from tenancies.models import Application, Tenancy, TenancyClaim, TerminationRequest
+from tenancies.services import (
+    accept_application,
+    accept_correction,
+    accept_termination_counter,
+    confirm_claim,
+    confirm_termination,
+    counter_correction,
+    create_claim,
+    dispute_termination,
+    raise_dispute,
+    reject_counter,
+    request_early_termination,
+    resolve_escalation,
+)
 from universities.constants import SignupPolicy, VerificationMethod, VerificationStatus
 from universities.models import Campus, University
 
@@ -146,6 +158,33 @@ BLOCK_NAMES = [
 ]
 
 
+#: Every path through the claim machine the seed drives, in order.
+#:
+#: Named rather than counted: a scenario that stops being reachable should show
+#: up as a name missing from a report, not as a number going down by one.
+TERMINATION_PATHS = (
+    "termination_pending",
+    "termination_disputed_pending",
+    "termination_confirmed",
+    "termination_auto_confirmed",
+    "termination_defeats_review",
+    "termination_disputed_then_countered",
+)
+
+
+SCENARIOS = (
+    "scenario_pending",
+    "scenario_auto_confirmed",
+    "scenario_correction_accepted",
+    "scenario_correction_pending",
+    "scenario_counter_rejected",
+    "scenario_correction_defeats_review",
+    "scenario_identity_escalated",
+    "scenario_identity_resolved",
+    "scenario_duplicate_withdrawn",
+)
+
+
 #: The smallest platform that still contains every shape this command exists to
 #: produce. See `Command.role_of` -- each of the first five indices has a job.
 MINIMUM_PROPERTIES = 5
@@ -214,6 +253,20 @@ class Command(BaseCommand):
         self.claim_state = 0
         #: Same guarantee for the early-terminated stay.
         self.seeded_termination = False
+        #: Claimants already used. `create_claim` caps claims per user per
+        #: rolling 30 days -- a real rule a seed reusing one student trips on
+        #: its fourth property.
+        self.claimed: set = set()
+        #: Cycles the termination paths, same reasoning as `claim_state`.
+        self.termination_state = 0
+        #: Transitions the seed asked for and could not reach through a real
+        #: call. Reported at the end: each is a missing path or a state that
+        #: should not exist.
+        self.unreachable: list[tuple[str, str]] = []
+        #: Which paths have actually been driven, so the leftovers can be
+        #: forced rather than left to how many properties somebody asked for.
+        self.scenarios_run: set[str] = set()
+        self.terminations_run: set[str] = set()
         self.today = timezone.localdate()
         self.now = timezone.now()
 
@@ -222,8 +275,12 @@ class Command(BaseCommand):
                 self.flush()
 
             universities = self.make_universities()
+            self.platform_admin = self.make_user("platform-admin", 0)
+            self.platform_admin.is_staff = True
+            self.platform_admin.save(update_fields=["is_staff"])
+
             landlords = self.make_landlords()
-            students = {
+            students_by_tenant = {
                 university.subdomain: self.make_students(university, count=18)
                 for university in universities
             }
@@ -232,10 +289,12 @@ class Command(BaseCommand):
                 self.make_properties(
                     university=university,
                     landlords=landlords,
-                    students=students[university.subdomain],
+                    students=students_by_tenant[university.subdomain],
                     count=options["properties"],
                 )
 
+        self.finish_scenarios(self.all_students())
+        self.finish_terminations(self.all_students())
         self.build_aggregates()
         self.report()
 
@@ -254,6 +313,7 @@ class Command(BaseCommand):
         LandlordRatingAggregate.objects.all().delete()
         ReviewResponse.all_objects.all().delete()
         Review.all_objects.all().delete()
+        TerminationRequest.all_objects.all().delete()
         Tenancy.all_objects.all().delete()
         TenancyClaim.all_objects.all().delete()
         Application.all_objects.all().delete()
@@ -866,18 +926,11 @@ class Command(BaseCommand):
         #    Guaranteed once, then varied -- like the open-ended stay, and for
         #    the same reason: a modulus makes a rare shape a function of how
         #    many properties somebody asked for.
-        if not self.seeded_termination or index % 5 == 2:
-            self.seeded_termination = True
-            terminated = self.tenancy(
-                unit,
-                pool[4],
-                start=self.today - dt.timedelta(days=300),
-                end=self.today - dt.timedelta(days=95),
-                via_claim=True,
-            )
-            terminated.terminated_early = True
-            terminated.termination_reason = "Moved closer to campus."
-            terminated.save(update_fields=["terminated_early", "termination_reason", "updated_at"])
+        # Every property with a spare student drives one. The four paths end
+        # in different places -- confirmed, auto-confirmed, escalated on
+        # request, and settled by counter -- and gating them behind a modulus
+        # meant the seed usually contained one path out of four.
+        self.drive_termination(unit, pool[4])
 
         # 6. A student who moved between two units in the same block. Two
         #    genuine reviews, one voice -- the divergence the de-duplication
@@ -915,7 +968,7 @@ class Command(BaseCommand):
         # fixture produces because no fixture puts one person in one unit
         # twice by accident.
         available = [student for student in students if student not in pool]
-        self.make_claims(unit, available or students, landlord, index)
+        self.drive_claims(unit, available or students, landlord, index)
 
     def tenancy(self, unit: Unit, tenant: User, *, start, end, via_claim: bool = False) -> Tenancy:
         """One confirmed stay, **with the origin it must have**.
@@ -931,58 +984,58 @@ class Command(BaseCommand):
         confirmation window and no dispute surface; a claim-sourced one has
         both, and the difference is most of the tenancy state machine.
         """
-        review_eligible = start + dt.timedelta(days=settings.REVIEW_MINIMUM_STAY_DAYS)
-
         if via_claim:
-            claim = TenancyClaim.all_objects.create(
+            # Raised and confirmed, not written. `confirm_claim` is the single
+            # place a claim becomes evidence, and it is what sets
+            # `was_disputed` from the claim's own history -- a field the direct
+            # write had been quietly leaving false on every seeded row.
+            claim = create_claim(
                 unit=unit,
                 claimant=tenant,
                 start_date=start,
                 end_date=end,
                 monthly_rent_kes=unit.rent_kes,
-                status=ClaimStatus.CONFIRMED,
-                confirmation_deadline=self.now - dt.timedelta(days=3),
-                resolved_at=self.now - dt.timedelta(days=3),
-                resolved_by=unit.property.landlord.user,
+                is_retrospective=True,
+                now=self.now - dt.timedelta(days=10),
             )
-            return Tenancy.all_objects.create(
-                unit=unit,
-                tenant=tenant,
-                claim=claim,
-                confirmation_source=ConfirmationSource.LANDLORD,
+            tenancy = confirm_claim(
+                claim,
+                source=ConfirmationSource.LANDLORD,
                 confirmed_by=unit.property.landlord.user,
-                confirmed_at=self.now - dt.timedelta(days=3),
+                now=self.now - dt.timedelta(days=9),
+            )
+        else:
+            application = Application.all_objects.create(
+                unit=unit,
+                applicant=tenant,
+                move_in_date=start,
+                intended_months=max(1, ((end or self.today) - start).days // 30),
+                message="Starting the new semester.",
+            )
+            # Accepted through the real decision, which is what writes the
+            # status, the actor, the timestamp and the tenancy together.
+            tenancy = accept_application(
+                application,
+                decided_by=unit.property.landlord.user,
                 start_date=start,
                 end_date=end,
-                monthly_rent_kes=unit.rent_kes,
-                status=TenancyStatus.CONFIRMED,
-                review_eligible_at=review_eligible,
+                note="See you on move-in day.",
             )
 
-        application = Application.all_objects.create(
-            unit=unit,
-            applicant=tenant,
-            status=ApplicationStatus.ACCEPTED,
-            move_in_date=start,
-            intended_months=max(1, ((end or self.today) - start).days // 30),
-            message="Starting the new semester.",
-            decided_by=unit.property.landlord.user,
-            decided_at=self.now - dt.timedelta(days=2),
-            decision_note="See you on move-in day.",
-        )
-        return Tenancy.all_objects.create(
-            unit=unit,
-            tenant=tenant,
-            application=application,
-            confirmation_source=ConfirmationSource.APPLICATION,
-            confirmed_by=unit.property.landlord.user,
-            confirmed_at=self.now - dt.timedelta(days=2),
-            start_date=start,
-            end_date=end,
-            monthly_rent_kes=unit.rent_kes,
-            status=TenancyStatus.CONFIRMED,
-            review_eligible_at=review_eligible,
-        )
+        # `review_eligible_at` is deliberately NOT set here.
+        #
+        # It is a latch, stamped by `review_eligibility_date` the first time
+        # anything observes the threshold met. Pre-setting it -- which this
+        # command did, with a comment claiming the opposite -- marks every
+        # seeded stay as having already earned its review right, and
+        # `termination_would_defeat_review` then returns False for all of
+        # them. The review-defeat guard was silently disabled across the whole
+        # seeded platform, and the `termination_defeats_review` path could not
+        # be reached no matter how short the proposed date was.
+        #
+        # Letting the services own it is the difference between exercising a
+        # rule and asserting one.
+        return tenancy
 
     def review(
         self, tenancy: Tenancy, landlord, index: int, *, always: bool = False
@@ -1026,106 +1079,532 @@ class Command(BaseCommand):
 
         return review
 
-    def make_claims(self, unit: Unit, students, landlord, index: int) -> None:
-        """Claims in every state the machine can reach.
+    def drive_claims(self, unit: Unit, students, landlord, index: int) -> None:
+        """Put claims into their states **by driving the machine**.
 
-        Including each typed dispute reason, so the admin queue has real rows
-        and the transition table is exercised by data rather than only by
-        tests. A queue that is empty in development is a queue nobody notices
-        is badly sorted.
+        Every claim below is raised, disputed, corrected, countered, escalated
+        and resolved through the real service functions -- never by setting a
+        status. The difference is not cosmetic. Writing `status="escalated"`
+        proves a string can be stored; calling `raise_dispute` and then
+        `reject_counter` proves the transition table permits the pairing, the
+        check constraint generated from it accepts the row, and the whole path
+        a real landlord walks actually connects end to end.
+
+        It is slower, and the first run of it found things a direct write
+        could not: see `self.unreachable`, which records every transition the
+        seed asked for and could not get through a real call. Each entry there
+        is either a missing path or a state that should not exist.
+
+        Each scenario takes its own claimant. `create_claim` caps claims per
+        user per rolling 30 days -- a real rule, and one a seed that reused
+        one student would trip on its fourth property.
         """
-        claimant = students[(index * 3) % len(students)]
-        base = {
-            "unit": unit,
-            "monthly_rent_kes": unit.rent_kes,
+        pool = [student for student in students if student not in self.claimed]
+        if len(pool) < 2:
+            return
+
+        scenario = SCENARIOS[self.claim_state % len(SCENARIOS)]
+        self.claim_state += 1
+        self.run_scenario(scenario, unit=unit, claimant=pool[0], landlord=landlord)
+
+    def run_scenario(self, scenario: str, *, unit, claimant, landlord) -> bool:
+        """Drive one path, and record it if it will not go.
+
+        Recorded rather than raised: a transition the seed cannot reach is
+        information, and stopping on the first one would mean finding them a
+        run at a time.
+        """
+        self.claimed.add(claimant)
+
+        try:
+            getattr(self, scenario)(unit=unit, claimant=claimant, landlord=landlord)
+        except Exception as error:
+            self.unreachable.append((scenario, f"{type(error).__name__}: {error}"))
+            return False
+
+        self.scenarios_run.add(scenario)
+        return True
+
+    def finish_scenarios(self, students) -> None:
+        """Run every path the property loop did not reach.
+
+        The cycle advances once per property that has a unit, spare students
+        and a landlord -- so at a small `--properties` the later scenarios
+        simply never came up. That is the same defect this file has produced
+        six times now: a shape whose presence depends on how much data
+        somebody happened to ask for.
+
+        Fixed the same way as the others, by making it a guarantee. Anything
+        still missing after this is genuinely unreachable, which is what the
+        report at the end exists to say.
+        """
+        for scenario in SCENARIOS:
+            if scenario in self.scenarios_run:
+                continue
+
+            unit = (
+                Unit.all_objects.filter(property__status=PropertyStatus.PUBLISHED)
+                .select_related("property__landlord__user")
+                .order_by("-total_count")
+                .first()
+            )
+            spare = [student for student in students if student not in self.claimed]
+
+            if unit is None or not spare:
+                self.unreachable.append((scenario, "no unit or no unused claimant left"))
+                continue
+
+            self.run_scenario(
+                scenario, unit=unit, claimant=spare[0], landlord=unit.property.landlord
+            )
+
+    def finish_terminations(self, students) -> None:
+        """The same guarantee for the four termination paths."""
+        for path in TERMINATION_PATHS:
+            if path in self.terminations_run:
+                continue
+
+            unit = (
+                Unit.all_objects.filter(
+                    property__status=PropertyStatus.PUBLISHED, total_count__gt=1
+                )
+                .select_related("property__landlord__user")
+                .order_by("-total_count")
+                .first()
+            )
+            free = (
+                self.free_tenant_for(
+                    unit, [student for student in students if student not in self.claimed]
+                )
+                if unit is not None
+                else None
+            )
+
+            if unit is None or free is None:
+                self.unreachable.append((path, "no pooled unit or no unused tenant left"))
+                continue
+
+            self.claimed.add(free)
+            try:
+                getattr(self, path)(unit=unit, tenant=free)
+            except Exception as error:
+                self.unreachable.append((path, f"{type(error).__name__}: {error}"))
+            else:
+                self.terminations_run.add(path)
+
+    # -- the scenarios, each one a path through the real machine ------------
+
+    def claim_dates(self, unit: Unit) -> dict:
+        """Dates long enough to earn a review, so the review-defeating
+        scenarios below have something to defeat."""
+        return {
             "start_date": self.today - dt.timedelta(days=400),
             "end_date": self.today - dt.timedelta(days=100),
+            "monthly_rent_kes": unit.rent_kes,
         }
 
-        # A counter, not a modulus of `index`.
-        #
-        # This file derived five independent variations from one index --
-        # draft, unpinned, no-photos, failed-photo, claim state -- and every
-        # one of them collided with another at some `--properties` size. A
-        # stride fixed each collision and produced the next: the claim states
-        # only cycled over properties that *reached* this method, so a draft
-        # in the wrong place skipped a state entirely and the seeded queue
-        # silently lost a dispute reason.
-        #
-        # Counting the calls removes the interference by construction. Every
-        # state is reached in order, whatever the caller skipped on the way.
-        state = self.claim_state % 6
-        self.claim_state += 1
+    def raise_claim(self, unit: Unit, claimant: User, *, days_ago: int = 10) -> TenancyClaim:
+        """A claim, raised as it would be, at a point in the past.
 
-        if state == 0:
-            TenancyClaim.all_objects.create(
-                claimant=claimant,
-                status=ClaimStatus.PENDING,
-                confirmation_deadline=self.now + dt.timedelta(days=5),
-                **base,
-            )
-        elif state == 1:
-            # Auto-confirmed by silence. `resolved_by` is null on purpose:
-            # silence has no author.
-            claim = TenancyClaim.all_objects.create(
-                claimant=claimant,
-                status=ClaimStatus.CONFIRMED,
-                confirmation_deadline=self.now - dt.timedelta(days=2),
-                resolved_at=self.now - dt.timedelta(days=2),
-                **base,
-            )
-            Tenancy.all_objects.create(
-                unit=unit,
-                tenant=claimant,
-                claim=claim,
-                confirmation_source=ConfirmationSource.AUTO,
-                confirmed_at=self.now - dt.timedelta(days=2),
-                start_date=claim.start_date,
-                end_date=claim.end_date,
-                monthly_rent_kes=claim.monthly_rent_kes,
-                status=TenancyStatus.CONFIRMED,
-            )
-        elif state in (2, 3, 4):
-            reason = [
-                DisputeReason.DATES_INCORRECT,
-                DisputeReason.NEVER_TENANTED,
-                DisputeReason.DUPLICATE,
-            ][state - 2]
-            TenancyClaim.all_objects.create(
-                claimant=claimant,
-                status=ClaimStatus.DISPUTED,
-                confirmation_deadline=self.now + dt.timedelta(days=3),
-                dispute_reason=reason,
-                dispute_note="This does not match my records.",
-                disputed_by=landlord.user,
-                disputed_at=self.now - dt.timedelta(days=1),
-                proposed_start_date=(
-                    self.today - dt.timedelta(days=380)
-                    if reason == DisputeReason.DATES_INCORRECT
-                    else None
-                ),
-                proposed_end_date=(
-                    self.today - dt.timedelta(days=120)
-                    if reason == DisputeReason.DATES_INCORRECT
-                    else None
-                ),
-                **base,
-            )
-        else:
-            # Escalated, sitting in the admin queue with a deadline.
-            TenancyClaim.all_objects.create(
-                claimant=claimant,
-                status=ClaimStatus.ESCALATED,
-                confirmation_deadline=self.now - dt.timedelta(days=1),
-                dispute_reason=DisputeReason.NEVER_TENANTED,
-                dispute_note="I have never had a tenant by this name.",
-                disputed_by=landlord.user,
-                disputed_at=self.now - dt.timedelta(days=6),
-                escalation_reason=EscalationReason.IDENTITY_DISPUTED,
-                escalated_at=self.now - dt.timedelta(days=5),
-                escalation_deadline=self.now + dt.timedelta(days=8),
-                **base,
-            )
+        `now` is passed rather than mocked: every service function in this
+        machine takes it, precisely so history can be constructed without
+        lying to the clock.
+        """
+        return create_claim(
+            unit=unit,
+            claimant=claimant,
+            is_retrospective=True,
+            now=self.now - dt.timedelta(days=days_ago),
+            **self.claim_dates(unit),
+        )
+
+    def scenario_pending(self, *, unit, claimant, landlord) -> None:
+        """Raised and waiting. Deadline still ahead."""
+        self.raise_claim(unit, claimant, days_ago=1)
+
+    def scenario_auto_confirmed(self, *, unit, claimant, landlord) -> None:
+        """Confirmed by silence, **through the deadline job**.
+
+        Not by setting a status. The sweep selects it, enqueues
+        `auto_confirm_claim`, and a burst worker runs it -- so the seed
+        exercises the enqueue-and-work path as well as the transition, which
+        nothing in the suite does either.
+        """
+        self.raise_claim(unit, claimant, days_ago=30)
+        sweep_overdue_claims(now=self.now)
+        self.drain_queue()
+
+    def scenario_correction_accepted(self, *, unit, claimant, landlord) -> None:
+        """Landlord corrects the dates, tenant agrees, claim confirms.
+
+        The path that settles without an administrator, which is the whole
+        reason disputes are typed.
+        """
+        claim = self.raise_claim(unit, claimant, days_ago=12)
+        raise_dispute(
+            claim,
+            reason=DisputeReason.DATES_INCORRECT,
+            disputed_by=landlord.user,
+            note="They moved in a month later than that.",
+            proposed_start_date=claim.start_date + dt.timedelta(days=30),
+            proposed_end_date=claim.end_date,
+            now=self.now - dt.timedelta(days=11),
+        )
+        accept_correction(claim, now=self.now - dt.timedelta(days=10))
+
+    def scenario_correction_pending(self, *, unit, claimant, landlord) -> None:
+        """A dates dispute waiting on the tenant.
+
+        **The only way a claim rests in `disputed`.** Driving the machine
+        showed why: `never_tenanted` escalates on the spot because the parties
+        cannot settle identity between them, and `duplicate` resolves itself
+        from data. Only `dates_incorrect` -- and `termination_date`, its
+        equivalent on the other model -- pauses for a human. A seed that wrote
+        `status="disputed"` for all three was describing a state two of them
+        can never occupy.
+        """
+        claim = self.raise_claim(unit, claimant, days_ago=3)
+        raise_dispute(
+            claim,
+            reason=DisputeReason.DATES_INCORRECT,
+            disputed_by=landlord.user,
+            note="I think they came in September, not August.",
+            proposed_start_date=claim.start_date + dt.timedelta(days=14),
+            proposed_end_date=claim.end_date,
+            now=self.now - dt.timedelta(days=2),
+        )
+
+    def scenario_counter_rejected(self, *, unit, claimant, landlord) -> None:
+        """Correction, counter, rejection -- and an administrator.
+
+        Two parties, no agreement. `counter_unresolved` is what the admin has
+        to decide, which is a different question from what was disputed.
+        """
+        claim = self.raise_claim(unit, claimant, days_ago=9)
+        raise_dispute(
+            claim,
+            reason=DisputeReason.DATES_INCORRECT,
+            disputed_by=landlord.user,
+            note="Those dates are not what my book says.",
+            proposed_start_date=claim.start_date + dt.timedelta(days=20),
+            proposed_end_date=claim.end_date,
+            now=self.now - dt.timedelta(days=8),
+        )
+        counter_correction(
+            claim,
+            start_date=claim.start_date + dt.timedelta(days=5),
+            end_date=claim.end_date,
+            now=self.now - dt.timedelta(days=7),
+        )
+        reject_counter(claim, now=self.now - dt.timedelta(days=6))
+
+    def scenario_correction_defeats_review(self, *, unit, claimant, landlord) -> None:
+        """A correction the tenant accepted that also deletes their review.
+
+        ADR-004 §2b: the cheapest attack on the whole mechanism. It escalates
+        **despite** the tenant agreeing, because they may not realise what
+        they agreed to. The landlord is not presumed dishonest; the side
+        effect is simply not theirs to settle privately.
+        """
+        claim = self.raise_claim(unit, claimant, days_ago=14)
+        # `claim_dates` always sets an end date. Raised rather than asserted,
+        # because an assert disappears under -O and this arithmetic would then
+        # read a None and produce a confusing failure somewhere else.
+        if claim.end_date is None:  # pragma: no cover - claim_dates sets it
+            raise ValueError("this scenario needs a claim with an end date")
+
+        raise_dispute(
+            claim,
+            reason=DisputeReason.DATES_INCORRECT,
+            disputed_by=landlord.user,
+            note="They were only here a few weeks.",
+            # Short enough to fall under the review minimum.
+            proposed_start_date=claim.end_date - dt.timedelta(days=20),
+            proposed_end_date=claim.end_date,
+            now=self.now - dt.timedelta(days=13),
+        )
+        accept_correction(claim, now=self.now - dt.timedelta(days=12))
+
+    def scenario_identity_escalated(self, *, unit, claimant, landlord) -> None:
+        """ "This person never lived here." Nothing the parties can settle."""
+        claim = self.raise_claim(unit, claimant, days_ago=6)
+        raise_dispute(
+            claim,
+            reason=DisputeReason.NEVER_TENANTED,
+            disputed_by=landlord.user,
+            note="I have never had a tenant by this name.",
+            now=self.now - dt.timedelta(days=5),
+        )
+
+    def scenario_identity_resolved(self, *, unit, claimant, landlord) -> None:
+        """Escalated and then decided against the claimant.
+
+        The claim closes as withdrawn with a named resolver -- the state that
+        makes the difference between "nobody decided this" and "somebody did"
+        visible in the data.
+        """
+        claim = self.raise_claim(unit, claimant, days_ago=20)
+        raise_dispute(
+            claim,
+            reason=DisputeReason.NEVER_TENANTED,
+            disputed_by=landlord.user,
+            note="Not a tenant of mine.",
+            now=self.now - dt.timedelta(days=19),
+        )
+        resolve_escalation(
+            claim,
+            resolved_by=self.platform_admin,
+            uphold_claim=False,
+            now=self.now - dt.timedelta(days=15),
+        )
+
+    def scenario_duplicate_withdrawn(self, *, unit, claimant, landlord) -> None:
+        """A duplicate that really is one: settled from data, nobody decides.
+
+        This is the path that clears the annotation without an administrator,
+        and the only one where `resolved_by` is null because a query resolved
+        it rather than a person. It needs a covering tenancy to exist, which
+        is why the claimant here is someone who already has one.
+        """
+        covering = Tenancy.all_objects.filter(unit=unit).order_by("start_date").first()
+        if covering is None:
+            raise LookupError("no covering tenancy on this unit to be a duplicate of")
+
+        claim = create_claim(
+            unit=unit,
+            claimant=covering.tenant,
+            is_retrospective=True,
+            now=self.now - dt.timedelta(days=4),
+            start_date=covering.start_date,
+            end_date=covering.end_date,
+            monthly_rent_kes=covering.monthly_rent_kes,
+        )
+        raise_dispute(
+            claim,
+            reason=DisputeReason.DUPLICATE,
+            disputed_by=landlord.user,
+            note="Already recorded.",
+            now=self.now - dt.timedelta(days=3),
+        )
+
+    # -- terminations, driven the same way ---------------------------------
+
+    def free_tenant_for(self, unit: Unit, candidates) -> User | None:
+        """Somebody with no stay in this unit already.
+
+        `tenancy_no_overlapping_stay` covers unit **and** tenant and is
+        unconditional, so a second overlapping stay for the same person in the
+        same room is refused -- correctly, since it describes two of them
+        living in one bed. Picking a free tenant is the seed's job, not the
+        constraint's.
+        """
+        taken = set(Tenancy.all_objects.filter(unit=unit).values_list("tenant_id", flat=True))
+        return next((person for person in candidates if person.pk not in taken), None)
+
+    def termination_unit(self, unit: Unit) -> Unit | None:
+        """A unit that can hold the termination's tenancy alongside what is
+        already there.
+
+        A termination needs a *current* stay to end early, and the property
+        already has one on its first unit. Putting a second current stay in a
+        one-room unit is two people in a room that holds one -- which the
+        occupancy cross-check caught the first time this ran, for the second
+        time in two rounds. Capacity is not a detail of the fixture.
+        """
+        if unit.total_count > 1:
+            return unit
+
+        spare = (
+            Unit.all_objects.filter(property=unit.property, total_count__gt=1)
+            .order_by("pk")
+            .first()
+        )
+        return spare
+
+    def drive_termination(self, unit: Unit, tenant: User) -> None:
+        """Early terminations, through the flow rather than by flag.
+
+        Three paths, cycled, because they end in different places: confirmed
+        by the counterparty, confirmed by silence through the sweep, and
+        escalated because the proposed date would newly delete a review right.
+
+        The last is the interesting one. It escalates **immediately** on
+        request -- not disputed, because nobody has disagreed yet -- and must
+        never reach the auto-confirm sweep, since the counterparty's silence
+        would otherwise delete their own review.
+        """
+        roomy = self.termination_unit(unit)
+        if roomy is None:
+            return
+
+        if self.free_tenant_for(roomy, [tenant]) is None:
+            return
+
+        path = TERMINATION_PATHS[self.termination_state % len(TERMINATION_PATHS)]
+        self.termination_state += 1
+
+        try:
+            getattr(self, path)(unit=roomy, tenant=tenant)
+        except Exception as error:
+            self.unreachable.append((path, f"{type(error).__name__}: {error}"))
+
+    def termination_confirmed(self, *, unit, tenant) -> None:
+        """Proposed by the tenant, confirmed by the landlord."""
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=300),
+            end=self.today + dt.timedelta(days=60),
+            via_claim=True,
+        )
+        request = request_early_termination(
+            tenancy,
+            initiated_by=tenant,
+            ended_on=self.today - dt.timedelta(days=20),
+            reason="Moved closer to campus.",
+            now=self.now - dt.timedelta(days=10),
+        )
+        confirm_termination(request, now=self.now - dt.timedelta(days=9))
+
+    def termination_auto_confirmed(self, *, unit, tenant) -> None:
+        """Confirmed by silence, through the sweep and a burst worker."""
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=320),
+            end=self.today + dt.timedelta(days=90),
+            via_claim=True,
+        )
+        request_early_termination(
+            tenancy,
+            initiated_by=unit.property.landlord.user,
+            ended_on=self.today - dt.timedelta(days=40),
+            reason="Left without notice; the room has been re-let.",
+            now=self.now - dt.timedelta(days=30),
+        )
+        sweep_overdue_terminations(now=self.now)
+        self.drain_queue()
+
+    def termination_defeats_review(self, *, unit, tenant) -> None:
+        """A proposed end date that would newly remove a review right.
+
+        Escalates on request. No silence confirms it, which is the whole
+        point: the counterparty ignoring an email must not be able to cost
+        them a review they had already earned.
+        """
+        # A stay that has NOT yet earned its review right. The first version
+        # of this used a 200-day-old tenancy and escalated nothing, which was
+        # the latch working exactly as designed: eligibility once earned is
+        # never revoked, so terminating an old stay cannot defeat a review
+        # there is no longer anything to defend. The path only exists for a
+        # stay still inside `REVIEW_MINIMUM_STAY_DAYS`.
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=10),
+            end=self.today + dt.timedelta(days=300),
+            via_claim=True,
+        )
+        request_early_termination(
+            tenancy,
+            initiated_by=unit.property.landlord.user,
+            ended_on=tenancy.start_date + dt.timedelta(days=5),
+            reason="They left after a few days.",
+            now=self.now,
+        )
+
+    def termination_pending(self, *, unit, tenant) -> None:
+        """Requested and waiting on the counterparty.
+
+        Added because driving the four original paths left no termination
+        resting in `pending` or `disputed` -- every one of them confirmed or
+        escalated -- and those are precisely the two the portal has to show
+        somebody a decision about.
+        """
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=280),
+            end=self.today + dt.timedelta(days=70),
+            via_claim=True,
+        )
+        request_early_termination(
+            tenancy,
+            initiated_by=tenant,
+            ended_on=self.today - dt.timedelta(days=5),
+            reason="Finishing my course early.",
+            now=self.now,
+        )
+
+    def termination_disputed_pending(self, *, unit, tenant) -> None:
+        """Disputed with a counter-date, waiting on the initiator.
+
+        The only way a termination rests in `disputed`: a counter-proposal
+        gives the parties something to settle, so it does not escalate. With
+        no counter it would go straight to an administrator, since there would
+        be nothing between them to agree on.
+        """
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=310),
+            end=self.today + dt.timedelta(days=50),
+            via_claim=True,
+        )
+        request = request_early_termination(
+            tenancy,
+            initiated_by=unit.property.landlord.user,
+            ended_on=self.today - dt.timedelta(days=30),
+            reason="The room was cleared in July.",
+            now=self.now - dt.timedelta(days=2),
+        )
+        dispute_termination(
+            request,
+            disputed_by=tenant,
+            counter_end_date=self.today - dt.timedelta(days=12),
+            now=self.now - dt.timedelta(days=1),
+        )
+
+    def termination_disputed_then_countered(self, *, unit, tenant) -> None:
+        """Disputed with a counter-date the initiator then accepts."""
+        tenancy = self.tenancy(
+            unit,
+            tenant,
+            start=self.today - dt.timedelta(days=340),
+            end=self.today + dt.timedelta(days=80),
+            via_claim=True,
+        )
+        request = request_early_termination(
+            tenancy,
+            initiated_by=unit.property.landlord.user,
+            ended_on=self.today - dt.timedelta(days=60),
+            reason="Room was cleared in June.",
+            now=self.now - dt.timedelta(days=20),
+        )
+        dispute_termination(
+            request,
+            disputed_by=tenant,
+            counter_end_date=self.today - dt.timedelta(days=45),
+            now=self.now - dt.timedelta(days=19),
+        )
+        accept_termination_counter(request, now=self.now - dt.timedelta(days=18))
+
+    def drain_queue(self) -> None:
+        """Run whatever the sweeps just enqueued, in this process.
+
+        The seed drives real jobs, and real jobs are enqueued rather than
+        called. Running a burst worker exercises the enqueue-and-work path --
+        the one place a job can be lost between a sweep selecting a row and
+        anything happening to it.
+        """
+        import django_rq
+
+        worker = django_rq.get_worker("default")
+        worker.work(burst=True, with_scheduler=False)
+
+    def all_students(self) -> list:
+        """Every seeded student, for the leftover-path pass."""
+        return list(User.objects.filter(student_profile__isnull=False).order_by("pk"))
 
     def build_aggregates(self) -> None:
         """Compute the rating caches the seeded reviews imply.
@@ -1133,14 +1612,10 @@ class Command(BaseCommand):
         Reviews are written straight to the model here rather than through
         `create_review`, because the gate correctly refuses most seeded
         tenancies -- so the enqueue that normally follows a review never runs.
-        Without this the platform has 33 reviews and no aggregates, which is a
-        state a real deployment can also reach (a queue that was down, a
-        restore that brought reviews without their caches) and which the
-        reconciler now reports as `missing` rather than as health.
-
-        Built explicitly rather than left broken: a seed whose every rating
-        endpoint returns "no reviews yet" would make the whole review surface
-        untestable by hand.
+        Without this the platform has reviews and no aggregates, which is a
+        state a real deployment also reaches (a queue that was down, a restore
+        that brought reviews without their caches) and which the reconciler
+        now reports as `missing` rather than as health.
         """
         from reviews.recompute import recompute_landlord, recompute_property, recompute_unit
 
@@ -1186,10 +1661,31 @@ class Command(BaseCommand):
             ("inquiries", Inquiry.all_objects.count()),
             ("  answered", Inquiry.all_objects.filter(status=InquiryStatus.ANSWERED).count()),
             ("saved properties", SavedProperty.all_objects.count()),
+            ("terminations", TerminationRequest.all_objects.count()),
+            (
+                "  escalated",
+                TerminationRequest.all_objects.filter(status=ClaimStatus.ESCALATED).count(),
+            ),
         ]
 
         for label, value in rows:
             self.stdout.write(f"{label:>24}  {value}")
+
+        self.stdout.write("")
+        if self.unreachable:
+            # The most valuable output of this command. Each line is a
+            # transition the seed asked for through a real service call and
+            # could not get -- either a path that does not connect, or a state
+            # that should not exist.
+            self.stdout.write(self.style.WARNING("Transitions the seed could not reach:"))
+            for scenario, error in self.unreachable:
+                self.stdout.write(f"  {scenario}: {error}")
+        else:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Every claim and termination path was reached through a real service call."
+                )
+            )
 
         coverage = cross_check_coverage()
         self.stdout.write("")

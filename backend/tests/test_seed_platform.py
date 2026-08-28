@@ -197,16 +197,114 @@ class TestTheAdminQueue:
         assert ClaimStatus.ESCALATED in states
 
     def test_every_typed_dispute_reason_appears(self, seeded):
-        """The transition table is exercised by data, not only by tests. A
-        queue that is empty in development is a queue nobody notices is badly
-        sorted."""
+        """Across all claims, not only the ones still sitting in `disputed`.
+
+        Driving the machine showed why the earlier version of this assertion
+        was wrong: **only `dates_incorrect` can rest in `disputed`.**
+        `never_tenanted` escalates on the spot, because identity is not
+        something the two parties can settle between them, and `duplicate`
+        resolves itself from data. A seed that wrote `status="disputed"` with
+        all three reasons was describing a state two of them can never
+        occupy.
+        """
         reasons = set(
-            TenancyClaim.all_objects.filter(status=ClaimStatus.DISPUTED).values_list(
+            TenancyClaim.all_objects.exclude(dispute_reason="").values_list(
                 "dispute_reason", flat=True
             )
         )
 
         assert len(reasons) >= 3
+
+    def test_only_a_dates_dispute_rests_in_disputed(self, seeded):
+        """The rule the previous assertion was hiding."""
+        from tenancies.constants import DisputeReason
+
+        resting = set(
+            TenancyClaim.all_objects.filter(status=ClaimStatus.DISPUTED).values_list(
+                "dispute_reason", flat=True
+            )
+        )
+
+        assert resting <= {DisputeReason.DATES_INCORRECT}
+
+    def test_claims_were_driven_rather_than_written(self, seeded):
+        """A confirmed claim carries a resolution, and an auto-confirmed one
+        carries no resolver.
+
+        Both come from `confirm_claim`, which is the single place a claim
+        becomes evidence. A direct write produces the status and neither of
+        these, and nothing would notice.
+        """
+        confirmed = TenancyClaim.all_objects.filter(status=ClaimStatus.CONFIRMED)
+
+        assert confirmed.exists()
+        assert not confirmed.filter(resolved_at=None).exists()
+
+    def test_a_tenancy_exists_that_was_auto_confirmed_by_silence(self, seeded):
+        """Reached through the deadline sweep and a burst worker, with the
+        clock advanced -- not by setting `confirmation_source`.
+
+        `confirmed_by` is null because silence has no author, and that is a
+        constraint as well as a comment.
+        """
+        auto = Tenancy.all_objects.filter(confirmation_source=ConfirmationSource.AUTO)
+
+        assert auto.exists()
+        assert not auto.exclude(confirmed_by=None).exists()
+
+
+class TestTerminations:
+    """Driven through the flow, not set by flag."""
+
+    def test_a_termination_was_confirmed(self, seeded):
+        from tenancies.models import TerminationRequest
+
+        assert TerminationRequest.all_objects.filter(status=ClaimStatus.CONFIRMED).exists()
+
+    def test_a_confirmed_termination_moved_the_end_date(self, seeded):
+        """`end_date` moves to the actual day and stays authoritative for
+        currency -- so a stay that ended in March reads as past from March
+        with no flag consulted."""
+        terminated = Tenancy.all_objects.filter(terminated_early=True)
+
+        assert terminated.exists()
+        assert not terminated.filter(termination_reason="").exists()
+
+    def test_a_review_defeating_termination_escalated_on_request(self, seeded):
+        """Not disputed -- nobody has disagreed yet -- and never reachable by
+        the auto-confirm sweep, because the counterparty's silence would
+        otherwise delete their own review right.
+
+        This path could not be reached at all until `effective_stay_days` was
+        fixed: every seeded stay was already review-eligible, so there was
+        never anything left to defeat.
+        """
+        from tenancies.constants import EscalationReason
+        from tenancies.models import TerminationRequest
+
+        assert TerminationRequest.all_objects.filter(
+            status=ClaimStatus.ESCALATED,
+            escalation_reason=EscalationReason.TERMINATION_DEFEATS_REVIEW,
+        ).exists()
+
+    def test_no_stay_is_pre_latched(self, seeded):
+        """`review_eligible_at` is a latch the services stamp, and the seed
+        used to set it directly -- which marked every stay as having earned a
+        review right and silently disabled the termination guard across the
+        whole platform.
+
+        A stay shorter than the minimum must carry no latch.
+        """
+        import datetime as dt
+
+        from django.conf import settings
+
+        too_new = Tenancy.all_objects.filter(
+            start_date__gt=dt.date.today() - dt.timedelta(days=settings.REVIEW_MINIMUM_STAY_DAYS),
+            end_date__isnull=False,
+        ).exclude(review_eligible_at=None)
+
+        assert not too_new.exists(), "a stay was marked eligible before it earned it"
 
 
 class TestPropertyStates:
