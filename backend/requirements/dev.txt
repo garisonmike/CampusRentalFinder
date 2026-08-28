@@ -20,3 +20,10 @@ pre-commit==4.4.0
 
 # --- Developer conveniences ------------------------------------------------
 django-extensions==4.1
+
+# --- Seed fixtures ---------------------------------------------------------
+# Writes EXIF into generated photos, so `strip_image_metadata` can be tested
+# against a file that actually has GPS coordinates in it rather than against a
+# synthetic pixel that has never had any. Dev-only: nothing in the request path
+# reads EXIF, it only removes it.
+piexif==1.1.3

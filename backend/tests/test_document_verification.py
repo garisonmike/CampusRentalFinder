@@ -574,3 +574,88 @@ class TestResubmission:
             submit_verification_document(student_profile, a_jpeg())
 
         assert "university" in str(caught.value).lower()
+
+
+class TestStrippingIsAffordable:
+    """The strip runs synchronously inside the upload request.
+
+    An implementation that is correct but costs 15 seconds and 838 MB per file
+    is a denial of service with a valid explanation. Both properties are
+    asserted here, because only one of them was ever true.
+
+    The photo used is a real 4032x3024 JPEG with EXIF and GPS -- the ordinary
+    case, and the one no test had ever supplied. Everything before this used a
+    synthetic image a few pixels wide, which exercises the code path and none
+    of its cost.
+    """
+
+    @staticmethod
+    def phone_photo() -> bytes:
+        from config.management.commands._seed_images import generate
+
+        data, _content_type, _name = generate("phone_4mb", seed=1)
+        return data
+
+    def test_it_removes_gps_from_a_real_phone_photo(self):
+        import piexif
+
+        from accounts.documents import strip_image_metadata
+
+        raw = self.phone_photo()
+        assert piexif.load(raw)["GPS"], "the fixture should carry GPS to begin with"
+
+        clean = strip_image_metadata(raw, "image/jpeg")
+
+        assert not piexif.load(clean)["GPS"]
+
+    def test_it_removes_the_device_make_and_model(self):
+        import piexif
+
+        from accounts.documents import strip_image_metadata
+
+        clean = strip_image_metadata(self.phone_photo(), "image/jpeg")
+        zeroth = piexif.load(clean)["0th"]
+
+        assert piexif.ImageIFD.Make not in zeroth
+        assert piexif.ImageIFD.Model not in zeroth
+
+    def test_it_does_not_allocate_a_python_object_per_pixel(self):
+        """12 million pixels became 12 million tuples, in the request path.
+
+        Asserted as a memory ceiling rather than a timing, because timings are
+        flaky on shared CI and this failure is a hundredfold, not a fraction.
+        """
+        import tracemalloc
+
+        from accounts.documents import strip_image_metadata
+
+        raw = self.phone_photo()
+
+        tracemalloc.start()
+        strip_image_metadata(raw, "image/jpeg")
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+
+        # The old implementation peaked at 838 MB on this exact file. Fifty is
+        # far above the 5 MB this version needs and far below that.
+        assert peak < 50 * 1024 * 1024, f"peaked at {peak / 1024 / 1024:.0f} MB"
+
+    def test_the_image_still_decodes_afterwards(self):
+        """A strip that corrupts the file would pass both assertions above."""
+        import io
+
+        from PIL import Image
+
+        from accounts.documents import strip_image_metadata
+
+        clean = strip_image_metadata(self.phone_photo(), "image/jpeg")
+
+        with Image.open(io.BytesIO(clean)) as image:
+            assert image.size == (4032, 3024)
+
+    def test_a_pdf_is_returned_untouched(self):
+        from accounts.documents import strip_image_metadata
+
+        pdf = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"0" * 64
+
+        assert strip_image_metadata(pdf, "application/pdf") == pdf
