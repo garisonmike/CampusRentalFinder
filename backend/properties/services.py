@@ -500,7 +500,27 @@ def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> Uni
     from accounts.documents import strip_image_metadata
 
     upload.seek(0)
-    clean = strip_image_metadata(upload.read(), content_type)
+    try:
+        clean = strip_image_metadata(upload.read(), content_type)
+    except OSError as error:
+        # A file with a valid header and missing body -- what a dropped upload
+        # leaves behind. The sniff above cannot catch it, because the header is
+        # genuinely a PNG's.
+        #
+        # Refused here rather than stored. Before the strip existed this was
+        # accepted, stored, and failed in the resize job: a photo the landlord
+        # believed they had uploaded, sitting `failed` in a queue they cannot
+        # see, with `best_url` serving the broken original. Failing at the
+        # point of upload is the difference between "try again" and "why is my
+        # listing like this".
+        raise ValidationError(
+            {
+                "image": _(
+                    "That image could not be read -- it looks incomplete. If "
+                    "the upload was interrupted, try it again."
+                )
+            }
+        ) from error
     upload.seek(0)
 
     key = f"units/{unit.pk}/{uuid4().hex}.{extension}"

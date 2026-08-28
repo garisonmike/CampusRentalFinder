@@ -743,6 +743,29 @@ class TestAnUploadIsJudgedByItsBytes:
 
         assert photo.byte_size == len(storages["default"].open(photo.original_key).read())
 
+    def test_a_truncated_image_is_refused_with_a_message(self, unit_factory):
+        """A valid header and no body. The sniff cannot catch it -- the header
+        really is a PNG's -- so the decode is what notices.
+
+        Before this it was stored and failed in the resize job: a photo the
+        landlord thought they had uploaded, sitting `failed` in a queue they
+        cannot see, with the broken original being served. Found by seeding a
+        deliberately truncated file, which then crashed with an unhandled
+        OSError -- a 500 where a sentence belongs.
+        """
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from config.management.commands._seed_images import generate
+        from properties.services import add_photo
+
+        raw, content_type, name = generate("truncated", seed=1)
+
+        with pytest.raises(ValidationError, match="incomplete"):
+            add_photo(
+                unit=unit_factory(),
+                upload=SimpleUploadedFile(name, raw, content_type=content_type),
+            )
+
     def test_the_file_is_still_readable_after_sniffing(self, unit_factory):
         """The sniff reads the head and must put the cursor back.
 

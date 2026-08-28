@@ -41,6 +41,8 @@ import datetime as dt
 import random
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -51,7 +53,7 @@ from engagement.constants import InquiryStatus
 from engagement.models import Inquiry, SavedProperty
 from properties.constants import PhotoProcessingStatus, PropertyStatus, PropertyType
 from properties.models import Property, PropertyCampusDistance, Unit, UnitPhoto
-from properties.services import state_vacancy
+from properties.services import add_photo, state_vacancy
 from reviews.aggregates import (
     LandlordRatingAggregate,
     PropertyRatingAggregate,
@@ -81,6 +83,8 @@ from tenancies.services import (
 )
 from universities.constants import SignupPolicy, VerificationMethod, VerificationStatus
 from universities.models import Campus, University
+
+from ._seed_images import PHOTO_SHAPES, generate
 
 # --- Kenyan flavour, so the data reads as the thing it represents ----------
 
@@ -158,6 +162,16 @@ BLOCK_NAMES = [
 ]
 
 
+#: What each generated photo is captioned, so alt text is real text.
+CAPTIONS = {
+    "phone_4mb": "The room, taken on a phone",
+    "modest_200kb": "The shared kitchen",
+    "portrait": "Looking towards the gate",
+    "panorama": "The whole compound",
+    "over_compressed": "",
+}
+
+
 #: Every path through the claim machine the seed drives, in order.
 #:
 #: Named rather than counted: a scenario that stops being reachable should show
@@ -208,6 +222,13 @@ class Command(BaseCommand):
             help="Properties per university. The default is enough for query "
             "counts to show their real shape; the minimum is what it takes to "
             "contain every shape at all.",
+        )
+        parser.add_argument(
+            "--real-images",
+            action="store_true",
+            help="Generate and upload actual image bytes through the real "
+            "pipeline, and resize them with a burst worker. Slower, and the "
+            "only way anything downstream of an upload is exercised at all.",
         )
         parser.add_argument(
             "--flush",
@@ -267,6 +288,11 @@ class Command(BaseCommand):
         #: forced rather than left to how many properties somebody asked for.
         self.scenarios_run: set[str] = set()
         self.terminations_run: set[str] = set()
+        #: Uploads the pipeline refused, with the reason. A refusal that stops
+        #: happening is a hole; recorded so it is visible either way.
+        self.refused_uploads: list[tuple[str, str]] = []
+        self.real_images = options["real_images"]
+        self.seed = options["seed"]
         self.today = timezone.localdate()
         self.now = timezone.now()
 
@@ -292,6 +318,11 @@ class Command(BaseCommand):
                     students=students_by_tenant[university.subdomain],
                     count=options["properties"],
                 )
+
+        if self.real_images:
+            # After the atomic block, so the `on_commit` enqueues from every
+            # `add_photo` above have actually fired.
+            self.drain_queue()
 
         self.finish_scenarios(self.all_students())
         self.finish_terminations(self.all_students())
@@ -498,7 +529,10 @@ class Command(BaseCommand):
             # building and stopped. The detail page has a state for it, and
             # nothing else in the seed reaches that state.
             units = [] if "no_units" in role else self.make_units(prop, index)
-            self.make_photos(units, index)
+            if self.real_images:
+                self.make_real_photos(units, index)
+            else:
+                self.make_photos(units, index)
             self.make_vacancy(units, landlord, index)
             self.make_history(prop, units, students, landlord, index)
             self.make_engagement(prop, units, students, index)
@@ -690,6 +724,50 @@ class Command(BaseCommand):
                 )
 
         return units
+
+    def make_real_photos(self, units: list[Unit], index: int) -> None:
+        """Upload real image bytes through `add_photo`, to real storage.
+
+        Every photo the seed made before this was a key string with nothing
+        behind it -- enough to render a URL, and enough to leave the whole
+        ADR-007 pipeline unexercised. `generate_photo_variants` had never met
+        a file with more than one pixel in it.
+
+        These go through the same service the API uses: content-type sniff,
+        size cap, store, enqueue. The burst worker then resizes them, which is
+        the first time that job has decoded anything real.
+
+        One unit per property gets the full set, because a 4 MB upload per
+        unit across a 24-property seed is a minute of encoding for no extra
+        coverage.
+        """
+        if index % 4 == 0 or not units:
+            return
+
+        unit = units[0]
+
+        for position, shape in enumerate(PHOTO_SHAPES):
+            data, content_type, filename = generate(shape, seed=self.seed + position)
+            upload = SimpleUploadedFile(filename, data, content_type=content_type)
+
+            try:
+                add_photo(
+                    unit=unit,
+                    upload=upload,
+                    caption=CAPTIONS.get(shape, ""),
+                    uploaded_by=unit.property.landlord.user,
+                )
+            except ValidationError as error:
+                # Expected for the shapes that are supposed to be refused.
+                # Recorded so a refusal that stops happening is visible: the
+                # seed asserting "the PDF was rejected" is worth more than the
+                # seed quietly not having one.
+                # Django's ValidationError, not DRF's: the service layer raises
+                # the framework-agnostic one so a management command and a job
+                # get the same error as a request does.
+                self.refused_uploads.append((shape, str(error.message_dict)))
+
+        self.drain_queue()
 
     def make_photos(self, units: list[Unit], index: int) -> None:
         """Photos, including the two states a listing page has to survive.
@@ -1589,18 +1667,23 @@ class Command(BaseCommand):
         )
         accept_termination_counter(request, now=self.now - dt.timedelta(days=18))
 
-    def drain_queue(self) -> None:
-        """Run whatever the sweeps just enqueued, in this process.
+    def drain_queue(self, *queues: str) -> None:
+        """Run whatever was just enqueued, in this process.
 
         The seed drives real jobs, and real jobs are enqueued rather than
-        called. Running a burst worker exercises the enqueue-and-work path --
-        the one place a job can be lost between a sweep selecting a row and
-        anything happening to it.
+        called. A burst worker exercises the enqueue-and-work path -- the one
+        place a job can be lost between a sweep selecting a row and anything
+        happening to it.
+
+        **Both queues by default.** Photo variants go to `media` and
+        everything else to `default`; draining only `default` left every
+        seeded photo `pending` with an empty queue and no failures, which
+        looks exactly like a worker that ran and found nothing to do.
         """
         import django_rq
 
-        worker = django_rq.get_worker("default")
-        worker.work(burst=True, with_scheduler=False)
+        for name in queues or ("default", "media"):
+            django_rq.get_worker(name).work(burst=True, with_scheduler=False)
 
     def all_students(self) -> list:
         """Every seeded student, for the leftover-path pass."""
@@ -1685,6 +1768,33 @@ class Command(BaseCommand):
                 self.style.SUCCESS(
                     "Every claim and termination path was reached through a real service call."
                 )
+            )
+
+        if self.real_images:
+            self.stdout.write("")
+            self.stdout.write("Uploads the pipeline refused:")
+            for shape, reason in self.refused_uploads:
+                self.stdout.write(f"  {shape}: {reason[:110]}")
+            if not self.refused_uploads:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "  none -- which is wrong: a lying extension and a truncated "
+                        "file are both in the fixture set and both should have been "
+                        "refused."
+                    )
+                )
+
+            ready = UnitPhoto.all_objects.filter(
+                processing_status=PhotoProcessingStatus.READY
+            ).count()
+            failed = UnitPhoto.all_objects.filter(
+                processing_status=PhotoProcessingStatus.FAILED
+            ).count()
+            pending = UnitPhoto.all_objects.filter(
+                processing_status=PhotoProcessingStatus.PENDING
+            ).count()
+            self.stdout.write(
+                f"  variants: {ready} ready, {failed} failed, {pending} still pending"
             )
 
         coverage = cross_check_coverage()
