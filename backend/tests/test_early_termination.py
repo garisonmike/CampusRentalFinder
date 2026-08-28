@@ -41,6 +41,7 @@ from tenancies.services import (
     accept_termination_counter,
     confirm_termination,
     dispute_termination,
+    effective_stay_days,
     request_early_termination,
     resolve_termination_escalation,
     review_eligibility_date,
@@ -489,3 +490,69 @@ class TestDisputingATermination:
 
         assert isinstance(result, TerminationRequest)
         assert result.escalation_reason == EscalationReason.TERMINATION_DEFEATS_REVIEW
+
+
+class TestAStayLastsAsLongAsItHasRun:
+    """`effective_stay_days` must never count past today.
+
+    Found by driving the seed through the real termination flow: the
+    `termination_defeats_review` escalation could not be reached no matter how
+    short the proposed end date was, because every seeded tenancy was already
+    review-eligible on the day it started.
+
+    The cause was one `or`. `end_date` was used whenever it was set, so a
+    twelve-month lease read as a 365-day stay on its first morning.
+    """
+
+    def test_a_current_stay_counts_from_start_to_today(self, tenancy_factory, unit_factory):
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=3),
+            end_date=dt.date.today() + dt.timedelta(days=362),
+        )
+
+        assert effective_stay_days(tenancy) == 3
+
+    def test_a_finished_stay_counts_its_whole_length(self, tenancy_factory, unit_factory):
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=200),
+            end_date=dt.date.today() - dt.timedelta(days=50),
+        )
+
+        assert effective_stay_days(tenancy) == 150
+
+    def test_an_open_ended_stay_counts_to_today(self, tenancy_factory, unit_factory):
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=40),
+            end_date=None,
+        )
+
+        assert effective_stay_days(tenancy) == 40
+
+    def test_a_three_day_old_lease_is_not_reviewable(self, tenancy_factory, unit_factory):
+        """The rule ADR-004 exists for. A week in a room tells you about the
+        viewing; the water going off every third Thursday takes a month to
+        notice -- and this was defeated for every tenancy with an agreed end
+        date, which is most of them."""
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=3),
+            end_date=dt.date.today() + dt.timedelta(days=362),
+            review_eligible_at=None,
+        )
+
+        assert review_eligibility_date(tenancy) is None
+
+    def test_the_termination_guard_can_fire_again(self, tenancy_factory, unit_factory):
+        """Its first condition is 'the stay has not yet earned eligibility'.
+        With everything already earned, nothing could ever be defeated."""
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=10),
+            end_date=dt.date.today() + dt.timedelta(days=300),
+            review_eligible_at=None,
+        )
+
+        assert termination_would_defeat_review(tenancy, tenancy.start_date + dt.timedelta(days=5))

@@ -345,12 +345,36 @@ def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
 def effective_stay_days(tenancy: Tenancy, *, today: dt.date | None = None) -> int:
     """How long the stay has lasted so far.
 
-    An ongoing tenancy counts up to today. This is the *live* figure -- it goes
-    down if `end_date` moves back, which is exactly why review eligibility is
-    latched rather than read from here.
+    **Never counts past today.** A twelve-month lease signed on Monday has
+    lasted three days by Thursday, not 365 -- and the earlier implementation
+    said 365, because it used `end_date` whenever one was set and only fell
+    back to today for open-ended stays.
+
+    The consequence was not small. Review eligibility reads this, so every
+    tenancy with an agreed end date became reviewable the day it started: the
+    minimum-stay rule ADR-004 exists to enforce -- *a week in a room tells you
+    about the viewing; the water going off every third Thursday takes a month
+    to notice* -- was defeated for the majority of stays, which are exactly the
+    ones with an agreed end. And because eligibility latches, the wrongly
+    granted right was then permanent.
+
+    It also silently disabled `termination_would_defeat_review`, whose first
+    condition is "the stay has not yet earned eligibility". Nothing could ever
+    be defeated, because everything was already earned.
+
+    No test saw it. Fixtures are past stays, where `end_date` is behind today
+    and the two readings agree, or open-ended ones, which took the fallback.
+    The disagreement only appears for a *current* stay with an agreed end --
+    the commonest tenancy in the product and the one no fixture had.
+
+    This is the *live* figure and it goes down if `end_date` moves back, which
+    is why eligibility is latched rather than read from here.
     """
-    end = tenancy.end_date or (today or dt.date.today())
-    return (end - tenancy.start_date).days
+    today = today or dt.date.today()
+    end = tenancy.end_date or today
+    # Whichever comes first. A stay cannot have lasted longer than it has been
+    # running, whatever the lease says it will eventually be.
+    return (min(end, today) - tenancy.start_date).days
 
 
 def review_eligibility_date(tenancy: Tenancy, *, today: dt.date | None = None) -> dt.date | None:
