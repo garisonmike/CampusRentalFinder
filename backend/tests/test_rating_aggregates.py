@@ -480,3 +480,40 @@ class TestReconciliation:
         summarise_property(prop.pk)
 
         assert not PropertyRatingAggregate.all_objects.filter(property_reviewed=prop).exists()
+
+
+class TestMissingAggregatesAreReported:
+    """A reviewed property with no aggregate row at all.
+
+    The reconciler samples **existing** aggregates, so a property whose
+    aggregate was never created is never sampled, never drifts, and never
+    appears in the count -- and the job logs `drifted=0`, which reads as
+    health. A seeded platform with 33 reviews and zero aggregates reported
+    exactly that.
+
+    `docs/OPERATIONS.md` calls this shape "a check whose scope is narrower than
+    the belief attached to it". The fix is not a wider sample; it is asking the
+    other question and reporting it as its own number.
+    """
+
+    def test_a_reviewed_property_with_no_aggregate_is_counted(
+        self, review_factory, tenancy_factory
+    ):
+        from reviews.aggregates import PropertyRatingAggregate, UnitRatingAggregate
+        from reviews.jobs import reconcile_rating_aggregates
+
+        review_factory(tenancy=tenancy_factory())
+        PropertyRatingAggregate.all_objects.all().delete()
+        UnitRatingAggregate.all_objects.all().delete()
+
+        assert reconcile_rating_aggregates() > 0
+
+    def test_a_platform_with_current_aggregates_is_clean(self, review_factory, tenancy_factory):
+        from reviews.jobs import reconcile_rating_aggregates
+        from reviews.recompute import recompute_property, recompute_unit
+
+        review = review_factory(tenancy=tenancy_factory())
+        recompute_unit(review.tenancy.unit_id)
+        recompute_property(review.tenancy.unit.property_id)
+
+        assert reconcile_rating_aggregates() == 0

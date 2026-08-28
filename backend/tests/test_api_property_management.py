@@ -25,12 +25,14 @@ import io
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.capabilities import CaretakerPermission
 from properties.constants import PropertyStatus, VacancyFreshness
-from properties.models import Unit, UnitPhoto
+from properties.models import Property, Unit, UnitPhoto
 from properties.services import vacancy_freshness
 
 from .factories import UserFactory
@@ -698,3 +700,80 @@ class TestTheManagedList:
         response = request_json(tenant_client, "get", "/api/v1/properties/manage/", host)
 
         assert response.data == []
+
+
+# ---------------------------------------------------------------------------
+# Query counts, at a size fixtures do not reach
+# ---------------------------------------------------------------------------
+
+
+class TestItDoesNotScaleWithRows:
+    """One query per row renders correctly in a test and falls over live.
+
+    These assertions exist because the seeded platform showed a real one:
+    `/properties/manage/` issued **eighteen queries for six properties**, two
+    per campus-distance row, because `CampusDistanceSerializer` renders
+    `campus_name` and `university_name` and the view prefetched the distances
+    without their relations. No fixture could show it -- they have one campus
+    each, so the N+1 was worth two queries and looked like a constant.
+    """
+
+    def test_the_managed_list_is_flat_in_portfolio_size(
+        self,
+        landlord_client,
+        host,
+        property_factory,
+        landlord_profile,
+        unit_factory,
+        campus_distance_factory,
+        university,
+        campus_factory,
+    ):
+        def measure(count: int) -> int:
+            Property.all_objects.filter(landlord=landlord_profile).delete()
+            campus = campus_factory(university=university)
+            for index in range(count):
+                prop = property_factory(landlord=landlord_profile, name=f"Block {index}")
+                campus_distance_factory(property=prop, university=university, campus=campus)
+                unit_factory(property=prop)
+
+            with CaptureQueriesContext(connection) as queries:
+                request_json(landlord_client, "get", "/api/v1/properties/manage/", host)
+            return len(queries)
+
+        two = measure(2)
+        eight = measure(8)
+
+        assert eight <= two + 1, (
+            f"{two} queries for two properties, {eight} for eight. "
+            f"That is {eight - two} extra queries for six extra rows."
+        )
+
+    def test_a_second_campus_costs_nothing(
+        self,
+        landlord_client,
+        host,
+        property_factory,
+        landlord_profile,
+        campus_distance_factory,
+        university,
+        campus_factory,
+        unit_factory,
+    ):
+        """The exact shape the seed exposed. A university with two campuses is
+        ordinary -- JKUAT has Juja and Karen -- and every property near both
+        gets two distance rows."""
+        prop = property_factory(landlord=landlord_profile)
+        unit_factory(property=prop)
+        for name in ("Main", "Second", "Third"):
+            campus_distance_factory(
+                property=prop,
+                university=university,
+                campus=campus_factory(university=university, name=name),
+            )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = request_json(landlord_client, "get", "/api/v1/properties/manage/", host)
+
+        assert len(response.data[0]["campus_distances"]) == 3
+        assert len(queries) < 12, [q["sql"][:80] for q in queries]

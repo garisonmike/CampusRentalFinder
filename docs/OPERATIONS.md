@@ -489,6 +489,8 @@ people repeat about the check has quietly widened past both.
 | `test_minio_is_reachable_in_ci` | A compliance test would skip rather than run |
 | `test_the_coverage_floor_is_declared_once` | The floor is declared in two places again |
 | `test_the_performance_budget_is_enforced` (frontend) | The listing bundle grows past its budget |
+| `reconcile_rating_aggregates` (the `missing` count) | A reviewed property has no aggregate row -- which the drift sample cannot see, because it walks aggregates that exist |
+| `seed_platform` + `test_every_shape_survives_the_smallest_allowed_platform` | The development seed stops producing a shape the UI has a branch for |
 | *(nothing — and there cannot be)* | A control over user-supplied imagery becomes unreadable. See **Checks whose scope is narrower than the belief attached to them**: this one is handled by construction at the component, not by a check |
 
 ## Alerting
@@ -508,6 +510,7 @@ volume threshold will not fire on it. Every threshold below is an age.
 | Variants stalled | Oldest `UnitPhoto` in `processing_status='pending'` > **1 hour** | Warn |
 | Routing stalled | Oldest `PropertyCampusDistance` with null `walking_minutes` > **24 hours** | Warn |
 | Rating drift | Any sampled aggregate differing from its recomputed value | Page |
+| Rating aggregate missing | Any published review whose property or unit has **no aggregate row at all** | Page |
 | Reconciler stalled | Oldest aggregate `computed_at` > **48 hours** | Warn |
 | Worker absent | No RQ job of any kind completed in **15 minutes** | Page |
 

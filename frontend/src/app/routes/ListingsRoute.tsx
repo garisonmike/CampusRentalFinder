@@ -105,7 +105,9 @@ export default function ListingsRoute() {
               <p className="mb-4 text-sm text-muted-foreground" role="status">
                 {listings.data.count === 1 ? "1 listing" : `${listings.data.count} listings`}
               </p>
-              <ul className="grid gap-4 sm:grid-cols-2">
+              {/* Named, so a screen reader announces "listings" rather
+                  than "list" -- there are several on this page. */}
+              <ul aria-label="Listings" className="grid gap-4 sm:grid-cols-2">
                 {results.map((property) => (
                   <li key={property.id}>
                     <ListingCard property={property} />

@@ -501,7 +501,14 @@ class ManagedPropertyListView(APIView):
             .select_related("landlord__user")
             .prefetch_related(
                 Prefetch("units", queryset=Unit.all_objects.order_by("label")),
-                "campus_distances",
+                # Both relations, not just the rows. `CampusDistanceSerializer`
+                # renders `campus_name` and `university_name`, so prefetching
+                # the distances alone leaves two queries per distance row --
+                # eighteen queries for six properties, which fixtures with one
+                # campus each could never show. The public detail view already
+                # does this; the management view did not.
+                "campus_distances__campus",
+                "campus_distances__university",
             )
             .order_by("name")
         )

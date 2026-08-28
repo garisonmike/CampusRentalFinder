@@ -75,6 +75,30 @@ def reconcile_rating_aggregates(sample_size: int = 100) -> int:
         *reconcile_landlords(landlords),
     ]
 
+    # A reviewed property with NO aggregate row at all.
+    #
+    # The sampling above walks existing aggregates, so a property whose
+    # aggregate was never created is not sampled, does not drift, and does not
+    # appear in the count -- and the job logs `drifted=0`, which reads as
+    # health. On a seeded platform with 33 reviews and zero aggregates it
+    # reported exactly that: a clean bill from a check that had looked at
+    # nothing.
+    #
+    # This is the shape docs/OPERATIONS.md calls "a check whose scope is
+    # narrower than the belief attached to it". The fix is not a wider sample;
+    # it is asking the other question -- who should have an aggregate and does
+    # not -- and reporting it as its own number so the two can never be
+    # confused.
+    missing = _reviewed_subjects_without_aggregates()
+
+    for kind, subject_id in missing:
+        logger.error(
+            "rating_aggregate_missing",
+            kind=kind,
+            subject_id=subject_id,
+            reason="reviews exist but no aggregate row does",
+        )
+
     for drift in drifts:
         logger.error(
             # ERROR: a rating that disagrees with its source is the worst
@@ -92,5 +116,47 @@ def reconcile_rating_aggregates(sample_size: int = 100) -> int:
         "rating_reconciliation",
         sampled=len(properties) + len(units) + len(landlords),
         drifted=len(drifts),
+        missing=len(missing),
     )
-    return len(drifts)
+    return len(drifts) + len(missing)
+
+
+def _reviewed_subjects_without_aggregates() -> list[tuple[str, int]]:
+    """Properties and units that have published reviews but no aggregate.
+
+    Reported separately from drift because they are a different failure with a
+    different cause. Drift means the recompute job ran and the number moved
+    since; absence means it never ran at all -- a queue that was down, a
+    review written by a path that skipped the enqueue, or a restore from a
+    backup that brought reviews without their caches.
+    """
+    from django.db.models import Exists, OuterRef
+
+    from .aggregates import PropertyRatingAggregate, UnitRatingAggregate
+    from .models import Review
+
+    reviewed_properties = (
+        Review.all_objects.filter(is_published=True)
+        .exclude(
+            Exists(
+                PropertyRatingAggregate.all_objects.filter(
+                    property_reviewed_id=OuterRef("tenancy__unit__property_id")
+                )
+            )
+        )
+        .values_list("tenancy__unit__property_id", flat=True)
+        .distinct()
+    )
+    reviewed_units = (
+        Review.all_objects.filter(is_published=True)
+        .exclude(
+            Exists(UnitRatingAggregate.all_objects.filter(unit_id=OuterRef("tenancy__unit_id")))
+        )
+        .values_list("tenancy__unit_id", flat=True)
+        .distinct()
+    )
+
+    return [
+        *(("property", subject_id) for subject_id in reviewed_properties),
+        *(("unit", subject_id) for subject_id in reviewed_units),
+    ]

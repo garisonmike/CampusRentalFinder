@@ -50,6 +50,49 @@ def test_it_refuses_to_run_outside_debug():
         call_command("seed_platform", verbosity=0)
 
 
+def test_it_refuses_a_platform_too_small_to_hold_every_shape():
+    """Refused rather than clamped.
+
+    Every rare shape in this command started life as `index % n` and every one
+    was unreachable at some size. The fix was to assign the first five indices
+    fixed jobs -- which makes five a real floor, and a seed below it a platform
+    missing shapes it claims to have.
+    """
+    with override_settings(DEBUG=True), pytest.raises(CommandError, match="at least"):
+        call_command("seed_platform", "--properties", "3", verbosity=0)
+
+
+def test_every_shape_survives_the_smallest_allowed_platform():
+    """The check the last five defects would each have failed.
+
+    Each of them was a shape present at the default size and absent at a
+    smaller one, which is the size a developer actually runs.
+    """
+    from django.db.models import Count
+
+    from engagement.models import Inquiry, SavedProperty
+
+    with override_settings(DEBUG=True):
+        call_command("seed_platform", "--seed", "5", "--properties", "5", verbosity=0)
+
+    published = Property.all_objects.filter(status=PropertyStatus.PUBLISHED)
+
+    assert Tenancy.all_objects.filter(end_date=None).exists(), "no open-ended stay"
+    assert Tenancy.all_objects.filter(terminated_early=True).exists(), "no early termination"
+    assert Tenancy.all_objects.upcoming().exists(), "no upcoming stay"
+    assert published.annotate(u=Count("units")).filter(u=0).exists(), "no unit-less property"
+    assert Property.all_objects.filter(latitude=None).exists(), "nothing unpinned"
+    assert Unit.all_objects.filter(total_count__gte=15).exists(), "no pooled block"
+    assert Inquiry.all_objects.exists(), "no inquiries"
+    assert SavedProperty.all_objects.exists(), "nothing saved"
+    assert {vacancy_freshness(unit) for unit in Unit.all_objects.all()} == {
+        "fresh",
+        "ageing",
+        "stale",
+        "unknown",
+    }, "not every vacancy band"
+
+
 def test_the_same_seed_produces_the_same_platform():
     """A bug found against seeded data has to travel as one integer.
 
@@ -65,10 +108,10 @@ def test_the_same_seed_produces_the_same_platform():
         )
 
     with override_settings(DEBUG=True):
-        call_command("seed_platform", "--seed", "7", "--properties", "4", verbosity=0)
+        call_command("seed_platform", "--seed", "7", "--properties", "5", verbosity=0)
         first = fingerprint()
 
-        call_command("seed_platform", "--seed", "7", "--properties", "4", "--flush", verbosity=0)
+        call_command("seed_platform", "--seed", "7", "--properties", "5", "--flush", verbosity=0)
         second = fingerprint()
 
     assert first == second
@@ -191,6 +234,35 @@ class TestPropertyStates:
         'is it available' stops being a boolean."""
         assert Unit.all_objects.filter(total_count__gte=15).exists()
 
+    def test_a_published_property_has_no_units_yet(self, seeded):
+        """The landlord created the building and stopped. The property page
+        has a state for that, and nothing else in the seed reaches it -- found
+        by auditing which empty states a realistic platform can still show."""
+        from django.db.models import Count
+
+        assert (
+            Property.all_objects.filter(status=PropertyStatus.PUBLISHED)
+            .annotate(units_count=Count("units"))
+            .filter(units_count=0)
+            .exists()
+        )
+
+    def test_a_property_has_nothing_ticked(self, seeded):
+        """Not "has no amenities" -- the landlord has not filled the form in,
+        which is a different claim and worded differently on the page. Random
+        booleans essentially never produce it."""
+        assert Property.all_objects.filter(
+            has_wifi=False,
+            has_water_tank=False,
+            has_borehole=False,
+            has_backup_power=False,
+            has_security_guard=False,
+            has_perimeter_wall=False,
+            has_cctv=False,
+            has_parking=False,
+            caretaker_on_site=False,
+        ).exists()
+
     def test_walking_times_are_sometimes_null(self, seeded):
         """Legitimately null, and the UI must render an em dash rather than
         substituting the straight line."""
@@ -216,6 +288,39 @@ class TestVacancy:
         assert not stated.filter(vacant_count_updated_by=None).exists()
 
 
+class TestRatingsAreCoherent:
+    def test_aggregates_exist_for_reviewed_properties(self, seeded):
+        """A seed where every rating endpoint answered 'no reviews yet' would
+        make the whole review surface untestable by hand -- and it is also a
+        state a real deployment reaches when the queue is down."""
+        from reviews.aggregates import PropertyRatingAggregate
+
+        assert PropertyRatingAggregate.all_objects.exists()
+
+    def test_the_reconciler_finds_nothing_wrong(self, seeded):
+        """Drift AND absence. The reconciler returns both now, so a clean run
+        against seeded data means the caches actually match their reviews."""
+        from reviews.jobs import reconcile_rating_aggregates
+
+        assert reconcile_rating_aggregates() == 0
+
+    def test_some_property_has_more_reviews_than_students(self, seeded):
+        """The de-duplication, visible in data.
+
+        One student who moved between two units in the same block writes two
+        genuine reviews and counts as one voice. This was unreachable in the
+        first version of the seed: the skip rule for "some properties have no
+        reviews" landed on the mover's second review every time.
+        """
+        from django.db.models import F
+
+        from reviews.aggregates import PropertyRatingAggregate
+
+        assert PropertyRatingAggregate.all_objects.filter(
+            review_count__gt=F("student_count")
+        ).exists()
+
+
 class TestTheCrossCheckHasSomethingToSay:
     def test_coverage_is_no_longer_zero(self, seeded):
         """The reason this command exists. Against fixtures the cross-check
@@ -238,6 +343,42 @@ class TestTheCrossCheckHasSomethingToSay:
         coverage = cross_check_coverage()
 
         assert coverage["contradictions"] == 0
+
+
+class TestEngagement:
+    """Inquiries and saved listings.
+
+    Added after an audit found the *populated* states of both screens
+    unreachable: the seed had none of either, so the portal's reply box and
+    the student's saved list could only ever be seen empty. An empty state
+    nobody can leave is as untested as one nobody can reach.
+    """
+
+    def test_inquiries_exist_in_both_states(self, seeded):
+        from engagement.constants import InquiryStatus
+        from engagement.models import Inquiry
+
+        statuses = set(Inquiry.all_objects.values_list("status", flat=True))
+
+        assert InquiryStatus.SENT in statuses
+        assert InquiryStatus.ANSWERED in statuses
+
+    def test_an_answered_inquiry_names_who_answered(self, seeded):
+        """The student is owed the knowledge that a person replied, and which
+        one. A constraint requires the pair, so this is also the data proving
+        the seed satisfies it."""
+        from engagement.constants import InquiryStatus
+        from engagement.models import Inquiry
+
+        answered = Inquiry.all_objects.filter(status=InquiryStatus.ANSWERED)
+
+        assert answered.exists()
+        assert not answered.filter(responded_by=None).exists()
+
+    def test_saved_properties_exist(self, seeded):
+        from engagement.models import SavedProperty
+
+        assert SavedProperty.all_objects.exists()
 
 
 class TestTheTenants:
