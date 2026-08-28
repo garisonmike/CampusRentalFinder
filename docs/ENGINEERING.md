@@ -556,3 +556,19 @@ unreachable by anybody. Both are pinned by tests in
 `tests/test_api_contract.py` and are fixed by their phase of the rewrite.
 
 The `user_type` escalation path is closed as of phase 2.
+
+## Verifying a range before pushing
+
+```
+tools/verify_commits.sh [base]      # default base: origin/main
+```
+
+Checks out **each** commit between `base` and `HEAD` into a throwaway worktree
+and runs what CI runs: ruff, format, mypy, the backend suite, the schema-drift
+check, then tsc, eslint, vitest, the build and the bundle budget.
+
+CI builds only the head of a push. "Every commit is green" is therefore an
+unverified claim about everything underneath it, and the commit a future bisect
+lands on is the one nobody ever built. Slow on purpose — it runs the real
+suites, because a faster version that skipped them would be a check whose scope
+is narrower than the belief attached to it (`docs/OPERATIONS.md`).

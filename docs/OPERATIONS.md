@@ -419,6 +419,12 @@ router exposes.
 **Can it skip?** A skipped test and a passing test look identical in a summary
 line. If a skip is legitimate locally but not in CI, assert that distinction.
 
+**Was it actually run on what you are claiming?** CI builds the head of a
+push, so a green tick on a ten-commit push says nothing about the nine
+underneath it. `tools/verify_commits.sh` checks each one in a throwaway
+worktree. A bisect lands on a commit nobody ever built, and the first time
+anyone finds out is when they are already looking for something else.
+
 **Does the fixture contain the case?** A suite whose fixtures are all
 currently-running tenancies cannot see a bug that needs history — which is
 exactly how the `vacant_count` bug survived eleven filters with the same shape.
@@ -491,6 +497,7 @@ people repeat about the check has quietly widened past both.
 | `test_the_performance_budget_is_enforced` (frontend) | The listing bundle grows past its budget |
 | `reconcile_rating_aggregates` (the `missing` count) | A reviewed property has no aggregate row -- which the drift sample cannot see, because it walks aggregates that exist |
 | `seed_platform` + `test_every_shape_survives_the_smallest_allowed_platform` | The development seed stops producing a shape the UI has a branch for |
+| `tools/verify_commits.sh` | A commit in a pushed range is not green on its own — which CI cannot tell you, because it builds only the head |
 | *(nothing — and there cannot be)* | A control over user-supplied imagery becomes unreadable. See **Checks whose scope is narrower than the belief attached to them**: this one is handled by construction at the component, not by a check |
 
 ## Alerting
