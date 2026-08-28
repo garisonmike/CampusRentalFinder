@@ -165,6 +165,63 @@ export function unitDetail(
   };
 }
 
+export function ratingAggregate(
+  overrides: Partial<Schemas["RatingAggregate"]> = {},
+): Schemas["RatingAggregate"] {
+  return {
+    average_rating: "4.30",
+    student_count: 8,
+    review_count: 8,
+    rating_distribution: { "1": 0, "2": 1, "3": 1, "4": 2, "5": 4 },
+    last_review_at: "2026-07-02T10:00:00Z",
+    computed_at: "2026-08-01T03:00:00Z",
+    ...overrides,
+  };
+}
+
+/** The empty aggregate the API sends for a property nobody has reviewed. */
+export const NO_REVIEWS: Schemas["RatingAggregate"] = {
+  average_rating: null,
+  student_count: 0,
+  review_count: 0,
+  rating_distribution: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 },
+  last_review_at: null,
+  computed_at: null,
+};
+
+export function propertyRating(
+  overrides: Partial<Schemas["PropertyRating"]> = {},
+): Schemas["PropertyRating"] {
+  return {
+    property: ratingAggregate(),
+    landlord: { ...ratingAggregate(), property_count: 3 },
+    ...overrides,
+  };
+}
+
+export function review(overrides: Partial<Schemas["Review"]> = {}): Schemas["Review"] {
+  return {
+    id: 100,
+    rating: 4,
+    cleanliness_rating: 4,
+    security_rating: 5,
+    water_reliability_rating: null,
+    landlord_rating: 4,
+    value_rating: 3,
+    comment: "Water goes off most Thursdays but the caretaker is quick about it.",
+    would_recommend: true,
+    created_at: "2026-07-02T10:00:00Z",
+    editable_until: "2026-07-16T10:00:00Z",
+    author_name: "Wanjiku K.",
+    is_verified_author: true,
+    dispute_annotation: null,
+    response: null,
+    unit_label: "Bedsitters",
+    stay_months: 8,
+    ...overrides,
+  };
+}
+
 /** Default handlers: an anonymous visitor at a branded tenant. */
 export const handlers = [
   http.get(`${API}/tenant/config/`, () => HttpResponse.json(tenantConfig)),

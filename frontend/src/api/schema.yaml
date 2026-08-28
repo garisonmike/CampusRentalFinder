@@ -2938,9 +2938,11 @@ components:
           type: string
           format: date-time
           readOnly: true
+          nullable: true
           description: When this cache was last rebuilt. Aggregates are stale by design
             between a review landing and the job running; a reconciler finds drift
-            rather than the number being recomputed per request.
+            rather than the number being recomputed per request. **Null until anything
+            has been computed** -- the same moment average_rating is null.
         property_count:
           type: integer
           readOnly: true
@@ -3849,9 +3851,11 @@ components:
           type: string
           format: date-time
           readOnly: true
+          nullable: true
           description: When this cache was last rebuilt. Aggregates are stale by design
             between a review landing and the job running; a reconciler finds drift
-            rather than the number being recomputed per request.
+            rather than the number being recomputed per request. **Null until anything
+            has been computed** -- the same moment average_rating is null.
       required:
       - average_rating
       - computed_at
@@ -3949,6 +3953,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/ReviewResponse'
           readOnly: true
+          nullable: true
         unit_label:
           type: string
           readOnly: true

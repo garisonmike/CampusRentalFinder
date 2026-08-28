@@ -1670,9 +1670,9 @@ export interface components {
             readonly last_review_at: string | null;
             /**
              * Format: date-time
-             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request.
+             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request. **Null until anything has been computed** -- the same moment average_rating is null.
              */
-            readonly computed_at: string;
+            readonly computed_at: string | null;
             /** @description How many of this landlord's properties the figure spans. Show it alongside the average: '4.2 across one property' and '4.2 across nine' are different claims. */
             readonly property_count: number;
         };
@@ -2077,9 +2077,9 @@ export interface components {
             readonly last_review_at: string | null;
             /**
              * Format: date-time
-             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request.
+             * @description When this cache was last rebuilt. Aggregates are stale by design between a review landing and the job running; a reconciler finds drift rather than the number being recomputed per request. **Null until anything has been computed** -- the same moment average_rating is null.
              */
-            readonly computed_at: string;
+            readonly computed_at: string | null;
         };
         /**
          * @description * `dates_incorrect` - dates_incorrect
@@ -2121,7 +2121,7 @@ export interface components {
             readonly is_verified_author: boolean;
             /** @description Neutral note that the landlord disputed this stay, or null. **Render it as a plain factual line. Never as a warning.** Do not grey the review out, collapse it, badge it amber, or exclude it from the average. A landlord who disputes honestly and one who disputes tactically produce the identical annotation, which is exactly why it must not read as a verdict -- styling it as one restores the veto ADR-004 removed. */
             readonly dispute_annotation: string | null;
-            readonly response: components["schemas"]["ReviewResponse"];
+            readonly response: components["schemas"]["ReviewResponse"] | null;
             readonly unit_label: string;
             /** @description Length of the stay behind this review, in whole months. */
             readonly stay_months: number;

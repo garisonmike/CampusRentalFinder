@@ -4,7 +4,15 @@ import { axe } from "vitest-axe";
 import { describe, expect, it } from "vitest";
 
 import PropertyRoute from "./PropertyRoute";
-import { API, campusDistance, propertyDetail, unitSummary } from "@/test/msw/handlers";
+import {
+  API,
+  NO_REVIEWS,
+  campusDistance,
+  page,
+  propertyDetail,
+  propertyRating,
+  unitSummary,
+} from "@/test/msw/handlers";
 import { server } from "@/test/msw/server";
 import { renderWithProviders } from "@/test/utils";
 
@@ -19,6 +27,13 @@ import { renderWithProviders } from "@/test/utils";
 function serve(property: ReturnType<typeof propertyDetail>) {
   server.use(
     http.get(`${API}/properties/wendani-court/`, () => HttpResponse.json(property)),
+    // The page carries the review block, which fetches its own two things.
+    // Stubbed empty here so these tests are about the property rather than
+    // about the ratings, and so nothing reaches the network unhandled.
+    http.get(`${API}/reviews/properties/wendani-court/rating/`, () =>
+      HttpResponse.json(propertyRating({ property: NO_REVIEWS, landlord: { ...NO_REVIEWS, property_count: 0 } })),
+    ),
+    http.get(`${API}/reviews/properties/wendani-court/`, () => HttpResponse.json(page([]))),
   );
 }
 

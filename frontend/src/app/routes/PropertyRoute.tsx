@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CampusDistances } from "@/components/listing/CampusDistances";
 import { UnitRow } from "@/components/listing/UnitRow";
+import { ReviewBlock } from "@/components/reviews/ReviewBlock";
 import { useProperty } from "@/features/listings/queries";
 import { toApiError, userFacingMessage } from "@/lib/api-error";
 import { formatKes, humanise } from "@/lib/format";
@@ -130,6 +131,8 @@ export default function PropertyRoute() {
       )}
 
       <Amenities property={data} />
+
+      <ReviewBlock slug={data.slug} />
 
       <section aria-labelledby="landlord-heading">
         <h2 id="landlord-heading" className="text-lg font-semibold">

@@ -53,10 +53,13 @@ class RatingAggregateSerializer(serializers.Serializer):
     last_review_at = serializers.DateTimeField(read_only=True, allow_null=True)
     computed_at = serializers.DateTimeField(
         read_only=True,
+        allow_null=True,
         help_text=(
-            "When this cache was last rebuilt. Aggregates are stale by design "
-            "between a review landing and the job running; a reconciler finds "
-            "drift rather than the number being recomputed per request."
+            "When this cache was last rebuilt. Aggregates are stale by "
+            "design between a review landing and the job running; a "
+            "reconciler finds drift rather than the number being recomputed "
+            "per request. **Null until anything has been computed** -- the "
+            "same moment average_rating is null."
         ),
     )
 
@@ -147,7 +150,10 @@ class ReviewSerializer(serializers.ModelSerializer):
         )
     )
     dispute_annotation = serializers.SerializerMethodField(help_text=DISPUTE_ANNOTATION)
-    response = ReviewResponseSerializer(read_only=True)
+    # Nullable, and declared so. Most reviews have no reply; a schema saying
+    # otherwise generates a non-optional type and the first `.body` read
+    # crashes on the common case.
+    response = ReviewResponseSerializer(read_only=True, allow_null=True)
     unit_label = serializers.CharField(source="tenancy.unit.label", read_only=True)
     stay_months = serializers.SerializerMethodField(
         help_text="Length of the stay behind this review, in whole months."

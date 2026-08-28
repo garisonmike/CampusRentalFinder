@@ -100,3 +100,19 @@ export function useUnit(id: number) {
     queryFn: () => get<Schemas["UnitDetail"]>(`/properties/units/${id}/`),
   });
 }
+
+/** The rating figures for one property, plus the landlord's own record. */
+export function usePropertyRating(slug: string) {
+  return useQuery({
+    queryKey: queryKeys.properties.rating(slug),
+    queryFn: () => get<Schemas["PropertyRating"]>(`/reviews/properties/${slug}/rating/`),
+  });
+}
+
+/** One page of reviews for a property. */
+export function usePropertyReviews(slug: string, page: number) {
+  return useQuery({
+    queryKey: queryKeys.properties.reviews(slug, page),
+    queryFn: () => getPage<Schemas["Review"]>(`/reviews/properties/${slug}/`, { page }),
+  });
+}
