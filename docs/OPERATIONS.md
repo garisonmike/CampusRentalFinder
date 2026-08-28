@@ -490,6 +490,17 @@ every sweep enumerates rows. The row-side accounting is impeccable —
 check constraint forbids the halfway state — and none of it can see a file the
 database has never heard of.
 
+`accounts.retention.orphaned_document_objects()` now answers the question from
+the other side: it lists the bucket and subtracts the rows. It returns keys
+rather than a count, because the next question is always "which ones" and a
+compliance answer of "seventeen" is not one.
+
+**It is an alert, not a test.** The mechanism has a test — a planted orphan is
+found — but "the bucket is clean" is a fact about an environment rather than
+about the code, and asserting it in CI would make the suite fail whenever a
+developer's seed data shares a bucket with it. It did, immediately. The claim
+belongs in the alert table above and in `run_compliance_sweeps`.
+
 That is the generalisation stated as strongly as it deserves: **when the thing
 being protected lives somewhere other than the database, the database cannot be
 the only place you look.**
@@ -582,6 +593,7 @@ volume threshold will not fire on it. Every threshold below is an age.
 | Routing stalled | Oldest `PropertyCampusDistance` with null `walking_minutes` > **24 hours** | Warn |
 | Rating drift | Any sampled aggregate differing from its recomputed value | Page |
 | Rating aggregate missing | Any published review whose property or unit has **no aggregate row at all** | Page |
+| Orphaned document object | Any object in the documents bucket with **no `VerificationDocument` row** (`orphaned_document_objects()`) | Page |
 | Reconciler stalled | Oldest aggregate `computed_at` > **48 hours** | Warn |
 | Worker absent | No RQ job of any kind completed in **15 minutes** | Page |
 

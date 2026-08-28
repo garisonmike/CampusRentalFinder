@@ -48,7 +48,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.capabilities import CaretakerPermission
+from accounts.documents import (
+    DocumentAccessLog,
+    VerificationDocument,
+    VerificationRequest,
+    VerificationRequestStatus,
+)
 from accounts.models import CaretakerAssignment, LandlordProfile, StudentProfile, User
+from accounts.privacy_api import ErasureRequest
 from engagement.constants import InquiryStatus
 from engagement.models import Inquiry, SavedProperty
 from properties.constants import PhotoProcessingStatus, PropertyStatus, PropertyType
@@ -231,6 +238,14 @@ class Command(BaseCommand):
             "only way anything downstream of an upload is exercised at all.",
         )
         parser.add_argument(
+            "--compliance",
+            action="store_true",
+            help="Seed verification documents and erasure requests at every "
+            "age relative to their deadlines, including the boundaries. Needs "
+            "object storage, because a document with no bytes proves nothing "
+            "about a job whose whole purpose is deleting bytes.",
+        )
+        parser.add_argument(
             "--flush",
             action="store_true",
             help="Delete existing seeded data first.",
@@ -291,7 +306,11 @@ class Command(BaseCommand):
         #: Uploads the pipeline refused, with the reason. A refusal that stops
         #: happening is a hole; recorded so it is visible either way.
         self.refused_uploads: list[tuple[str, str]] = []
+        #: What the compliance surface contains, by name, so the sweep report
+        #: can say which case did what rather than counting rows.
+        self.compliance_cases: list[tuple[str, int]] = []
         self.real_images = options["real_images"]
+        self.compliance = options["compliance"]
         self.seed = options["seed"]
         self.today = timezone.localdate()
         self.now = timezone.now()
@@ -324,6 +343,9 @@ class Command(BaseCommand):
             # `add_photo` above have actually fired.
             self.drain_queue()
 
+        if self.compliance:
+            self.seed_compliance()
+
         self.finish_scenarios(self.all_students())
         self.finish_terminations(self.all_students())
         self.build_aggregates()
@@ -337,6 +359,23 @@ class Command(BaseCommand):
         Deliberately not `flush` on the whole database: a developer running
         this has a superuser they do not want to recreate.
         """
+        self.flush_object_storage()
+
+        # The compliance tables, explicitly.
+        #
+        # None of them cascade from `User`: `VerificationDocument` is PROTECTed
+        # from its request so the tombstone survives, and `DocumentAccessLog`
+        # nulls its links rather than dying with them -- both correct, and both
+        # meaning a flush that only deleted users left the rows behind to
+        # accumulate across runs. What that looked like: access-log rows
+        # pointing at documents whose requests were gone, a shape ADR-008's
+        # pseudonymisation never produces because it never hard-deletes
+        # anything.
+        DocumentAccessLog.objects.all().delete()
+        ErasureRequest.objects.all().delete()
+        VerificationRequest.all_objects.all().delete()
+        VerificationDocument.objects.all().delete()
+
         Inquiry.all_objects.all().delete()
         SavedProperty.all_objects.all().delete()
         PropertyRatingAggregate.all_objects.all().delete()
@@ -353,11 +392,48 @@ class Command(BaseCommand):
         PropertyCampusDistance.all_objects.all().delete()
         Property.all_objects.all().delete()
         CaretakerAssignment.all_objects.all().delete()
+        from accounts.models import UniversityStaffProfile
+
+        UniversityStaffProfile.all_objects.all().delete()
         StudentProfile.all_objects.all().delete()
         LandlordProfile.objects.all().delete()
         User.objects.filter(is_superuser=False).delete()
         Campus.all_objects.all().delete()
         University.objects.all().delete()
+
+    def flush_object_storage(self) -> None:
+        """Delete the stored objects, not only the rows that point at them.
+
+        A `--flush` that clears the database and leaves the bucket alone
+        orphans every file it had -- and **nothing will ever delete them**,
+        because every retention sweep enumerates rows. Two hundred and fifty
+        identity documents accumulated in the development bucket this way
+        before anything looked, which is the same failure mode the production
+        hole has, arrived at by a route a developer takes weekly.
+
+        Deleted by key from the rows about to be removed, plus anything the
+        orphan scan finds, so a previous flush's leftovers go too.
+        """
+        from django.core.files.storage import storages
+
+        from accounts.retention import orphaned_document_objects
+
+        documents = storages["documents"]
+        keys = (
+            list(
+                VerificationDocument.objects.exclude(storage_key="").values_list(
+                    "storage_key", flat=True
+                )
+            )
+            + orphaned_document_objects()
+        )
+
+        for key in keys:
+            documents.delete(key)
+
+        media = storages["default"]
+        for photo_key in UnitPhoto.all_objects.values_list("original_key", flat=True):
+            media.delete(photo_key)
 
     # -- the tenants -------------------------------------------------------
 
@@ -385,6 +461,12 @@ class Command(BaseCommand):
             accent_hsl="142 71% 95%",
             signup_policy=SignupPolicy.OPEN,
             verification_required_to_review=False,
+            # Email domain only. A school with an open policy that still
+            # offers the badge is the common shape, and it is the one where
+            # the reviewer queue stays empty -- which is why the document
+            # cases below have to be seeded at the other university.
+            verification_methods_enabled=[VerificationMethod.EMAIL_DOMAIN],
+            student_email_domains=["students.ku.ac.ke"],
         )
         Campus.all_objects.create(
             university=kenyatta,
@@ -413,6 +495,13 @@ class Command(BaseCommand):
             signup_policy=SignupPolicy.REQUIRED,
             verification_required_to_review=True,
             verification_grace_period_days=14,
+            # Both methods, so the document queue and its retention deadlines
+            # have something in them.
+            verification_methods_enabled=[
+                VerificationMethod.EMAIL_DOMAIN,
+                VerificationMethod.STUDENT_ID_UPLOAD,
+            ],
+            student_email_domains=["students.jkuat.ac.ke"],
         )
         Campus.all_objects.create(
             university=jkuat,
@@ -1684,6 +1773,139 @@ class Command(BaseCommand):
 
         for name in queues or ("default", "media"):
             django_rq.get_worker(name).work(burst=True, with_scheduler=False)
+
+    # -- the compliance surface --------------------------------------------
+
+    def seed_compliance(self) -> None:
+        """Documents and erasure requests at every age relative to both
+        deadlines, **including the boundaries**.
+
+        The two document deadlines are independent: seven days after a
+        decision, and thirty after upload whether or not anybody looked. The
+        second exists because an unworked queue is the common case, not an
+        edge one -- and the sweeps that enforce both have only ever run
+        against rows created moments earlier.
+
+        A boundary row for each, because "past the deadline" and "exactly on
+        it" are different questions and a `lte` versus `lt` is the kind of
+        thing nobody notices until an auditor asks why a document survived its
+        own retention window by a day.
+        """
+        from accounts.documents import signed_document_url, submit_verification_document
+        from accounts.privacy_api import ErasureRequest
+
+        # Students at the school that actually offers document upload.
+        # `submit_verification_document` refuses the others, correctly: the
+        # first run of this seeded them at the open-policy university and got
+        # six refusals, which is the gate working rather than a bug.
+        uploaders = [
+            student
+            for student in self.all_students()
+            if VerificationMethod.STUDENT_ID_UPLOAD
+            in student.student_profile.university.verification_methods_enabled
+        ]
+
+        if len(uploaders) < 10:
+            self.unreachable.append(("seed_compliance", "not enough students who may upload"))
+            return
+
+        students = uploaders
+
+        decision_days = settings.VERIFICATION_DECISION_RETENTION_DAYS
+        absolute_days = settings.VERIFICATION_ABSOLUTE_RETENTION_DAYS
+
+        # (label, days since upload, days since decision or None)
+        cases = [
+            ("decided, past its retention", decision_days + 5, decision_days + 3),
+            ("decided, still within it", 3, 1),
+            ("decided exactly on the boundary", decision_days + 1, decision_days),
+            ("undecided, past the absolute deadline", absolute_days + 6, None),
+            ("undecided, still within it", 4, None),
+            ("undecided exactly on the boundary", absolute_days, None),
+        ]
+
+        for index, (label, uploaded_days_ago, decided_days_ago) in enumerate(cases):
+            student = students[index]
+            profile = student.student_profile
+            data, _content_type, _name = generate("modest_200kb", seed=self.seed + index)
+
+            try:
+                request = submit_verification_document(profile, data)
+            except Exception as error:
+                self.unreachable.append((f"document: {label}", f"{type(error).__name__}: {error}"))
+                continue
+
+            uploaded_at = self.now - dt.timedelta(days=uploaded_days_ago)
+            VerificationDocument.objects.filter(pk=request.document_id).update(
+                uploaded_at=uploaded_at
+            )
+
+            if decided_days_ago is not None:
+                VerificationRequest.all_objects.filter(pk=request.pk).update(
+                    status=VerificationRequestStatus.APPROVED,
+                    reviewed_at=self.now - dt.timedelta(days=decided_days_ago),
+                    reviewed_by=self.platform_admin,
+                    decision_reason="Card matches the register.",
+                )
+
+            # A reviewer actually opens it, which is what writes an access
+            # log row. Without this the log is empty and ADR-008's
+            # pseudonymisation -- the thing that has to survive the subject
+            # being erased -- has nothing to act on.
+            if decided_days_ago is not None:
+                try:
+                    signed_document_url(request.document, reviewer=self.reviewer_for(profile))
+                except Exception as error:
+                    self.unreachable.append(
+                        (f"document view: {label}", f"{type(error).__name__}: {error}")
+                    )
+
+            self.compliance_cases.append((label, request.document_id))
+
+        # Erasure requests across the cooling-off window, including one the
+        # subject cancelled and one whose date has passed.
+        cooling = settings.ERASURE_COOLING_OFF_DAYS
+        erasures = [
+            ("cooling off, days left", cooling - 2, ErasureRequest.Status.COOLING_OFF),
+            ("cooling off, due today", 0, ErasureRequest.Status.COOLING_OFF),
+            ("cooling off, overdue", -4, ErasureRequest.Status.COOLING_OFF),
+            ("cancelled by the subject", cooling - 1, ErasureRequest.Status.CANCELLED),
+        ]
+
+        for offset, (label, days_ahead, status) in enumerate(erasures):
+            # The overdue one is deliberately a student who **has** a
+            # document and an access-log row against it. Erasing somebody with
+            # no history proves nothing about ADR-008: the whole question is
+            # whether the audit trail still says who opened what, after every
+            # link to the person is gone.
+            subject = students[0] if label == "cooling off, overdue" else students[6 + offset]
+            erasure = ErasureRequest.objects.create(
+                user=subject,
+                status=status,
+                executes_after=self.now + dt.timedelta(days=days_ahead),
+                cancelled_at=(
+                    self.now - dt.timedelta(days=1)
+                    if status == ErasureRequest.Status.CANCELLED
+                    else None
+                ),
+            )
+            self.compliance_cases.append((f"erasure: {label}", erasure.pk))
+
+    def reviewer_for(self, profile) -> User:
+        """University staff at the student's own school.
+
+        Scoped deliberately: this role can read national ID documents, and
+        staff at one university must never reach another's queue.
+        """
+        from accounts.models import UniversityStaffProfile
+
+        existing = UniversityStaffProfile.all_objects.filter(university=profile.university).first()
+        if existing is not None:
+            return existing.user
+
+        user = self.make_user(f"reviewer-{profile.university.subdomain}-", 0)
+        UniversityStaffProfile.all_objects.create(user=user, university=profile.university)
+        return user
 
     def all_students(self) -> list:
         """Every seeded student, for the leftover-path pass."""

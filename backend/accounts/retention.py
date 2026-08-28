@@ -253,6 +253,39 @@ def sweep_expired_documents(limit: int = 500, now: dt.datetime | None = None) ->
     return len(document_ids)
 
 
+def orphaned_document_objects(prefix: str = "verification") -> list[str]:
+    """Objects in the document bucket that **no row points at**.
+
+    Every sweep in this module enumerates rows, so an object whose row never
+    existed -- or no longer does -- is invisible to all of them for ever.
+    `submit_verification_document` writes to the bucket before opening the
+    transaction that creates the row, so a failed transaction leaves exactly
+    this: a national ID document nothing will ever delete.
+
+    `docs/OPERATIONS.md` states the general rule -- a reconciler must count
+    what should exist and does not -- and this is its other direction. There
+    the database was the authority and the cache was missing; here the bucket
+    is the authority and the row is missing. Both are only visible from the
+    side that is not being walked.
+
+    Returns keys rather than a count, because the operator's next question is
+    "which ones", and a compliance answer of "seventeen" is not one.
+    """
+    storage = _storage()
+
+    try:
+        _directories, files = storage.listdir(prefix)
+    except Exception as error:
+        logger.warning("orphan_scan_failed", error=str(error))
+        return []
+
+    known = set(
+        VerificationDocument.objects.exclude(storage_key="").values_list("storage_key", flat=True)
+    )
+
+    return sorted(f"{prefix}/{name}" for name in files if f"{prefix}/{name}" not in known)
+
+
 def unconfirmed_deletions():
     """Documents a delete has been attempted on and could not be confirmed.
 
