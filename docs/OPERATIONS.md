@@ -423,6 +423,59 @@ currently-running tenancies cannot see a bug that needs history — which is
 exactly how the `vacant_count` bug survived eleven filters with the same shape.
 `docs/ENGINEERING.md` records why the default factory shape is the awkward case.
 
+## Checks whose scope is narrower than the belief attached to them
+
+**A different failure from the five above, and worth keeping separate.** Those
+five are checks that ran and reported nothing useful. This one is a check that
+ran **correctly**, reported **accurately**, and had a belief attached to it
+wider than the thing it measured. Nothing was broken; the reading was true. It
+simply was not the reading anybody thought they had.
+
+### The instance
+
+`theme/contrast.test.ts` sweeps roughly 30,000 colours and proves that every
+tenant palette produces a foreground meeting AA **against its own background
+token**. That is a real guarantee and it holds. The belief that grew around it
+was "the palette suite proves the interface is readable in any tenant colour",
+and it does not, because one class of surface has no token behind it at all.
+
+The photo-gallery arrows sit on **user-supplied photography**. Their background
+is whatever a landlord uploaded. At 90% opacity in the pale-yellow tenant
+palette the control dissolved entirely into a bright photograph — while
+`--secondary` and `--secondary-foreground` continued, correctly, to pair at
+better than 4.5:1 with each other. Both facts are true at once and only one of
+them was being read.
+
+Nor could the page-level palette suite have caught it: jsdom has no layout and
+no painting, so axe's contrast rule does not run there. Twenty-four
+page × palette combinations passed on the commit that shipped the defect, and
+they were right to.
+
+### The permanent consequence
+
+> **Any control placed over a photograph, a video, a map tile, or any other
+> user-supplied imagery is outside the palette suite's reach, permanently and
+> by construction. It needs deliberate treatment — an opaque fill, its own
+> border, or a scrim — regardless of what the suite says.**
+
+This is not a gap to be closed later. There is no palette computation that can
+make a claim about an image nobody has seen. The suite's silence about these
+controls is correct behaviour, and the mistake is only ever in reading that
+silence as approval.
+
+### How to spot the shape
+
+The question is not "did the check pass?" but **"what exactly did it measure,
+and is that the sentence I am about to say about it?"** The gap opens when a
+check's name is broader than its assertion: "contrast" measured
+token-against-token, "accessibility" measured a tree with no pixels,
+"integration" measured two services with a third stubbed. The check is right;
+the summary of it is what drifts.
+
+Related to but distinct from the previous section. There, the check and the
+checked thing had diverged. Here, they agree perfectly — and the sentence
+people repeat about the check has quietly widened past both.
+
 ### Where this is already enforced
 
 | Guard | Fails when |
@@ -435,6 +488,7 @@ exactly how the `vacant_count` bug survived eleven filters with the same shape.
 | `test_minio_is_reachable_in_ci` | A compliance test would skip rather than run |
 | `test_the_coverage_floor_is_declared_once` | The floor is declared in two places again |
 | `test_the_performance_budget_is_enforced` (frontend) | The listing bundle grows past its budget |
+| *(nothing — and there cannot be)* | A control over user-supplied imagery becomes unreadable. See **Checks whose scope is narrower than the belief attached to them**: this one is handled by construction at the component, not by a check |
 
 ## Alerting
 
