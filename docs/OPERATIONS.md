@@ -430,6 +430,70 @@ currently-running tenancies cannot see a bug that needs history — which is
 exactly how the `vacant_count` bug survived eleven filters with the same shape.
 `docs/ENGINEERING.md` records why the default factory shape is the awkward case.
 
+## Reconcilers are blind to absence by construction
+
+**A reconciler that samples the derived side can only compare rows that exist.**
+It walks the caches, recomputes each, and reports the ones that disagree. A
+subject that *should* have a cache and does not is not sampled, does not
+disagree, and does not appear in the count — so the job reports no drift, and
+"no drift" is what everybody reads.
+
+This is not a bug in any particular reconciler. It is what sampling the derived
+side means, and it will be true of the next one somebody writes.
+
+### The rule
+
+> **Every reconciler must count what should exist and does not, as a separate
+> number with a separate alert. "No drift" is meaningless without it.**
+
+Separate, not folded into the drift count, because the two have different
+causes and different fixes. Drift means the job ran and the number moved since:
+recompute it, then find out why. Absence means it never ran at all — a queue
+that was down, a write path that skipped the enqueue, a restore that brought
+the source rows without their caches. A single number would send whoever is
+on call looking for the wrong thing.
+
+### Found this way
+
+`reconcile_rating_aggregates` reported `drifted=0` against a platform with 33
+reviews and zero aggregates: a clean bill from a check that had looked at
+nothing. It now returns `missing` alongside `drifted`, and both have alert rows.
+
+### The audit
+
+Every sweep and reconciler in the project, checked for the same shape:
+
+| Job | Walks | Blind to | Verdict |
+|---|---|---|---|
+| `reconcile_rating_aggregates` | aggregate rows | reviewed subjects with no aggregate | **had it — fixed** |
+| `route_stale_distances` | `PropertyCampusDistance` rows | a property with no distance row for a campus that exists | **has it** |
+| `sweep_expired_documents` | `VerificationDocument` rows | an object in the bucket with no row pointing at it | **has it, and it is the worst one** |
+| `sweep_due_erasures` | `ErasureRequest` rows | nothing: the request *is* the subject | clean |
+| `sweep_overdue_claims` | claims past deadline | nothing: a claim is its own subject | clean |
+| `sweep_overdue_disputes` | escalated claims | nothing | clean |
+| `sweep_overdue_terminations` | pending terminations | nothing | clean |
+| `expire_stale_inquiries` | inquiries in `sent` | nothing | clean |
+| `prompt_stale_vacancies` | units with aged counts | nothing — it **already** includes never-stated units, which is this rule applied before it was written down | clean |
+
+**`route_stale_distances`.** A campus added after a property was published gets
+no `PropertyCampusDistance` row, and the sweep only routes rows that exist. The
+property is then invisible to that campus for ever, with no error anywhere —
+the same silent-invisibility failure the publish gate exists to prevent,
+arriving by a different door. Nothing creates the join retrospectively.
+
+**`sweep_expired_documents`.** `submit_verification_document` writes the object
+to the bucket **before** opening the transaction that creates the row. If that
+transaction fails, the bytes are in private storage with nothing pointing at
+them: a national ID document that no retention sweep will ever see, because
+every sweep enumerates rows. The row-side accounting is impeccable —
+`deleted_at` is only set after a re-read confirms the object is gone, and a
+check constraint forbids the halfway state — and none of it can see a file the
+database has never heard of.
+
+That is the generalisation stated as strongly as it deserves: **when the thing
+being protected lives somewhere other than the database, the database cannot be
+the only place you look.**
+
 ## Checks whose scope is narrower than the belief attached to them
 
 **A different failure from the five above, and worth keeping separate.** Those
