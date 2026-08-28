@@ -167,8 +167,18 @@ function Arrow({
       // Named, not implied by which side it sits on. "Button" is what a screen
       // reader says for an icon with no label.
       aria-label={`${direction === "previous" ? "Previous" : "Next"} photo`}
+      // Opaque, and with a border of its own.
+      //
+      // This is the one control on the site whose background is a photograph,
+      // so nothing about its contrast is computable: `theme/contrast.test.ts`
+      // proves --secondary pairs readably with its foreground, and says
+      // nothing about either against somebody's picture of a courtyard at
+      // noon. At 90% opacity in the pale-yellow tenant palette the button
+      // dissolved into a bright photo entirely. The border is what makes the
+      // control's edge findable regardless of what is behind it, and it is
+      // drawn in --border rather than in the brand.
       className={cn(
-        "absolute top-1/2 size-9 -translate-y-1/2 rounded-full opacity-90 shadow-md",
+        "absolute top-1/2 size-9 -translate-y-1/2 rounded-full border border-border shadow-md",
         direction === "previous" ? "left-2" : "right-2",
       )}
     >
