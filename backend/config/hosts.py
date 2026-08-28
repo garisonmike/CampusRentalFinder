@@ -85,6 +85,21 @@ ROUTE_HOST_CLASSES: dict[str, HostClass] = {
     "properties:property-list": HostClass.TENANT_SCOPED,
     "properties:property-detail": HostClass.TENANT_SCOPED,
     "properties:unit-detail": HostClass.TENANT_SCOPED,
+    # The landlord and caretaker write surface. Every one of these is a write
+    # or an authenticated read of unpublished work, so all are tenant-scoped:
+    # a draft property belongs to the landlord who is making it and has no
+    # business on a publicly cacheable host.
+    "properties:managed-list": HostClass.TENANT_SCOPED,
+    "properties:property-create": HostClass.TENANT_SCOPED,
+    "properties:property-update": HostClass.TENANT_SCOPED,
+    "properties:property-publication": HostClass.TENANT_SCOPED,
+    "properties:unit-create": HostClass.TENANT_SCOPED,
+    "properties:unit-update": HostClass.TENANT_SCOPED,
+    "properties:unit-vacancy": HostClass.TENANT_SCOPED,
+    "properties:unit-availability": HostClass.TENANT_SCOPED,
+    "properties:unit-photos": HostClass.TENANT_SCOPED,
+    "properties:unit-photo-order": HostClass.TENANT_SCOPED,
+    "properties:unit-photo-detail": HostClass.TENANT_SCOPED,
     # -- Tenant-scoped: reviews and ratings --------------------------------
     # Reading is public; writing is not. Both are tenant-scoped for the same
     # reason listings are -- a review is about a property, and which properties

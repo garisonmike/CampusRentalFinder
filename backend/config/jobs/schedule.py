@@ -116,19 +116,6 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         func="properties.jobs.prompt_stale_vacancies",
         cron="0 9 * * 1",
         queue="default",
-        enabled=False,
-        held_because=(
-            "There is no endpoint through which a landlord can restate a "
-            "vacancy count. The Django admin is the only write path and it "
-            "reaches platform staff, not landlords -- so this job emails "
-            "people asking them to do something the platform does not let "
-            "them do. Running it would spend the one channel the whole "
-            "freshness mechanism depends on: a prompt with no destination "
-            "teaches landlords that our email is safe to ignore, and that "
-            "lesson does not un-teach when the endpoint ships. Unblocked by "
-            "the landlord write surface (PATCH /properties/{slug}/units/"
-            "{id}/vacancy/). Enable in the same commit that lands it."
-        ),
         on_failure=(
             "Vacancy counts age and nobody is asked to refresh them. The "
             "listings quietly become misleading -- advertising last term's "

@@ -13,6 +13,7 @@ from __future__ import annotations
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from accounts import capabilities
+from accounts.capabilities import CaretakerPermission
 
 
 class IsPlatformStaff(BasePermission):
@@ -210,3 +211,53 @@ class IsPropertyOwner(IsPropertyManager):
 
         landlord_profile = getattr(request.user, "landlord_profile", None)
         return landlord_profile is not None and self._owner_id(obj) == landlord_profile.pk
+
+
+# ---------------------------------------------------------------------------
+# Delegated management (ADR-003)
+# ---------------------------------------------------------------------------
+#
+# One class per delegable permission, rather than one class taking the
+# permission as an argument. The verbose version is the point: a view names the
+# authority it needs, and `test_every_api_view_declares_its_permission_classes`
+# can read that name without executing anything. A parameterised class would
+# put the actual authority in a keyword argument at each call site, which is
+# where it stops being greppable.
+#
+# Each is deliberately narrow. A caretaker trusted to say a room is off the
+# market is not thereby trusted to change its rent, and a caretaker trusted to
+# upload photos is not thereby trusted to state how many rooms are free -- the
+# vacancy count is the number the whole freshness mechanism rests on.
+
+
+class CanManageUnits(IsPropertyManager):
+    """Create and edit units. Not vacancy, and not availability."""
+
+    message = "You are not allowed to edit units on this property."
+    required_permission = CaretakerPermission.MANAGE_UNITS
+
+
+class CanManageVacancy(IsPropertyManager):
+    """State how many rooms are free.
+
+    Its own permission because it is its own kind of trust: the count is the
+    one number a student travels across a city on, and it is stamped with the
+    name of whoever set it.
+    """
+
+    message = "You are not allowed to set vacancy counts on this property."
+    required_permission = CaretakerPermission.MANAGE_VACANCY
+
+
+class CanManagePhotos(IsPropertyManager):
+    """Upload, reorder and delete listing photos."""
+
+    message = "You are not allowed to manage photos on this property."
+    required_permission = CaretakerPermission.MANAGE_PHOTOS
+
+
+class CanSetAvailability(IsPropertyManager):
+    """Set when a unit is free from, and whether it is listed at all."""
+
+    message = "You are not allowed to set availability on this property."
+    required_permission = CaretakerPermission.SET_AVAILABILITY

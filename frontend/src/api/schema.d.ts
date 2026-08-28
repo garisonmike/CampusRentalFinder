@@ -685,6 +685,252 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/properties/manage/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Properties you manage
+         * @description Owned properties for a landlord, assigned ones for a caretaker, **including drafts** -- which is the difference from the public listing endpoint. This is where an unpublished property lives until it is pinned.
+         */
+        get: operations["properties_manage_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a property
+         * @description Landlord only -- editing the building's own details is not in `CaretakerPermission`.
+         *
+         *     The slug follows the name only while the property is a draft. Once published the URL is in somebody's saved list and in messages the landlord has already sent, so renaming a live listing changes what it is called and not where it lives.
+         */
+        patch: operations["properties_manage_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/publication/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a property
+         * @description **The coordinates gate runs here.** A property with no latitude and longitude cannot be joined to a campus, and the join is what makes a listing visible to a university (ADR-002) -- so publishing one produces a listing the landlord can see and nobody else can. That failure looks exactly like low demand, which is why this refuses with a named reason instead.
+         *
+         *     Landlord only. Publishing puts a building on the internet under the owner's name.
+         */
+        post: operations["properties_manage_publication_create"];
+        /**
+         * Take a property off the site
+         * @description Back to draft, never deleted. Tenancies, claims and reviews point at this property and are other people's records.
+         */
+        delete: operations["properties_manage_publication_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a unit
+         * @description A pool of identical rooms is **one** unit with a `total_count`, not forty units. `vacant_count` is not settable here: a new unit starts with nobody having stated anything, which is what `vacancy_freshness: unknown` means.
+         */
+        post: operations["properties_manage_units_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a unit
+         * @description **`vacant_count` is refused here**, not ignored. It has one write path, which stamps the count with who stated it and when; a unit edit that could also set the number would leave a fresh count wearing an old date, and the staleness signal would then claim currency.
+         */
+        patch: operations["properties_manage_units_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/availability/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set a unit's availability
+         * @description Separately delegable from editing the unit: a caretaker may be trusted to say a room is off the market without being trusted to change its rent.
+         *
+         *     `is_active: false` hides a unit without deleting it. Prefer it — tenancy records point at units, and a deleted unit takes somebody's rental history with it.
+         */
+        patch: operations["properties_manage_units_availability_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/photos/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Photos on a unit, as its manager sees them
+         * @description Includes `processing_status` and `processing_error`, which the public serializer does not: a landlord whose photo failed to resize is owed the reason, and a student is not.
+         */
+        get: operations["properties_manage_units_photos_list"];
+        put?: never;
+        /**
+         * Upload a photo
+         * @description Stored immediately and resized in the background (ADR-007), so a fresh photo has no variants and the API serves the original. The first photo on a unit becomes its cover.
+         *
+         *     JPEG, PNG or WebP, checked by content type rather than by filename -- an extension is whatever the client typed, and the resize step is a decoder pointed at whatever arrives.
+         */
+        post: operations["properties_manage_units_photos_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/photos/{photo_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a photo
+         * @description Removes the row. The stored object is left in the bucket -- a delete that also removed the file could not be undone by an operator, and a landlord who deleted the wrong photo of a room they no longer have access to has lost it for good.
+         *
+         *     Deleting the cover promotes the next photo.
+         */
+        delete: operations["properties_manage_units_photos_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/photos/order/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Reorder a unit's photos
+         * @description Send **every** photo id on the unit, in the order you want. A partial list is refused: it means the page you are ordering from is stale, and applying it would silently drop the photos it does not mention.
+         *
+         *     The first becomes the cover.
+         */
+        put: operations["properties_manage_units_photos_order_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/manage/{slug}/units/{id}/vacancy/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * State how many rooms are free
+         * @description **The only way to write `vacant_count`.** Every write stamps the time and the author together, and the listing shows that stamp beside the number -- which is what lets a student tell 'six free, confirmed yesterday' from 'six free, nobody has said since March'.
+         *
+         *     The count is never derived from our tenancy records and never overwritten by them: you know about the room let off-platform last week and we do not.
+         *
+         *     Delegable to a caretaker as `manage_vacancy`, separately from everything else, because this is the number people travel on.
+         */
+        patch: operations["properties_manage_units_vacancy_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/properties/manage/new/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a property
+         * @description Always created as a **draft**, whatever the payload says. Publishing has a gate -- a property with no coordinates cannot join a campus and would be invisible to every student -- so creating and publishing are two steps, one of which can refuse.
+         *
+         *     Landlord only. Creating a building is not delegable.
+         */
+        post: operations["properties_manage_new_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/properties/units/{id}/": {
         parameters: {
             query?: never;
@@ -1833,6 +2079,65 @@ export interface components {
             /** Active */
             is_active?: boolean;
         };
+        /** @description When a unit is free from, and whether it is listed at all. */
+        PatchedAvailabilityRequest: {
+            /**
+             * Format: date
+             * @description Null means no date given, which is not the same as available today.
+             */
+            available_from?: string | null;
+            /** @description False hides the unit from listings without deleting it. Use this rather than deleting a unit somebody has stayed in -- the tenancy records point at it. */
+            is_active?: boolean;
+        };
+        /**
+         * @description Creating and editing a property's own details.
+         *
+         *     `status`, `published_at`, `slug` and `landlord` are all absent. Status
+         *     moves through `publish()` and `unpublish()` because publishing has a gate;
+         *     the slug is derived from the name and frozen once published, since a
+         *     published URL is in somebody's saved list; and the landlord is the caller.
+         */
+        PatchedPropertyWriteRequest: {
+            name?: string;
+            description?: string;
+            property_type?: components["schemas"]["PropertyTypeEnum"];
+            county?: components["schemas"]["CountyEnum"];
+            town?: string;
+            /** @description e.g. "Kahawa Wendani" */
+            estate?: string;
+            street?: string;
+            /** @description e.g. "opposite Naivas" */
+            landmark?: string;
+            /** @description P.O. Box 43844-00100 */
+            postal_address?: string;
+            /**
+             * Format: double
+             * @description Decimal degrees. **Required before publishing**: the campus join is computed from coordinates, and a property with none is invisible to every university (ADR-002). Saving without them is fine -- the draft simply cannot go live yet.
+             */
+            latitude?: number | null;
+            /**
+             * Format: double
+             * @description Decimal degrees. See `latitude`.
+             */
+            longitude?: number | null;
+            /** Water tank */
+            has_water_tank?: boolean;
+            /** Borehole */
+            has_borehole?: boolean;
+            /** Backup power */
+            has_backup_power?: boolean;
+            /** Perimeter wall */
+            has_perimeter_wall?: boolean;
+            /** Security guard */
+            has_security_guard?: boolean;
+            /** CCTV */
+            has_cctv?: boolean;
+            /** Wifi */
+            has_wifi?: boolean;
+            /** Parking */
+            has_parking?: boolean;
+            caretaker_on_site?: boolean;
+        };
         /**
          * @description Creating or editing a review.
          *
@@ -1857,6 +2162,65 @@ export interface components {
             value_rating?: number | null;
             comment?: string;
             would_recommend?: boolean | null;
+        };
+        /**
+         * @description Creating and editing a unit.
+         *
+         *     `vacant_count` is **not here and will not be added.** It is stated through
+         *     `PATCH .../vacancy/`, which stamps the time and the author with it. A unit
+         *     edit that could also set the count would let a fresh number keep an old
+         *     date, which is worse than a stale count because the staleness signal would
+         *     then claim currency.
+         *
+         *     `available_from` and `is_active` are not here either, for a different
+         *     reason: they are separately delegable. A caretaker may be trusted to say a
+         *     room is off the market without being trusted to change its rent.
+         */
+        PatchedUnitWriteRequest: {
+            /** @description "B12" for one unit, or "Bedsitters" for a pool of identical ones. */
+            label?: string;
+            unit_type?: components["schemas"]["UnitTypeEnum"];
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            rent_kes?: string;
+            /**
+             * Deposit (KES)
+             * Format: decimal
+             */
+            deposit_kes?: string | null;
+            water_included?: boolean;
+            /** @description Token metering is the norm otherwise. */
+            electricity_included?: boolean;
+            wifi_included?: boolean;
+            /** Furnishing */
+            furnished?: components["schemas"]["FurnishedEnum"];
+            /**
+             * Size (m²)
+             * @description Square metres, not feet.
+             */
+            size_sqm?: number | null;
+            /** @description 0 for a bedsitter or single room. */
+            bedrooms?: number;
+            /**
+             * Private bathroom
+             * @description Replaces the draft's bathrooms>=1, which made a hostel block with shared ablutions impossible to list.
+             */
+            has_private_bathroom?: boolean;
+            /** Kitchenette */
+            has_kitchenette?: boolean;
+            floor?: number | null;
+            /**
+             * Total units
+             * @description How many identical rooms this row represents. A hostel block is one Unit with a total_count of forty, not forty Units.
+             */
+            total_count?: number;
+            /**
+             * Minimum stay (months)
+             * @description One semester. The draft defaulted to a 12-month lease.
+             */
+            min_stay_months?: number;
         };
         /** @description The settings a school administers about itself. */
         PatchedUniversityPolicyRequest: {
@@ -1909,6 +2273,56 @@ export interface components {
             phone_number?: string;
             /** Format: uri */
             avatar_url?: string;
+        };
+        /**
+         * @description Stating how many rooms are free.
+         *
+         *     One field, its own endpoint, and its own delegable permission -- because
+         *     this is the number a student crosses a city on. Every write through it is
+         *     stamped with who said it and when, and that stamp is what the listing
+         *     shows beside the count.
+         */
+        PatchedVacancyRequest: {
+            /** @description How many rooms are free right now, as you know it. Never derived from our tenancy records: you know about the room let off-platform last week and we do not. Must not exceed the unit's total_count. */
+            vacant_count?: number;
+        };
+        /** @description A photo as its manager sees it, including why it may not be ready. */
+        Photo: {
+            readonly id: number;
+            readonly caption: string;
+            readonly sort_order: number;
+            /** Primary photo */
+            readonly is_primary: boolean;
+            readonly url: string;
+            readonly processing_status: components["schemas"]["ProcessingStatusEnum"];
+            readonly processing_error: string;
+        };
+        /**
+         * @description The whole order, not a move.
+         *
+         *     Two people each nudging one photo produce an order neither chose. Sending
+         *     the full list makes it last-write-wins on something the writer could see,
+         *     and a stale list is rejected rather than silently applied.
+         */
+        PhotoOrderRequest: {
+            /** @description Every photo id on this unit, in the order you want them. The first becomes the cover. */
+            photo_ids: number[];
+        };
+        /**
+         * @description One photo.
+         *
+         *     The file's content type is checked in the service rather than here,
+         *     because the same rule has to hold for a management command bulk-importing
+         *     a landlord's existing photos.
+         */
+        PhotoUploadRequest: {
+            /**
+             * Format: binary
+             * @description JPEG, PNG or WebP.
+             */
+            image: string;
+            /** @description Optional. Used as the image's alt text, so it should say what the photo shows -- 'the shared kitchen', not 'IMG_2831'. */
+            caption?: string;
         };
         /**
          * @description * `pending` - Pending
@@ -2052,6 +2466,55 @@ export interface components {
          * @enum {string}
          */
         PropertyTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
+        /**
+         * @description Creating and editing a property's own details.
+         *
+         *     `status`, `published_at`, `slug` and `landlord` are all absent. Status
+         *     moves through `publish()` and `unpublish()` because publishing has a gate;
+         *     the slug is derived from the name and frozen once published, since a
+         *     published URL is in somebody's saved list; and the landlord is the caller.
+         */
+        PropertyWriteRequest: {
+            name: string;
+            description?: string;
+            property_type: components["schemas"]["PropertyTypeEnum"];
+            county: components["schemas"]["CountyEnum"];
+            town: string;
+            /** @description e.g. "Kahawa Wendani" */
+            estate: string;
+            street?: string;
+            /** @description e.g. "opposite Naivas" */
+            landmark?: string;
+            /** @description P.O. Box 43844-00100 */
+            postal_address?: string;
+            /**
+             * Format: double
+             * @description Decimal degrees. **Required before publishing**: the campus join is computed from coordinates, and a property with none is invisible to every university (ADR-002). Saving without them is fine -- the draft simply cannot go live yet.
+             */
+            latitude?: number | null;
+            /**
+             * Format: double
+             * @description Decimal degrees. See `latitude`.
+             */
+            longitude?: number | null;
+            /** Water tank */
+            has_water_tank?: boolean;
+            /** Borehole */
+            has_borehole?: boolean;
+            /** Backup power */
+            has_backup_power?: boolean;
+            /** Perimeter wall */
+            has_perimeter_wall?: boolean;
+            /** Security guard */
+            has_security_guard?: boolean;
+            /** CCTV */
+            has_cctv?: boolean;
+            /** Wifi */
+            has_wifi?: boolean;
+            /** Parking */
+            has_parking?: boolean;
+            caretaker_on_site?: boolean;
+        };
         /**
          * @description The shared shape of all three aggregates.
          *
@@ -2533,6 +2996,65 @@ export interface components {
          * @enum {string}
          */
         UnitTypeEnum: "bedsitter" | "single_room" | "one_bedroom" | "two_bedroom" | "three_bedroom" | "hostel_block" | "shared_house" | "maisonette" | "other";
+        /**
+         * @description Creating and editing a unit.
+         *
+         *     `vacant_count` is **not here and will not be added.** It is stated through
+         *     `PATCH .../vacancy/`, which stamps the time and the author with it. A unit
+         *     edit that could also set the count would let a fresh number keep an old
+         *     date, which is worse than a stale count because the staleness signal would
+         *     then claim currency.
+         *
+         *     `available_from` and `is_active` are not here either, for a different
+         *     reason: they are separately delegable. A caretaker may be trusted to say a
+         *     room is off the market without being trusted to change its rent.
+         */
+        UnitWriteRequest: {
+            /** @description "B12" for one unit, or "Bedsitters" for a pool of identical ones. */
+            label: string;
+            unit_type: components["schemas"]["UnitTypeEnum"];
+            /**
+             * Monthly rent (KES)
+             * Format: decimal
+             */
+            rent_kes: string;
+            /**
+             * Deposit (KES)
+             * Format: decimal
+             */
+            deposit_kes?: string | null;
+            water_included?: boolean;
+            /** @description Token metering is the norm otherwise. */
+            electricity_included?: boolean;
+            wifi_included?: boolean;
+            /** Furnishing */
+            furnished?: components["schemas"]["FurnishedEnum"];
+            /**
+             * Size (m²)
+             * @description Square metres, not feet.
+             */
+            size_sqm?: number | null;
+            /** @description 0 for a bedsitter or single room. */
+            bedrooms?: number;
+            /**
+             * Private bathroom
+             * @description Replaces the draft's bathrooms>=1, which made a hostel block with shared ablutions impossible to list.
+             */
+            has_private_bathroom?: boolean;
+            /** Kitchenette */
+            has_kitchenette?: boolean;
+            floor?: number | null;
+            /**
+             * Total units
+             * @description How many identical rooms this row represents. A hostel block is one Unit with a total_count of forty, not forty Units.
+             */
+            total_count?: number;
+            /**
+             * Minimum stay (months)
+             * @description One semester. The draft defaulted to a 12-month lease.
+             */
+            min_stay_months?: number;
+        };
         /** @description The settings a school administers about itself. */
         UniversityPolicy: {
             readonly name: string;
@@ -2661,6 +3183,20 @@ export interface components {
         };
         /** @enum {string} */
         VacancyFreshnessEnum: "fresh" | "ageing" | "stale" | "unknown";
+        /** @description What restating a vacancy gives back: the count, and its provenance. */
+        VacancyResult: {
+            readonly id: number;
+            readonly vacant_count: number;
+            readonly total_count: number;
+            /** @description How much to trust `vacant_count`: fresh | ageing | stale | unknown. **Surface this. Never present a stale count as current.** The number is stated by the landlord and never derived -- they know about the room let off-platform last week and we do not -- so it is only as good as its age. A stale count is still SHOWN, with its age; hiding it or zeroing it would replace a number the reader can judge with one they cannot. Render the band, do not recompute it from the timestamp: the thresholds are server side and a second copy in the client is how they drift. */
+            readonly vacancy_freshness: string;
+            /** @description Days since the landlord last stated `vacant_count`, or null if they never have. **null is not zero** -- 'nobody has ever said' and 'said today' are opposite facts. Show alongside `vacancy_freshness`; do not derive the band from this. */
+            readonly vacancy_age_days: number | null;
+            /** Format: date-time */
+            readonly vacant_count_updated_at: string | null;
+            /** @description Who stated it. A caretaker walking the block and a landlord updating from an office are different kinds of evidence, and an operator chasing a stale listing needs to know which. */
+            readonly vacant_count_updated_by_name: string;
+        };
         /** @description Approving or rejecting one. */
         VerificationDecisionRequest: {
             /** @description Shown to the student. **Required for a rejection** -- a student told 'no' with nothing to act on cannot resubmit successfully. */
@@ -3716,6 +4252,330 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"];
+                };
+            };
+        };
+    };
+    properties_manage_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"][];
+                };
+            };
+        };
+    };
+    properties_manage_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedPropertyWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedPropertyWriteRequest"];
+                "multipart/form-data": components["schemas"]["PatchedPropertyWriteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"];
+                };
+            };
+        };
+    };
+    properties_manage_publication_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"];
+                };
+            };
+        };
+    };
+    properties_manage_publication_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PropertyDetail"];
+                };
+            };
+        };
+    };
+    properties_manage_units_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["UnitWriteRequest"];
+                "multipart/form-data": components["schemas"]["UnitWriteRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSummary"];
+                };
+            };
+        };
+    };
+    properties_manage_units_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedUnitWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedUnitWriteRequest"];
+                "multipart/form-data": components["schemas"]["PatchedUnitWriteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSummary"];
+                };
+            };
+        };
+    };
+    properties_manage_units_availability_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedAvailabilityRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedAvailabilityRequest"];
+                "multipart/form-data": components["schemas"]["PatchedAvailabilityRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSummary"];
+                };
+            };
+        };
+    };
+    properties_manage_units_photos_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Photo"][];
+                };
+            };
+        };
+    };
+    properties_manage_units_photos_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoUploadRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PhotoUploadRequest"];
+                "multipart/form-data": components["schemas"]["PhotoUploadRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Photo"];
+                };
+            };
+        };
+    };
+    properties_manage_units_photos_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                photo_id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    properties_manage_units_photos_order_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoOrderRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PhotoOrderRequest"];
+                "multipart/form-data": components["schemas"]["PhotoOrderRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Photo"][];
+                };
+            };
+        };
+    };
+    properties_manage_units_vacancy_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedVacancyRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedVacancyRequest"];
+                "multipart/form-data": components["schemas"]["PatchedVacancyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VacancyResult"];
+                };
+            };
+        };
+    };
+    properties_manage_new_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PropertyWriteRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PropertyWriteRequest"];
+                "multipart/form-data": components["schemas"]["PropertyWriteRequest"];
+            };
+        };
+        responses: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

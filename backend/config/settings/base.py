@@ -440,6 +440,15 @@ ERASURE_COOLING_OFF_DAYS = config("ERASURE_COOLING_OFF_DAYS", default=7, cast=in
 VACANCY_FRESH_DAYS = config("VACANCY_FRESH_DAYS", default=7, cast=int)
 VACANCY_STALE_DAYS = config("VACANCY_STALE_DAYS", default=30, cast=int)
 
+# The largest listing photo we accept, in bytes.
+#
+# 10 MB, which a modern phone camera exceeds only on its highest setting. The
+# limit exists because the resize job decodes whatever arrives: an unbounded
+# upload is an unbounded allocation in a worker shared with the retention
+# sweeps, so the cost of a huge file is paid by a compliance job rather than by
+# the person who uploaded it.
+MAX_PHOTO_BYTES = config("MAX_PHOTO_BYTES", default=10 * 1024 * 1024, cast=int)
+
 # Manual ID verification (ADR-003). Every default here takes the option that
 # holds less data for less time -- this is Data Protection Act 2019 territory,
 # not a preference.

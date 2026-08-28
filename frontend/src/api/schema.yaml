@@ -1237,6 +1237,449 @@ paths:
               schema:
                 $ref: '#/components/schemas/PropertyDetail'
           description: ''
+  /api/v1/properties/manage/:
+    get:
+      operationId: properties_manage_list
+      description: Owned properties for a landlord, assigned ones for a caretaker,
+        **including drafts** -- which is the difference from the public listing endpoint.
+        This is where an unpublished property lives until it is pinned.
+      summary: Properties you manage
+      tags:
+      - properties
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PropertyDetail'
+          description: ''
+  /api/v1/properties/manage/{slug}/:
+    patch:
+      operationId: properties_manage_partial_update
+      description: |-
+        Landlord only -- editing the building's own details is not in `CaretakerPermission`.
+
+        The slug follows the name only while the property is a draft. Once published the URL is in somebody's saved list and in messages the landlord has already sent, so renaming a live listing changes what it is called and not where it lives.
+      summary: Edit a property
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertyWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertyWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertyWriteRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+          description: ''
+  /api/v1/properties/manage/{slug}/publication/:
+    post:
+      operationId: properties_manage_publication_create
+      description: |-
+        **The coordinates gate runs here.** A property with no latitude and longitude cannot be joined to a campus, and the join is what makes a listing visible to a university (ADR-002) -- so publishing one produces a listing the landlord can see and nobody else can. That failure looks exactly like low demand, which is why this refuses with a named reason instead.
+
+        Landlord only. Publishing puts a building on the internet under the owner's name.
+      summary: Publish a property
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+          description: ''
+    delete:
+      operationId: properties_manage_publication_destroy
+      description: Back to draft, never deleted. Tenancies, claims and reviews point
+        at this property and are other people's records.
+      summary: Take a property off the site
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/:
+    post:
+      operationId: properties_manage_units_create
+      description: 'A pool of identical rooms is **one** unit with a `total_count`,
+        not forty units. `vacant_count` is not settable here: a new unit starts with
+        nobody having stated anything, which is what `vacancy_freshness: unknown`
+        means.'
+      summary: Add a unit
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UnitWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UnitWriteRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitSummary'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/{id}/:
+    patch:
+      operationId: properties_manage_units_partial_update
+      description: '**`vacant_count` is refused here**, not ignored. It has one write
+        path, which stamps the count with who stated it and when; a unit edit that
+        could also set the number would leave a fresh count wearing an old date, and
+        the staleness signal would then claim currency.'
+      summary: Edit a unit
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUnitWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUnitWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUnitWriteRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitSummary'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/{id}/availability/:
+    patch:
+      operationId: properties_manage_units_availability_partial_update
+      description: |-
+        Separately delegable from editing the unit: a caretaker may be trusted to say a room is off the market without being trusted to change its rent.
+
+        `is_active: false` hides a unit without deleting it. Prefer it — tenancy records point at units, and a deleted unit takes somebody's rental history with it.
+      summary: Set a unit's availability
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAvailabilityRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedAvailabilityRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedAvailabilityRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitSummary'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/{id}/photos/:
+    get:
+      operationId: properties_manage_units_photos_list
+      description: 'Includes `processing_status` and `processing_error`, which the
+        public serializer does not: a landlord whose photo failed to resize is owed
+        the reason, and a student is not.'
+      summary: Photos on a unit, as its manager sees them
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Photo'
+          description: ''
+    post:
+      operationId: properties_manage_units_photos_create
+      description: |-
+        Stored immediately and resized in the background (ADR-007), so a fresh photo has no variants and the API serves the original. The first photo on a unit becomes its cover.
+
+        JPEG, PNG or WebP, checked by content type rather than by filename -- an extension is whatever the client typed, and the resize step is a decoder pointed at whatever arrives.
+      summary: Upload a photo
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhotoUploadRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PhotoUploadRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PhotoUploadRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Photo'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/{id}/photos/{photo_id}/:
+    delete:
+      operationId: properties_manage_units_photos_destroy
+      description: |-
+        Removes the row. The stored object is left in the bucket -- a delete that also removed the file could not be undone by an operator, and a landlord who deleted the wrong photo of a room they no longer have access to has lost it for good.
+
+        Deleting the cover promotes the next photo.
+      summary: Delete a photo
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: photo_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/properties/manage/{slug}/units/{id}/photos/order/:
+    put:
+      operationId: properties_manage_units_photos_order_update
+      description: |-
+        Send **every** photo id on the unit, in the order you want. A partial list is refused: it means the page you are ordering from is stale, and applying it would silently drop the photos it does not mention.
+
+        The first becomes the cover.
+      summary: Reorder a unit's photos
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhotoOrderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PhotoOrderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PhotoOrderRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Photo'
+          description: ''
+  /api/v1/properties/manage/{slug}/units/{id}/vacancy/:
+    patch:
+      operationId: properties_manage_units_vacancy_partial_update
+      description: |-
+        **The only way to write `vacant_count`.** Every write stamps the time and the author together, and the listing shows that stamp beside the number -- which is what lets a student tell 'six free, confirmed yesterday' from 'six free, nobody has said since March'.
+
+        The count is never derived from our tenancy records and never overwritten by them: you know about the room let off-platform last week and we do not.
+
+        Delegable to a caretaker as `manage_vacancy`, separately from everything else, because this is the number people travel on.
+      summary: State how many rooms are free
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVacancyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVacancyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVacancyRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VacancyResult'
+          description: ''
+  /api/v1/properties/manage/new/:
+    post:
+      operationId: properties_manage_new_create
+      description: |-
+        Always created as a **draft**, whatever the payload says. Publishing has a gate -- a property with no coordinates cannot join a campus and would be invisible to every student -- so creating and publishing are two steps, one of which can refuse.
+
+        Landlord only. Creating a building is not delegable.
+      summary: Create a property
+      tags:
+      - properties
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyWriteRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PropertyWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PropertyWriteRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyDetail'
+          description: ''
   /api/v1/properties/units/{id}/:
     get:
       operationId: properties_units_retrieve
@@ -3305,6 +3748,104 @@ components:
         is_active:
           type: boolean
           title: Active
+    PatchedAvailabilityRequest:
+      type: object
+      description: When a unit is free from, and whether it is listed at all.
+      properties:
+        available_from:
+          type: string
+          format: date
+          nullable: true
+          description: Null means no date given, which is not the same as available
+            today.
+        is_active:
+          type: boolean
+          description: False hides the unit from listings without deleting it. Use
+            this rather than deleting a unit somebody has stayed in -- the tenancy
+            records point at it.
+    PatchedPropertyWriteRequest:
+      type: object
+      description: |-
+        Creating and editing a property's own details.
+
+        `status`, `published_at`, `slug` and `landlord` are all absent. Status
+        moves through `publish()` and `unpublish()` because publishing has a gate;
+        the slug is derived from the name and frozen once published, since a
+        published URL is in somebody's saved list; and the landlord is the caller.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        property_type:
+          $ref: '#/components/schemas/PropertyTypeEnum'
+        county:
+          $ref: '#/components/schemas/CountyEnum'
+        town:
+          type: string
+          minLength: 1
+          maxLength: 100
+        estate:
+          type: string
+          minLength: 1
+          description: e.g. "Kahawa Wendani"
+          maxLength: 100
+        street:
+          type: string
+          maxLength: 200
+        landmark:
+          type: string
+          description: e.g. "opposite Naivas"
+          maxLength: 200
+        postal_address:
+          type: string
+          description: P.O. Box 43844-00100
+          maxLength: 50
+        latitude:
+          type: number
+          format: double
+          maximum: 90
+          minimum: -90
+          nullable: true
+          description: 'Decimal degrees. **Required before publishing**: the campus
+            join is computed from coordinates, and a property with none is invisible
+            to every university (ADR-002). Saving without them is fine -- the draft
+            simply cannot go live yet.'
+        longitude:
+          type: number
+          format: double
+          maximum: 180
+          minimum: -180
+          nullable: true
+          description: Decimal degrees. See `latitude`.
+        has_water_tank:
+          type: boolean
+          title: Water tank
+        has_borehole:
+          type: boolean
+          title: Borehole
+        has_backup_power:
+          type: boolean
+          title: Backup power
+        has_perimeter_wall:
+          type: boolean
+          title: Perimeter wall
+        has_security_guard:
+          type: boolean
+          title: Security guard
+        has_cctv:
+          type: boolean
+          title: CCTV
+        has_wifi:
+          type: boolean
+          title: Wifi
+        has_parking:
+          type: boolean
+          title: Parking
+        caretaker_on_site:
+          type: boolean
     PatchedReviewWriteRequest:
       type: object
       description: |-
@@ -3360,6 +3901,89 @@ components:
         would_recommend:
           type: boolean
           nullable: true
+    PatchedUnitWriteRequest:
+      type: object
+      description: |-
+        Creating and editing a unit.
+
+        `vacant_count` is **not here and will not be added.** It is stated through
+        `PATCH .../vacancy/`, which stamps the time and the author with it. A unit
+        edit that could also set the count would let a fresh number keep an old
+        date, which is worse than a stale count because the staleness signal would
+        then claim currency.
+
+        `available_from` and `is_active` are not here either, for a different
+        reason: they are separately delegable. A caretaker may be trusted to say a
+        room is off the market without being trusted to change its rent.
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: '"B12" for one unit, or "Bedsitters" for a pool of identical
+            ones.'
+          maxLength: 50
+        unit_type:
+          $ref: '#/components/schemas/UnitTypeEnum'
+        rent_kes:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          title: Monthly rent (KES)
+        deposit_kes:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Deposit (KES)
+        water_included:
+          type: boolean
+        electricity_included:
+          type: boolean
+          description: Token metering is the norm otherwise.
+        wifi_included:
+          type: boolean
+        furnished:
+          allOf:
+          - $ref: '#/components/schemas/FurnishedEnum'
+          title: Furnishing
+        size_sqm:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+          title: Size (m²)
+          description: Square metres, not feet.
+        bedrooms:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: 0 for a bedsitter or single room.
+        has_private_bathroom:
+          type: boolean
+          title: Private bathroom
+          description: Replaces the draft's bathrooms>=1, which made a hostel block
+            with shared ablutions impossible to list.
+        has_kitchenette:
+          type: boolean
+          title: Kitchenette
+        floor:
+          type: integer
+          maximum: 32767
+          minimum: -32768
+          nullable: true
+        total_count:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          title: Total units
+          description: How many identical rooms this row represents. A hostel block
+            is one Unit with a total_count of forty, not forty Units.
+        min_stay_months:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          title: Minimum stay (months)
+          description: One semester. The draft defaulted to a 12-month lease.
     PatchedUniversityPolicyRequest:
       type: object
       description: The settings a school administers about itself.
@@ -3460,6 +4084,94 @@ components:
           type: string
           format: uri
           maxLength: 200
+    PatchedVacancyRequest:
+      type: object
+      description: |-
+        Stating how many rooms are free.
+
+        One field, its own endpoint, and its own delegable permission -- because
+        this is the number a student crosses a city on. Every write through it is
+        stamped with who said it and when, and that stamp is what the listing
+        shows beside the count.
+      properties:
+        vacant_count:
+          type: integer
+          minimum: 0
+          description: 'How many rooms are free right now, as you know it. Never derived
+            from our tenancy records: you know about the room let off-platform last
+            week and we do not. Must not exceed the unit''s total_count.'
+    Photo:
+      type: object
+      description: A photo as its manager sees it, including why it may not be ready.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        caption:
+          type: string
+          readOnly: true
+        sort_order:
+          type: integer
+          readOnly: true
+        is_primary:
+          type: boolean
+          readOnly: true
+          title: Primary photo
+        url:
+          type: string
+          readOnly: true
+        processing_status:
+          allOf:
+          - $ref: '#/components/schemas/ProcessingStatusEnum'
+          readOnly: true
+        processing_error:
+          type: string
+          readOnly: true
+      required:
+      - caption
+      - id
+      - is_primary
+      - processing_error
+      - processing_status
+      - sort_order
+      - url
+    PhotoOrderRequest:
+      type: object
+      description: |-
+        The whole order, not a move.
+
+        Two people each nudging one photo produce an order neither chose. Sending
+        the full list makes it last-write-wins on something the writer could see,
+        and a stale list is rejected rather than silently applied.
+      properties:
+        photo_ids:
+          type: array
+          items:
+            type: integer
+          description: Every photo id on this unit, in the order you want them. The
+            first becomes the cover.
+      required:
+      - photo_ids
+    PhotoUploadRequest:
+      type: object
+      description: |-
+        One photo.
+
+        The file's content type is checked in the service rather than here,
+        because the same rule has to hold for a management command bulk-importing
+        a landlord's existing photos.
+      properties:
+        image:
+          type: string
+          format: binary
+          description: JPEG, PNG or WebP.
+        caption:
+          type: string
+          description: Optional. Used as the image's alt text, so it should say what
+            the photo shows -- 'the shared kitchen', not 'IMG_2831'.
+          maxLength: 200
+      required:
+      - image
     ProcessingStatusEnum:
       enum:
       - pending
@@ -3801,6 +4513,95 @@ components:
         * `shared_house` - Shared House
         * `maisonette` - Maisonette
         * `other` - Other
+    PropertyWriteRequest:
+      type: object
+      description: |-
+        Creating and editing a property's own details.
+
+        `status`, `published_at`, `slug` and `landlord` are all absent. Status
+        moves through `publish()` and `unpublish()` because publishing has a gate;
+        the slug is derived from the name and frozen once published, since a
+        published URL is in somebody's saved list; and the landlord is the caller.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        property_type:
+          $ref: '#/components/schemas/PropertyTypeEnum'
+        county:
+          $ref: '#/components/schemas/CountyEnum'
+        town:
+          type: string
+          minLength: 1
+          maxLength: 100
+        estate:
+          type: string
+          minLength: 1
+          description: e.g. "Kahawa Wendani"
+          maxLength: 100
+        street:
+          type: string
+          maxLength: 200
+        landmark:
+          type: string
+          description: e.g. "opposite Naivas"
+          maxLength: 200
+        postal_address:
+          type: string
+          description: P.O. Box 43844-00100
+          maxLength: 50
+        latitude:
+          type: number
+          format: double
+          maximum: 90
+          minimum: -90
+          nullable: true
+          description: 'Decimal degrees. **Required before publishing**: the campus
+            join is computed from coordinates, and a property with none is invisible
+            to every university (ADR-002). Saving without them is fine -- the draft
+            simply cannot go live yet.'
+        longitude:
+          type: number
+          format: double
+          maximum: 180
+          minimum: -180
+          nullable: true
+          description: Decimal degrees. See `latitude`.
+        has_water_tank:
+          type: boolean
+          title: Water tank
+        has_borehole:
+          type: boolean
+          title: Borehole
+        has_backup_power:
+          type: boolean
+          title: Backup power
+        has_perimeter_wall:
+          type: boolean
+          title: Perimeter wall
+        has_security_guard:
+          type: boolean
+          title: Security guard
+        has_cctv:
+          type: boolean
+          title: CCTV
+        has_wifi:
+          type: boolean
+          title: Wifi
+        has_parking:
+          type: boolean
+          title: Parking
+        caretaker_on_site:
+          type: boolean
+      required:
+      - county
+      - estate
+      - name
+      - property_type
+      - town
     RatingAggregate:
       type: object
       description: |-
@@ -4846,6 +5647,93 @@ components:
         * `shared_house` - Shared House
         * `maisonette` - Maisonette
         * `other` - Other
+    UnitWriteRequest:
+      type: object
+      description: |-
+        Creating and editing a unit.
+
+        `vacant_count` is **not here and will not be added.** It is stated through
+        `PATCH .../vacancy/`, which stamps the time and the author with it. A unit
+        edit that could also set the count would let a fresh number keep an old
+        date, which is worse than a stale count because the staleness signal would
+        then claim currency.
+
+        `available_from` and `is_active` are not here either, for a different
+        reason: they are separately delegable. A caretaker may be trusted to say a
+        room is off the market without being trusted to change its rent.
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: '"B12" for one unit, or "Bedsitters" for a pool of identical
+            ones.'
+          maxLength: 50
+        unit_type:
+          $ref: '#/components/schemas/UnitTypeEnum'
+        rent_kes:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          title: Monthly rent (KES)
+        deposit_kes:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Deposit (KES)
+        water_included:
+          type: boolean
+        electricity_included:
+          type: boolean
+          description: Token metering is the norm otherwise.
+        wifi_included:
+          type: boolean
+        furnished:
+          allOf:
+          - $ref: '#/components/schemas/FurnishedEnum'
+          title: Furnishing
+        size_sqm:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+          title: Size (m²)
+          description: Square metres, not feet.
+        bedrooms:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          description: 0 for a bedsitter or single room.
+        has_private_bathroom:
+          type: boolean
+          title: Private bathroom
+          description: Replaces the draft's bathrooms>=1, which made a hostel block
+            with shared ablutions impossible to list.
+        has_kitchenette:
+          type: boolean
+          title: Kitchenette
+        floor:
+          type: integer
+          maximum: 32767
+          minimum: -32768
+          nullable: true
+        total_count:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          title: Total units
+          description: How many identical rooms this row represents. A hostel block
+            is one Unit with a total_count of forty, not forty Units.
+        min_stay_months:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          title: Minimum stay (months)
+          description: One semester. The draft defaulted to a 12-month lease.
+      required:
+      - label
+      - rent_kes
+      - unit_type
     UniversityPolicy:
       type: object
       description: The settings a school administers about itself.
@@ -5148,6 +6036,57 @@ components:
       - stale
       - unknown
       type: string
+    VacancyResult:
+      type: object
+      description: 'What restating a vacancy gives back: the count, and its provenance.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        vacant_count:
+          type: integer
+          readOnly: true
+        total_count:
+          type: integer
+          readOnly: true
+        vacancy_freshness:
+          type: string
+          readOnly: true
+          description: 'How much to trust `vacant_count`: fresh | ageing | stale |
+            unknown. **Surface this. Never present a stale count as current.** The
+            number is stated by the landlord and never derived -- they know about
+            the room let off-platform last week and we do not -- so it is only as
+            good as its age. A stale count is still SHOWN, with its age; hiding it
+            or zeroing it would replace a number the reader can judge with one they
+            cannot. Render the band, do not recompute it from the timestamp: the thresholds
+            are server side and a second copy in the client is how they drift.'
+        vacancy_age_days:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Days since the landlord last stated `vacant_count`, or null
+            if they never have. **null is not zero** -- 'nobody has ever said' and
+            'said today' are opposite facts. Show alongside `vacancy_freshness`; do
+            not derive the band from this.
+        vacant_count_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        vacant_count_updated_by_name:
+          type: string
+          readOnly: true
+          description: Who stated it. A caretaker walking the block and a landlord
+            updating from an office are different kinds of evidence, and an operator
+            chasing a stale listing needs to know which.
+      required:
+      - id
+      - total_count
+      - vacancy_age_days
+      - vacancy_freshness
+      - vacant_count
+      - vacant_count_updated_at
+      - vacant_count_updated_by_name
     VerificationDecisionRequest:
       type: object
       description: Approving or rejecting one.

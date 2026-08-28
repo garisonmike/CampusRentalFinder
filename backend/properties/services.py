@@ -10,16 +10,20 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import storages
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
-from .constants import PropertyStatus, VacancyFreshness
-from .models import Property, Unit
+from .constants import PhotoProcessingStatus, PropertyStatus, VacancyFreshness
+from .jobs import enqueue_photo_variants
+from .models import Property, Unit, UnitPhoto
 
 
 class PropertyNotPublishableError(ValidationError):
@@ -271,3 +275,283 @@ def cross_check_coverage(units=None, *, today: dt.date | None = None) -> dict[st
         "informative": len(informative),
         "contradictions": len([row for row in informative if row.is_contradiction]),
     }
+
+
+# ---------------------------------------------------------------------------
+# The landlord and caretaker write surface (ADR-002, ADR-003)
+# ---------------------------------------------------------------------------
+#
+# Every write below is a named function rather than a serializer `.save()`,
+# for the reason the rest of this module exists: the rules that span rows
+# cannot be constraints, and a rule enforced only in a serializer is a rule the
+# admin, a management command and a future job all miss.
+#
+# `vacant_count` in particular never appears in a writable serializer. It has
+# exactly one write path -- `state_vacancy` -- because a bare field write
+# leaves a fresh number wearing an old timestamp, and `docs/OPERATIONS.md`
+# records the admin arriving at that door once already.
+
+
+def _unique_slug(name: str, *, exclude_pk: int | None = None) -> str:
+    """A slug nobody else holds.
+
+    Suffixed rather than rejected: two landlords near the same campus
+    genuinely do both call a block "Sunrise Apartments", and refusing the
+    second would be the platform telling a landlord their building has the
+    wrong name.
+    """
+    base = slugify(name)[:200] or "property"
+    candidate = base
+
+    existing = Property.all_objects.exclude(pk=exclude_pk) if exclude_pk else Property.all_objects
+    suffix = 2
+    while existing.filter(slug=candidate).exists():
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+
+    return candidate
+
+
+@transaction.atomic
+def create_property(*, landlord, **fields) -> Property:
+    """Create a property, always as a draft.
+
+    **Never published on create**, whatever the payload says. Publication has
+    a gate (`assert_property_is_publishable`) and a property created straight
+    into `PUBLISHED` would either bypass it or fail confusingly half way
+    through a create. Two steps, one of which can refuse.
+    """
+    return Property.all_objects.create(
+        landlord=landlord,
+        slug=_unique_slug(fields.get("name", "")),
+        status=PropertyStatus.DRAFT,
+        **fields,
+    )
+
+
+@transaction.atomic
+def update_property(property_obj: Property, **fields) -> Property:
+    """Edit a property's own details.
+
+    The slug follows the name only while the property is a draft. Once
+    published the URL is in somebody's saved list and in a message a landlord
+    sent a student, and silently moving it turns both into a 404.
+    """
+    for name, value in fields.items():
+        setattr(property_obj, name, value)
+
+    if "name" in fields and property_obj.status == PropertyStatus.DRAFT:
+        property_obj.slug = _unique_slug(fields["name"], exclude_pk=property_obj.pk)
+
+    property_obj.full_clean(exclude=["landlord"])
+    property_obj.save()
+    return property_obj
+
+
+def unpublish(property_obj: Property) -> Property:
+    """Take a listing down without deleting it.
+
+    A property with tenancies against it is a record other people rely on, so
+    the way off the site is a status change rather than a delete. Draft is
+    also the state the publish gate can be re-run from.
+    """
+    property_obj.status = PropertyStatus.DRAFT
+    property_obj.save(update_fields=["status", "updated_at"])
+    return property_obj
+
+
+@transaction.atomic
+def create_unit(*, property_obj: Property, **fields) -> Unit:
+    """Add a unit to a property.
+
+    `vacant_count` is deliberately not settable here. A new unit starts at
+    zero free rooms with no provenance -- `vacancy_freshness` reads `unknown`,
+    which is the truth: nobody has stated anything yet. Accepting a count on
+    create would let it be stated without being stamped.
+    """
+    unit = Unit(property=property_obj, **fields)
+    unit.full_clean(exclude=["property"])
+    unit.save()
+    return unit
+
+
+@transaction.atomic
+def update_unit(unit: Unit, **fields) -> Unit:
+    """Edit a unit's details.
+
+    Refuses `vacant_count` loudly rather than ignoring it. A silently dropped
+    field is how a caller comes to believe they set something they did not,
+    and this is the one field where that belief becomes a listing that lies.
+    """
+    if "vacant_count" in fields:
+        raise ValidationError(
+            {
+                "vacant_count": _(
+                    "Vacancy is set through its own endpoint, so the count is "
+                    "always stamped with who said it and when."
+                )
+            }
+        )
+
+    for name, value in fields.items():
+        setattr(unit, name, value)
+
+    unit.full_clean(exclude=["property"])
+    unit.save()
+    return unit
+
+
+def set_availability(unit: Unit, *, available_from=None, is_active: bool | None = None) -> Unit:
+    """When a unit becomes available, and whether it is listed at all.
+
+    Separate from `update_unit` because it is separately delegable: a
+    caretaker may be trusted to say a room is off the market without being
+    trusted to change its rent.
+    """
+    if available_from is not None:
+        unit.available_from = available_from
+    if is_active is not None:
+        unit.is_active = is_active
+
+    unit.save(update_fields=["available_from", "is_active", "updated_at"])
+    return unit
+
+
+# ---------------------------------------------------------------------------
+# Photos (ADR-007)
+# ---------------------------------------------------------------------------
+
+
+#: What a landlord may upload. Checked by content, not by filename: an
+#: extension is whatever the client typed, and the resize job is a decoder
+#: pointed at whatever arrives.
+ALLOWED_PHOTO_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
+@transaction.atomic
+def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> UnitPhoto:
+    """Store one photo and queue its variants.
+
+    The row is created `pending` with no variants, which the API already
+    models honestly: `url` falls back to the original, so a slow queue costs
+    page weight rather than a broken image.
+
+    The first photo on a unit becomes primary. Not "the lowest sort_order" --
+    a unit whose only photo is not primary has no cover, and the listing card
+    then shows "No photos yet" beside a unit that plainly has one.
+    """
+    content_type = getattr(upload, "content_type", "") or ""
+    extension = ALLOWED_PHOTO_TYPES.get(content_type)
+
+    if extension is None:
+        raise ValidationError(
+            {
+                "image": _(
+                    "Upload a JPEG, PNG or WebP image. %(given)s is not one, "
+                    "and the resize step would fail later rather than here."
+                )
+                % {"given": content_type or _("an unknown file type")}
+            }
+        )
+
+    if upload.size > settings.MAX_PHOTO_BYTES:
+        raise ValidationError(
+            {
+                "image": _(
+                    "That photo is %(size).1f MB. The limit is %(limit).1f MB "
+                    "-- a phone photo is usually well under it."
+                )
+                % {
+                    "size": upload.size / 1_000_000,
+                    "limit": settings.MAX_PHOTO_BYTES / 1_000_000,
+                }
+            }
+        )
+
+    key = f"units/{unit.pk}/{uuid4().hex}.{extension}"
+    storages["default"].save(key, upload)
+
+    last = UnitPhoto.all_objects.filter(unit=unit).order_by("-sort_order").first()
+
+    photo = UnitPhoto.all_objects.create(
+        unit=unit,
+        original_key=key,
+        caption=caption,
+        sort_order=(last.sort_order + 1) if last else 0,
+        is_primary=last is None,
+        processing_status=PhotoProcessingStatus.PENDING,
+        byte_size=upload.size,
+    )
+
+    # After commit: enqueuing inside the transaction races the worker, which
+    # can pick the job up and find no row.
+    transaction.on_commit(lambda: enqueue_photo_variants(photo.pk))
+
+    return photo
+
+
+@transaction.atomic
+def reorder_photos(*, unit: Unit, ordered_ids: list[int]) -> list[UnitPhoto]:
+    """Set the order of a unit's photos, and with it the cover.
+
+    The whole order is sent rather than a move-one-up operation, because two
+    tabs each nudging a photo produce an order neither of them chose. A full
+    list is last-write-wins on something the writer could see.
+
+    Rejects a partial list: a caller sending three of five ids has a stale
+    view of the unit, and applying it would silently discard the other two.
+    """
+    photos = {photo.pk: photo for photo in UnitPhoto.all_objects.filter(unit=unit)}
+
+    if set(ordered_ids) != set(photos):
+        raise ValidationError(
+            {
+                "photo_ids": _(
+                    "Send every photo on this unit, in the order you want "
+                    "them. Your list has %(given)d of %(actual)d -- someone "
+                    "may have added or removed one since this page loaded."
+                )
+                % {"given": len(set(ordered_ids)), "actual": len(photos)}
+            }
+        )
+
+    # Clear every primary flag before setting the new one. `UnitPhoto` has a
+    # partial unique constraint of one primary per unit and it is not
+    # deferrable, so setting the new cover while the old one still holds the
+    # flag is an IntegrityError mid-transaction -- which surfaces as a 409 on
+    # an operation the caller did nothing wrong in.
+    UnitPhoto.all_objects.filter(unit=unit, is_primary=True).update(is_primary=False)
+
+    for position, photo_id in enumerate(ordered_ids):
+        photo = photos[photo_id]
+        photo.sort_order = position
+        photo.is_primary = False
+        photo.save(update_fields=["sort_order", "is_primary", "updated_at"])
+
+    # First is the cover. Set last, and stated once, so "primary" and "first"
+    # cannot come to disagree.
+    cover = photos[ordered_ids[0]]
+    cover.is_primary = True
+    cover.save(update_fields=["is_primary", "updated_at"])
+
+    return [photos[photo_id] for photo_id in ordered_ids]
+
+
+@transaction.atomic
+def delete_photo(photo: UnitPhoto) -> None:
+    """Remove a photo, and promote a new cover if this was it.
+
+    The object itself is left in the bucket. A delete that also removes the
+    file cannot be undone by an operator, and a landlord deleting the wrong
+    photo of a room they no longer have access to has lost it for good;
+    retention sweeps object storage separately.
+    """
+    unit = photo.unit
+    was_primary = photo.is_primary
+    photo.delete()
+
+    if was_primary:
+        replacement = UnitPhoto.all_objects.filter(unit=unit).order_by("sort_order").first()
+        if replacement is not None:
+            replacement.is_primary = True
+            replacement.save(update_fields=["is_primary", "updated_at"])

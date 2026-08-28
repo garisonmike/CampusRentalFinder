@@ -171,27 +171,13 @@ a real S3 API and CI provides MinIO as a service container. A test in that file
 fails the build if MinIO is unreachable while `CI` is set, because a silently
 skipped compliance test is indistinguishable from a passing one.
 
-### 2b. Vacancy staleness prompts — **HELD, NOT RUNNING**
-
-> **This job is registered and deliberately not installed.**
-> `prompt_stale_vacancies` emails landlords asking them to restate a vacancy
-> count, and there is no endpoint through which a landlord can restate one.
-> The Django admin is the only write path and it reaches platform staff.
->
-> Running it would spend the one channel this whole mechanism depends on. A
-> prompt with no destination teaches landlords that our email is safe to
-> ignore, and that lesson does not un-teach itself when the endpoint ships.
->
-> **Unblocked by** the landlord write surface. Enable it in the same commit
-> that lands the vacancy endpoint, and delete `held_because` when you do —
-> `test_an_enabled_job_carries_no_stale_hold_reason` fails otherwise.
->
-> Everything below describes the job as it will behave once enabled.
+### 2b. Vacancy staleness prompts
 
 | | |
 |---|---|
 | **Schedule** | Weekly, Monday 09:00 |
 | **Does** | Emails landlords whose `vacant_count` has not been restated within `VACANCY_STALE_DAYS`, grouped one message per landlord |
+| **Points at** | `PATCH /api/v1/properties/manage/{slug}/units/{id}/vacancy/` — the only write path for the count, which stamps who said it and when |
 | **Guarantees** | That the only person who *can* refresh a stated vacancy is asked to |
 
 `vacant_count` is stated by the landlord and never derived — they know about
