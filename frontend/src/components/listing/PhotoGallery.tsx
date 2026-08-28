@@ -167,18 +167,31 @@ function Arrow({
       // Named, not implied by which side it sits on. "Button" is what a screen
       // reader says for an icon with no label.
       aria-label={`${direction === "previous" ? "Previous" : "Next"} photo`}
-      // Opaque, and with a border of its own.
+      // A **two-tone** edge: white outside, black inside.
       //
       // This is the one control on the site whose background is a photograph,
-      // so nothing about its contrast is computable: `theme/contrast.test.ts`
-      // proves --secondary pairs readably with its foreground, and says
-      // nothing about either against somebody's picture of a courtyard at
-      // noon. At 90% opacity in the pale-yellow tenant palette the button
-      // dissolved into a bright photo entirely. The border is what makes the
-      // control's edge findable regardless of what is behind it, and it is
-      // drawn in --border rather than in the brand.
+      // so no palette computation can say anything about it --
+      // `contrast.test.ts` proves `--secondary` pairs with its own foreground
+      // and is silent about either against somebody's picture of a courtyard
+      // at noon.
+      //
+      // The previous version was an opaque fill plus a border in `--border`,
+      // which is better than 90% opacity and still one flat colour against an
+      // arbitrary background. `theme/gallery-over-photos.test.ts` measures
+      // that against real photographs: every tenant fill, and `--border`
+      // itself, drop below AA somewhere in an ordinary photo.
+      //
+      // A black-and-white pair cannot. At every luminance one of the two
+      // contrasts, and the worst case -- the crossover at L = 0.179, where
+      // both are weakest at once -- is 4.58:1. That is the same number the
+      // whole theming system floors at, for the same reason.
+      //
+      // These two colours are deliberately **not** tokens. The background
+      // here is not ours to theme, so neither is the edge that has to survive
+      // it.
       className={cn(
-        "absolute top-1/2 size-9 -translate-y-1/2 rounded-full border border-border shadow-md",
+        "absolute top-1/2 size-9 -translate-y-1/2 rounded-full",
+        "border-2 border-white ring-1 ring-black ring-offset-0 shadow-md",
         direction === "previous" ? "left-2" : "right-2",
       )}
     >
