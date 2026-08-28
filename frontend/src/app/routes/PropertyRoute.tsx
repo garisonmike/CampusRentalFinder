@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { CampusDistances } from "@/components/listing/CampusDistances";
 import { UnitRow } from "@/components/listing/UnitRow";
 import { ReviewBlock } from "@/components/reviews/ReviewBlock";
+import { SaveButton } from "@/components/engagement/SaveButton";
 import { useProperty } from "@/features/listings/queries";
 import { toApiError, userFacingMessage } from "@/lib/api-error";
 import { formatKes, humanise } from "@/lib/format";
@@ -79,6 +80,9 @@ export default function PropertyRoute() {
           {[data.estate, data.town, humanise(data.county)].filter(Boolean).join(", ")}
           {data.landmark && <span className="block text-sm">{data.landmark}</span>}
         </p>
+        <div className="mt-3">
+          <SaveButton slug={data.slug} name={data.name} />
+        </div>
       </header>
 
       <Cover url={data.cover_photo_url} name={data.name} />

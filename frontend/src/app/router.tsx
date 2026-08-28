@@ -12,6 +12,7 @@ const PropertyRoute = lazy(() => import("@/app/routes/PropertyRoute"));
 const UnitRoute = lazy(() => import("@/app/routes/UnitRoute"));
 const LoginRoute = lazy(() => import("@/app/routes/LoginRoute"));
 const DashboardRoute = lazy(() => import("@/app/routes/DashboardRoute"));
+const SavedRoute = lazy(() => import("@/app/routes/SavedRoute"));
 const AdminRoute = lazy(() => import("@/app/routes/AdminRoute"));
 const ForbiddenRoute = lazy(() => import("@/app/routes/ForbiddenRoute"));
 const NotFoundRoute = lazy(() => import("@/app/routes/NotFoundRoute"));
@@ -31,6 +32,15 @@ export function AppRoutes() {
           element={
             <AuthGuard>
               <DashboardRoute />
+            </AuthGuard>
+          }
+        />
+
+        <Route
+          path="saved"
+          element={
+            <AuthGuard>
+              <SavedRoute />
             </AuthGuard>
           }
         />

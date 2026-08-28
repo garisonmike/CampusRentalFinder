@@ -2,22 +2,23 @@ import { create } from "zustand";
 
 import { get, post, setSessionExpiredHandler } from "@/api/client";
 import { clearTokens, setTokens } from "@/api/tokens";
+import type { Schemas } from "@/api/types";
 
 /**
  * Capabilities, as the backend reports them.
  *
- * ADR-003 replaces the `user_type` string with object-level roles, and the
- * /auth/me/ response is expected to carry an explicit capability set so the
- * client never re-derives authorization from raw model shapes. Until that
- * endpoint exists, the fields below are optional and default to false, which
- * is the safe direction: an unknown capability denies rather than allows.
+ * ADR-003 replaces the `user_type` string with object-level roles, and
+ * `/auth/me/` carries an explicit capability set so the client never
+ * re-derives authorization from model shapes. **Taken from the generated
+ * schema**, not written by hand: a capability the backend adds and the client
+ * does not know about is a permission check that silently reads `undefined`.
+ *
+ * The note on the field is emphatic that these are per-student and must not be
+ * cached against the university -- two students at the same school can
+ * legitimately have different ones, because gating intersects the policy
+ * frozen at their own registration with the live one.
  */
-export interface Capabilities {
-  is_student: boolean;
-  is_landlord: boolean;
-  is_staff: boolean;
-  manages_properties: number[];
-}
+export type Capabilities = Schemas["User"]["capabilities"];
 
 export interface CurrentUser {
   id: number;
@@ -40,10 +41,18 @@ interface AuthState {
   hasRole: (role: Role) => boolean;
 }
 
-const NO_CAPABILITIES: Capabilities = {
+/** The safe default: an unknown capability denies rather than allows.
+ *  Exported so tests build a user by narrowing this rather than by listing
+ *  every capability -- a hand-built set goes stale the moment one is added. */
+export const NO_CAPABILITIES: Capabilities = {
   is_student: false,
   is_landlord: false,
+  is_university_staff: false,
   is_staff: false,
+  is_verified_student: false,
+  verification_status: null,
+  grace_period_ends_at: null,
+  university: null,
   manages_properties: [],
 };
 

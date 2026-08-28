@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
-import { useAuthStore, type Capabilities } from "@/stores/auth";
+import { useAuthStore, type Capabilities, NO_CAPABILITIES } from "@/stores/auth";
 
 import { AuthGuard, RoleGuard } from "./guards";
 
@@ -37,13 +37,7 @@ function signIn(capabilities: Partial<Capabilities> = {}) {
       email: "a@b.test",
       first_name: "A",
       last_name: "B",
-      capabilities: {
-        is_student: false,
-        is_landlord: false,
-        is_staff: false,
-        manages_properties: [],
-        ...capabilities,
-      },
+      capabilities: { ...NO_CAPABILITIES, ...capabilities },
     },
   });
 }

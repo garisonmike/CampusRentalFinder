@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InquiryForm } from "@/components/engagement/InquiryForm";
 import { PhotoGallery } from "@/components/listing/PhotoGallery";
 import { VacancyNotice, vacancyExplanation } from "@/components/listing/VacancyNotice";
 import { useUnit } from "@/features/listings/queries";
@@ -162,6 +163,15 @@ export default function UnitRoute() {
           <Included label="Electricity" included={data.electricity_included} />
           <Included label="Wifi" included={data.wifi_included} />
         </ul>
+      </section>
+
+      <section aria-labelledby="ask-heading">
+        <h2 id="ask-heading" className="text-lg font-semibold">
+          Ask about this room
+        </h2>
+        <div className="mt-2">
+          <InquiryForm unitId={data.id} unitLabel={data.label} />
+        </div>
       </section>
     </Shell>
   );
