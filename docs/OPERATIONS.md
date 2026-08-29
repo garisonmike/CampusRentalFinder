@@ -706,6 +706,8 @@ people repeat about the check has quietly widened past both.
 | `reconcile_rating_aggregates` (the `missing` count) | A reviewed property has no aggregate row -- which the drift sample cannot see, because it walks aggregates that exist |
 | `seed_platform` + `test_every_shape_survives_the_smallest_allowed_platform` | The development seed stops producing a shape the UI has a branch for |
 | `tools/verify_commits.sh` | A commit in a pushed range is not green on its own — which CI cannot tell you, because it builds only the head |
+| `tools/verify_commits.sh --self-test` | The verifier itself stops detecting a red suite |
+| `publish()` calling `backfill_property_joins` | A property is published with no campus join — previously impossible to satisfy through any product action, because nothing in the product created one |
 | *(nothing — and there cannot be)* | A control over user-supplied imagery becomes unreadable. See **Checks whose scope is narrower than the belief attached to them**: this one is handled by construction at the component, not by a check |
 
 ## Alerting
@@ -773,3 +775,83 @@ work out why the schedule stopped. The alert is measuring a legal obligation.
 
 **Dispute queue over threshold.** Work oldest-first, always. Working newest-first
 maximises the number of deadlines missed.
+
+---
+
+## The upload ordering is narrowed, not closed
+
+`b27b1f6` was committed as *"close the upload ordering"*. It does not close
+it, and the distinction is the difference between a defence that can be
+retired and one that cannot.
+
+**What it did.** The old order stored the bytes and *then* opened the
+transaction that creates the row, so any failure inside that transaction --
+a constraint, a lost connection, a rollback higher up -- stranded a national
+ID document in the private bucket with nothing pointing at it. Every
+retention sweep enumerates rows, so nothing would ever have deleted it. The
+store now happens **inside** the transaction.
+
+**What survives.** Store succeeds, commit does not: the process killed, the
+connection lost, a deferred constraint firing at `COMMIT`. The window went
+from "the whole transaction body" to "the gap between the PUT returning and
+`COMMIT` returning". Small. Not zero.
+
+**The justification argued for a residue the code does not produce.** The
+comment reasoned that a *dangling row* is the better failure -- visible,
+self-announcing, harmless, because the retention sweep deletes a key that
+does not exist, the store answers successfully, the re-read confirms it is
+gone, and the row closes out correctly. That is right. But this ordering
+produces the *other* residue: a leaked file nothing can see. The shape that
+produces the preferred one is row-first, `COMMIT`, then write in
+`transaction.on_commit` and mark the document ready.
+
+**Was that shape considered and rejected?** No. The previous ordering was
+fixed by moving the store inside the transaction, that was the first thing
+that worked, and the justification was written afterwards -- about the
+residue the change was hoped to leave rather than the one it leaves. Saying
+so is the point of this entry. It is not adopted here because it adds a
+not-yet-ready state that every reader of a document row must handle, which
+is a design decision rather than a cleanup.
+
+**The consequence for the sweep.** Because the class is narrowed, the
+bucket-side scan is load-bearing, not residual. It was neither scheduled nor
+alerting -- it lived in a development-only observation command and a seed
+cross-check. `accounts.retention.reconcile_document_objects` now runs daily
+and alerts with the keys. It reports; it does not delete, because an
+automatic delete acts on exactly the objects whose rows are missing, which is
+where the scan's own correctness is least verifiable and the cost of being
+wrong is destroying a student's identity document.
+
+**And the scan committed the sin it names.** `orphaned_document_objects`
+answered an unlistable bucket with `[]` -- the same value it returns when it
+looked and found nothing. Callers printed "0 orphans", which is a verdict
+from a check that could not look: catalogue instance eight, one level down.
+It raises `OrphanScanUnavailableError` now; the job propagates it, the seed
+teardown refuses to claim a clean flush, and the compliance report prints
+*"NO CONCLUSION about orphans is available from this run. This is not the
+same as finding none."*
+
+### What the transaction holds open
+
+Measured, because "sub-second on a healthy path" was an assertion nobody had
+timed. Against MinIO on loopback, `storages["documents"].save()`:
+
+| Payload | Median | Max |
+| --- | --- | --- |
+| 218 KB document | 18 ms | 126 ms |
+| 4.3 MB document (the cap is 5 MB) | 70 ms | 84 ms |
+
+For that span the transaction holds one Postgres connection from a pool with
+`CONN_MAX_AGE=60` and no pooler configured, plus the row lock on the student
+profile it updates.
+
+**Whether that matters is unknown, and it is unknown for a specific reason:
+nobody has a number for the concurrency this deployment expects.** There is
+no worker count, no expected simultaneous-upload figure, and no pooler sizing
+anywhere in the repository -- which is why `docs/PRE_LAUNCH.md` §1c already
+says the same thing about the 0.26 s of image decoding on the same request.
+The two costs are additive and land on the same request; roughly 0.33 s of
+which about 70 ms is inside the transaction. Loopback MinIO is also the
+friendliest possible measurement: production object storage across a network
+is unmeasured.
+

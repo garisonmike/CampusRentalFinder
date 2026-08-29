@@ -430,8 +430,6 @@ class Command(BaseCommand):
         """
         from django.core.files.storage import storages
 
-        from accounts.retention import orphaned_document_objects
-
         if self.keep_storage:
             document_count = VerificationDocument.objects.exclude(storage_key="").count()
             photo_count = UnitPhoto.all_objects.count()
@@ -455,7 +453,7 @@ class Command(BaseCommand):
                     "storage_key", flat=True
                 )
             )
-            + orphaned_document_objects()
+            + self.orphans_or_explain()
         )
 
         for key in keys:
@@ -466,6 +464,26 @@ class Command(BaseCommand):
             media.delete(photo_key)
 
     # -- the tenants -------------------------------------------------------
+
+    def orphans_or_explain(self) -> list[str]:
+        """Keys with no row, or a loud stop if the bucket cannot be listed.
+
+        `orphaned_document_objects` used to answer an unlistable bucket with
+        an empty list, which reads here as "there were no orphans" and would
+        have let a flush report a clean teardown while leaving identity
+        documents behind. It raises now, and a teardown that cannot see the
+        bucket refuses rather than claiming to have cleared it.
+        """
+        from accounts.retention import OrphanScanUnavailableError, orphaned_document_objects
+
+        try:
+            return orphaned_document_objects()
+        except OrphanScanUnavailableError as error:
+            raise CommandError(
+                f"{error}\n"
+                f"Refusing to report a clean flush: identity documents may remain "
+                f"in the bucket and no row-walking sweep can ever find them."
+            ) from error
 
     def make_universities(self) -> list[University]:
         """Two schools that differ in the two ways that matter.

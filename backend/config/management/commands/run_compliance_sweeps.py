@@ -206,7 +206,16 @@ class Command(BaseCommand):
             _dirs, files = storages["documents"].listdir("verification")
             stored = {f"verification/{name}" for name in files}
         except Exception as error:
-            self.stdout.write(f"  bucket listing unavailable: {type(error).__name__}: {error}")
+            # Loud, and it does NOT fall through to the counts below. A
+            # listing failure followed by "objects with no row: 0" is the
+            # catalogue shape: a verdict from a check that could not look.
+            self.stdout.write(
+                self.style.ERROR(
+                    f"  bucket listing unavailable: {type(error).__name__}: {error}\n"
+                    f"  NO CONCLUSION about orphans is available from this run. This is "
+                    f"not the same as finding none."
+                )
+            )
             return
 
         orphans = stored - known

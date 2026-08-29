@@ -31,6 +31,7 @@ from accounts.documents import (
 )
 from accounts.privacy_api import ErasureRequest
 from accounts.retention import (
+    OrphanScanUnavailableError,
     delete_verification_document,
     documents_due_for_deletion,
     erasures_due,
@@ -217,6 +218,53 @@ class TestRetentionAgainstRealAge:
             assert in_flight not in orphaned_document_objects()
         finally:
             storages["documents"].delete(in_flight)
+
+    def test_an_unlistable_bucket_is_not_an_empty_bucket(self, compliance):
+        """The scan used to answer a listing failure with `[]`.
+
+        Which is the value it returns when it looked and found nothing. Every
+        caller then printed "0 orphans", the operator read a clean bill, and
+        the one class of object no row-walking sweep can ever see went
+        unreported for exactly as long as the bucket was unreachable.
+
+        This is the rule the function's own docstring states, applied to the
+        function: a reconciler must report what it could not check as its own
+        number, not fold it into the reassuring one.
+        """
+        from unittest import mock
+
+        with mock.patch("accounts.retention._storage") as storage:
+            storage.return_value.listdir.side_effect = OSError("bucket unreachable")
+
+            with pytest.raises(OrphanScanUnavailableError):
+                orphaned_document_objects()
+
+    def test_the_scheduled_reconciler_fails_rather_than_reporting_zero(self, compliance):
+        """And the job propagates it.
+
+        A job that swallowed this would log `orphans=0` on every run while the
+        bucket was unreachable -- an alert that stays quiet precisely when the
+        thing it watches cannot be watched.
+        """
+        from unittest import mock
+
+        from accounts.retention import reconcile_document_objects
+
+        with mock.patch("accounts.retention._storage") as storage:
+            storage.return_value.listdir.side_effect = OSError("bucket unreachable")
+
+            with pytest.raises(OrphanScanUnavailableError):
+                reconcile_document_objects()
+
+    def test_the_reconciler_is_scheduled(self):
+        """The upload ordering narrows the orphan window rather than closing
+        it, so this scan is load-bearing. A load-bearing check that runs only
+        when an operator remembers to run it is not one.
+        """
+        from config.jobs.schedule import SCHEDULE
+
+        scheduled = {job.func for job in SCHEDULE if job.enabled}
+        assert "accounts.retention.reconcile_document_objects" in scheduled
 
 
 class TestErasureAgainstAPopulatedDatabase:

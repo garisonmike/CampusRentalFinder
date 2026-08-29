@@ -93,6 +93,20 @@ SCHEDULE: tuple[ScheduledJob, ...] = (
         ),
     ),
     ScheduledJob(
+        func="accounts.retention.reconcile_document_objects",
+        cron="0 5 * * *",
+        queue="default",
+        on_failure=(
+            "Nothing looks for identity documents in the bucket that no row "
+            "points at. Every other retention sweep walks rows, so an orphan "
+            "is invisible to all of them for ever -- and the upload path "
+            "narrows that window rather than closing it: bytes stored, commit "
+            "lost, a national ID document nobody can see and nothing will "
+            "delete. The failure is silent by construction, which is why it "
+            "is here rather than in a report somebody runs."
+        ),
+    ),
+    ScheduledJob(
         func="reviews.jobs.reconcile_rating_aggregates",
         cron="0 3 * * *",
         queue="default",

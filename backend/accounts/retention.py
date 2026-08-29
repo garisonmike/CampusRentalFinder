@@ -253,6 +253,14 @@ def sweep_expired_documents(limit: int = 500, now: dt.datetime | None = None) ->
     return len(document_ids)
 
 
+class OrphanScanUnavailableError(RuntimeError):
+    """The bucket could not be listed, so the scan has no answer.
+
+    Distinct from "no orphans". A reconciler that cannot see the thing it
+    reconciles against must say so rather than return the reassuring value.
+    """
+
+
 def orphaned_document_objects(
     prefix: str = "verification", *, now: dt.datetime | None = None
 ) -> list[str]:
@@ -276,9 +284,14 @@ def orphaned_document_objects(
 
     Every sweep in this module enumerates rows, so an object whose row never
     existed -- or no longer does -- is invisible to all of them for ever.
-    `submit_verification_document` writes to the bucket before opening the
-    transaction that creates the row, so a failed transaction leaves exactly
-    this: a national ID document nothing will ever delete.
+
+    `submit_verification_document` now writes the bytes **inside** the
+    transaction that creates the row, which narrows the window rather than
+    closing it: a store that succeeds and a commit that does not -- the
+    process killed, the connection lost, a deferred constraint firing at
+    COMMIT -- still leaves exactly this. A national ID document nothing will
+    ever delete. So this scan is load-bearing, not residual, and it is
+    scheduled (`config.jobs.schedule`) rather than available.
 
     `docs/OPERATIONS.md` states the general rule -- a reconciler must count
     what should exist and does not -- and this is its other direction. There
@@ -288,6 +301,12 @@ def orphaned_document_objects(
 
     Returns keys rather than a count, because the operator's next question is
     "which ones", and a compliance answer of "seventeen" is not one.
+
+    Raises `OrphanScanUnavailableError` when the bucket cannot be listed. It used
+    to log a warning and return `[]`, which is the same shape the docstring
+    above complains about: an empty list from a scan that could not look is
+    indistinguishable from an empty list from a scan that looked and found
+    nothing, and the caller printing "0 orphans" is not lying on purpose.
     """
     storage = _storage()
 
@@ -295,7 +314,10 @@ def orphaned_document_objects(
         _directories, files = storage.listdir(prefix)
     except Exception as error:
         logger.warning("orphan_scan_failed", error=str(error))
-        return []
+        raise OrphanScanUnavailableError(
+            f"The document bucket could not be listed ({type(error).__name__}: {error}). "
+            f"No conclusion about orphans is available from this run."
+        ) from error
 
     known = set(
         VerificationDocument.objects.exclude(storage_key="").values_list("storage_key", flat=True)
@@ -450,3 +472,42 @@ def sweep_due_erasures(limit: int = 200, now: dt.datetime | None = None) -> int:
         oldest_overdue_seconds=None if waiting is None else int(waiting.total_seconds()),
     )
     return len(erasure_ids)
+
+
+def reconcile_document_objects(*, now: dt.datetime | None = None) -> int:
+    """Scheduled counterpart to :func:`orphaned_document_objects`.
+
+    **Why this is a job and not a report.** `submit_verification_document`
+    stores the bytes inside the transaction that creates the row, which makes
+    an orphan rare -- store succeeds, commit does not -- rather than
+    impossible. Rare is not zero, the residue is a national ID document in a
+    private bucket that no row-walking sweep can see, and until now the only
+    thing that looked for it was a development-only observation command and a
+    seed cross-check. A defence that runs when somebody remembers to run it is
+    not a defence.
+
+    It reports and alerts; it does not delete. An automatic delete here acts
+    on the one class of object whose row is missing, which is precisely the
+    situation where the scan's own correctness is least verifiable -- and the
+    cost of being wrong is destroying a student's identity document. The
+    operator gets the keys and decides.
+
+    Absence is a separate number with a separate alert (docs/OPERATIONS.md):
+    an unlistable bucket logs `orphan_scan_unavailable` and re-raises, so the
+    job fails visibly instead of recording a comfortable zero.
+    """
+    try:
+        orphans = orphaned_document_objects(now=now)
+    except OrphanScanUnavailableError:
+        logger.error("orphan_scan_unavailable")
+        raise
+
+    logger.info("orphan_reconcile", orphans=len(orphans))
+
+    if orphans:
+        # Loud, with the keys. "Seventeen" is not a compliance answer; the
+        # operator's next question is which ones, and the log is where they
+        # will look at 2am.
+        logger.error("orphaned_documents_found", count=len(orphans), keys=orphans[:20])
+
+    return len(orphans)

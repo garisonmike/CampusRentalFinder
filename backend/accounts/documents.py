@@ -524,27 +524,39 @@ def submit_verification_document(profile: StudentProfile, data: bytes) -> Verifi
         ) from error
     key = random_document_key(EXTENSIONS[content_type])
 
-    # **Row first, bytes second, and the row is written inside a transaction
-    # that only commits once the object is stored.**
+    # **Row first, bytes second, both inside one transaction.** The class of
+    # failure is NARROWED, not closed, and the difference matters enough to
+    # say plainly here rather than let the previous wording stand.
     #
-    # The old order was the reverse: store, then open the transaction. A
-    # transaction that failed after the store -- a constraint, a lost
-    # connection, a rollback higher up -- left a national ID document in the
-    # private bucket with nothing pointing at it, and every retention sweep
-    # enumerates rows, so nothing would ever have deleted it.
+    # The old order was store-then-open-the-transaction, so any failure in the
+    # transaction body -- a constraint, a lost connection, a rollback higher up
+    # -- stranded a national ID document in the private bucket with nothing
+    # pointing at it. That window was the whole transaction. It is now the gap
+    # between the PUT returning and COMMIT returning: the process killed, the
+    # connection lost, a deferred constraint firing at commit. Small. Not zero.
     #
-    # This is the ordering closed rather than orphans accepted and swept. The
-    # choice is between a *leaked* file nothing can see and a *dangling row*
-    # pointing at an object that was never written -- and the second is
-    # visible, self-announcing, and harmless: the retention sweep tries to
-    # delete a key that does not exist, the store answers successfully, the
-    # re-read confirms it is gone, and the row is closed out correctly.
-    # Failing towards a record with no file is failing towards the direction
-    # the whole table is designed for, since the row is a tombstone anyway.
+    # And note which residue this ordering actually produces. The argument
+    # below is that a *dangling row* is the better failure -- visible,
+    # self-announcing, harmless, since the retention sweep deletes a key that
+    # does not exist, the store answers successfully, the re-read confirms it
+    # is gone, and the row closes out correctly, which is the direction a
+    # tombstone table is designed to fail in anyway. But this ordering
+    # produces the other one: a *leaked file* nothing can see.
     #
-    # The bucket-side scan (`orphaned_document_objects`) stays, because this
-    # ordering makes orphans rare rather than impossible: a process killed
-    # between the store and the commit still leaves one.
+    # The shape that produces the preferred residue is row-first, COMMIT, then
+    # write in `transaction.on_commit` and mark the document ready. That was
+    # not considered when this was written -- the previous ordering was fixed
+    # by moving the store inside the transaction, which was the first thing
+    # that worked, and the justification was written afterwards about the
+    # residue it was hoped to leave rather than the one it leaves. It is
+    # written up in docs/OPERATIONS.md rather than changed here, because it
+    # adds a not-yet-ready state that every reader of a document row has to
+    # handle, and that is a design decision, not a cleanup.
+    #
+    # Because the class is narrowed rather than closed, the bucket-side scan
+    # is **load-bearing**: `accounts.retention.reconcile_document_objects`
+    # runs on a schedule and alerts, rather than existing as a function an
+    # operator could call.
     with transaction.atomic():
         document = VerificationDocument.objects.create(
             storage_key=key, content_type=content_type, byte_size=len(clean)

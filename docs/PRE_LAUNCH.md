@@ -110,9 +110,11 @@ roughly 0.33 s per upload, ~70 ms of it holding a database connection and a row
 lock — over a link far friendlier than production object storage.
 
 **To remove this entry:** a measurement of upload throughput at the intended
-worker count, with the decode running, against the concurrency this deployment
-actually plans for. If it turns out to matter, the fix is not to defer the
-strip — it is to bound concurrent uploads.
+worker count, with the decode running and the store over a real network,
+against the concurrency this deployment actually plans for. If it turns out to
+matter, the fix is not to defer the strip — it is to bound concurrent uploads
+and to move the store out of the transaction (`docs/OPERATIONS.md`, "The upload
+ordering is narrowed, not closed").
 
 ---
 
