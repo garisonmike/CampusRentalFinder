@@ -87,6 +87,35 @@ edge that is demonstrably not stored.
 
 ---
 
+## 1c. Synchronous image work on the upload request
+
+**Status: measured, small, and unmeasured under concurrency.**
+
+`add_photo` sniffs and strips metadata on the request path. Measured on a real
+4 MB, 4032×3024 phone photo with EXIF and GPS: **0.26 s, 5 MB peak**. That is
+down from 15.7 s and 838 MB before the stripper was rewritten, and it is small
+enough that moving it to a job would cost more than it saves — a deferred strip
+means un-stripped bytes exist somewhere, and ADR-007's fallback serves the
+original.
+
+What is unmeasured: what that costs at concurrency. 0.26 s of CPU per upload is
+fine for one; twenty simultaneous uploads is five CPU-seconds of image decoding
+competing with request handling, and nobody has a number for how many workers
+this deployment will have or how many concurrent uploads to expect.
+
+The identity-document path adds a second cost on the same request: the object
+store PUT happens **inside** the transaction, measured at 18 ms median for a
+218 KB document and 70 ms for a 4.3 MB one against MinIO on loopback. So
+roughly 0.33 s per upload, ~70 ms of it holding a database connection and a row
+lock — over a link far friendlier than production object storage.
+
+**To remove this entry:** a measurement of upload throughput at the intended
+worker count, with the decode running, against the concurrency this deployment
+actually plans for. If it turns out to matter, the fix is not to defer the
+strip — it is to bound concurrent uploads.
+
+---
+
 ## 2. The frontend has never been served to a browser
 
 **Status: unexercised.**
