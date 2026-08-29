@@ -38,12 +38,20 @@ function serve() {
   server.use(
     http.get(`${API}/properties/`, () => HttpResponse.json(listing)),
     http.get(`${API}/properties/${slug}/`, () => HttpResponse.json(detail)),
-    http.get(`${API}/reviews/properties/${slug}/rating/`, () => HttpResponse.json(rating)),
-    http.get(`${API}/reviews/properties/${slug}/`, () => HttpResponse.json(reviews)),
+    http.get(`${API}/reviews/properties/${slug}/rating/`, () =>
+      HttpResponse.json(rating),
+    ),
+    http.get(`${API}/reviews/properties/${slug}/`, () =>
+      HttpResponse.json(reviews),
+    ),
   );
 }
 
-function applyPalette(hsl: { primary: string; secondary: string; accent: string }) {
+function applyPalette(hsl: {
+  primary: string;
+  secondary: string;
+  accent: string;
+}) {
   for (const [name, value] of Object.entries(buildTokens(hsl))) {
     document.documentElement.style.setProperty(name, value);
   }
@@ -54,7 +62,8 @@ describe("the seeded catalogue is actually varied", () => {
     // Asserted on the data, before anything renders it. A capture that
     // silently became eight identical published properties would make every
     // test below pass and prove nothing.
-    const rows = (seeded.listing as { results: Array<Record<string, unknown>> }).results;
+    const rows = (seeded.listing as { results: Array<Record<string, unknown>> })
+      .results;
 
     expect(rows.length).toBeGreaterThan(4);
     expect(rows.some((row) => row.cover_photo_url === null)).toBe(true);
@@ -62,17 +71,25 @@ describe("the seeded catalogue is actually varied", () => {
   });
 
   it("has a unit whose vacancy nobody has ever stated", () => {
-    const units = (seeded.detail as { units: Array<{ vacancy_freshness: string }> }).units;
+    const units = (
+      seeded.detail as { units: Array<{ vacancy_freshness: string }> }
+    ).units;
 
-    expect(units.some((unit) => unit.vacancy_freshness === "unknown")).toBe(true);
+    expect(units.some((unit) => unit.vacancy_freshness === "unknown")).toBe(
+      true,
+    );
   });
 
   it("has a campus distance with no walking route", () => {
     const distances = (
-      seeded.detail as { campus_distances: Array<{ walking_minutes: number | null }> }
+      seeded.detail as {
+        campus_distances: Array<{ walking_minutes: number | null }>;
+      }
     ).campus_distances;
 
-    expect(distances.some((distance) => distance.walking_minutes === null)).toBe(true);
+    expect(
+      distances.some((distance) => distance.walking_minutes === null),
+    ).toBe(true);
   });
 });
 
@@ -82,7 +99,8 @@ describe("the listing page against real data", () => {
 
     renderWithProviders(<ListingsRoute />, { route: "/listings" });
 
-    const rows = (seeded.listing as { results: Array<{ name: string }> }).results;
+    const rows = (seeded.listing as { results: Array<{ name: string }> })
+      .results;
     await screen.findByText(rows[0].name);
 
     // Counted as articles rather than list items: each card contains its own
@@ -144,13 +162,27 @@ describe("both real tenant palettes", () => {
   // low-chroma grey which sits inside the hostile band on purpose.
   it.each(Object.entries(seeded.themes))(
     "renders the listing page under the %s palette",
-    async (_name, theme) => {
-      applyPalette(theme as { primary: string; secondary: string; accent: string });
+    async (_name, config) => {
+      // `.theme`, because the capture now holds the **whole** tenant-config
+      // response. The previous file had been trimmed by hand to just the three
+      // colours -- a capture that somebody edited is a hand-written fixture
+      // wearing a capture's name, and the trimming is where the stale
+      // `stay_months` hid.
+      applyPalette(
+        (
+          config as {
+            theme: { primary: string; secondary: string; accent: string };
+          }
+        ).theme,
+      );
       serve();
 
-      const { container } = renderWithProviders(<ListingsRoute />, { route: "/listings" });
+      const { container } = renderWithProviders(<ListingsRoute />, {
+        route: "/listings",
+      });
       await screen.findByText(
-        (seeded.listing as { results: Array<{ name: string }> }).results[0].name,
+        (seeded.listing as { results: Array<{ name: string }> }).results[0]
+          .name,
       );
 
       expect(await axe(container)).toHaveNoViolations();
