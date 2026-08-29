@@ -341,9 +341,16 @@ def _find_covering_tenancy(claim: TenancyClaim) -> Tenancy | None:
     )
 
 
-@transaction.atomic
 def effective_stay_days(tenancy: Tenancy, *, today: dt.date | None = None) -> int:
     """How long the stay has lasted so far.
+
+    **Not `@transaction.atomic`.** It was, and it is a pure computation over
+    two date fields -- no write, nothing to roll back. Inside an existing
+    transaction the decorator emits a SAVEPOINT and a RELEASE per call, so
+    delegating `reviews.services.stay_days` to it turned a serializer render
+    of four reviews into eight extra round trips. Every other function in this
+    module that carries the decorator writes something; this one is the only
+    read in the list.
 
     **Never counts past today.** A twelve-month lease signed on Monday has
     lasted three days by Thursday, not 365 -- and the earlier implementation

@@ -77,11 +77,21 @@ class ReviewFrozenError(ValidationError):
 def stay_days(tenancy: Tenancy, *, today: dt.date | None = None) -> int:
     """How long the stay has lasted so far.
 
-    An ongoing tenancy counts up to today, which is why the minimum cannot be
-    a check constraint.
+    **One definition, in `tenancies.services`.** This was a second copy of the
+    same arithmetic and it carried the same defect: `end_date` was used
+    whenever one was set, so a twelve-month lease reported 365 days on its
+    first morning. 3889249 fixed the copy in `tenancies` and left this one --
+    which is the shape `docs/OPERATIONS.md` collects, produced by the fix for
+    an instance of itself.
+
+    It mattered here in a different way. The eligibility gate reads the latch,
+    so this figure only reached the error message -- but `ReviewSerializer`
+    also renders it as `stay_months`, a public field, so a review card could
+    say "stayed 12 months" about somebody three days into a lease.
     """
-    end = tenancy.end_date or (today or dt.date.today())
-    return (end - tenancy.start_date).days
+    from tenancies.services import effective_stay_days
+
+    return effective_stay_days(tenancy, today=today)
 
 
 def assert_tenancy_is_reviewable(tenancy: Tenancy, *, today: dt.date | None = None) -> None:

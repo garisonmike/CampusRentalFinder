@@ -485,3 +485,55 @@ class TestReviewScoping:
 
         assert review in Review.objects.for_tenant(university)
         assert review not in Review.objects.for_tenant(university_factory())
+
+
+class TestStayLengthHasOneDefinition:
+    """`stay_days` was a second copy of `effective_stay_days`, carrying the
+    same defect after that one was fixed.
+
+    The eligibility gate reads the latch, so the wrong figure never reached a
+    decision -- but `ReviewSerializer.stay_months` renders it, so a review card
+    could say "stayed 12 months" about somebody three days into a lease.
+    """
+
+    def test_a_current_lease_reports_elapsed_not_agreed(self, tenancy_factory, unit_factory):
+        tenancy = tenancy_factory(
+            unit=unit_factory(),
+            start_date=dt.date.today() - dt.timedelta(days=3),
+            end_date=dt.date.today() + dt.timedelta(days=362),
+        )
+
+        assert stay_days(tenancy) == 3
+
+    def test_the_review_card_does_not_overstate_the_stay(
+        self, review_factory, tenancy_factory, unit_factory
+    ):
+        """The public field. `stay_months` is what a student reads when
+        weighing how much a review is worth."""
+        from reviews.serializers import ReviewSerializer
+
+        review = review_factory(
+            tenancy=tenancy_factory(
+                unit=unit_factory(),
+                start_date=dt.date.today() - dt.timedelta(days=40),
+                end_date=dt.date.today() + dt.timedelta(days=300),
+            )
+        )
+
+        assert ReviewSerializer(review).data["stay_months"] == 1
+
+    def test_it_agrees_with_the_tenancies_definition(self, tenancy_factory, unit_factory):
+        """Delegation rather than a matching implementation: two functions that
+        agree today are two functions that can stop agreeing."""
+        from tenancies.services import effective_stay_days
+
+        for start_offset, end_offset in [(-3, 362), (-200, -50), (-40, None)]:
+            tenancy = tenancy_factory(
+                unit=unit_factory(),
+                start_date=dt.date.today() + dt.timedelta(days=start_offset),
+                end_date=(
+                    None if end_offset is None else dt.date.today() + dt.timedelta(days=end_offset)
+                ),
+            )
+
+            assert stay_days(tenancy) == effective_stay_days(tenancy)
