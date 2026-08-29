@@ -24,9 +24,7 @@ import {
  * no room to spare, which is why this is a test and not a convention.
  */
 
-const AA_NORMAL = 4.5;
-const AA_LARGE = 3;
-const AAA_NORMAL = 7;
+import { AA_LARGE, AA_NORMAL, AAA_NORMAL } from "./contrast-floors";
 
 /** Every 7th hue, every 5th saturation, every 3rd lightness. ~30k samples:
  *  dense enough to find the crossover, fast enough to run on every commit. */

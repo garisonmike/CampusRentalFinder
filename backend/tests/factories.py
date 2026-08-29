@@ -15,6 +15,7 @@ import datetime as dt
 from decimal import Decimal
 
 import factory
+from django.conf import settings
 from django.utils import timezone
 from factory.django import DjangoModelFactory
 
@@ -398,7 +399,17 @@ class TenancyClaimFactory(TenantScopedFactory):
     monthly_rent_kes = Decimal("9500.00")
     status = ClaimStatus.PENDING
     is_retrospective = False
-    confirmation_deadline = factory.LazyFunction(lambda: timezone.now() + dt.timedelta(days=7))
+    #: Read from settings, not written as 7.
+    #:
+    #: It was a literal, and `create_claim` derives the same deadline from
+    #: `TENANCY_CONFIRMATION_WINDOW_DAYS`. Raising the setting would have left
+    #: every factory-made claim on the old window while the service test --
+    #: which reads the setting -- went on passing: the check and the checked
+    #: thing in two places, with the fixture quietly winning for most of the
+    #: suite (`docs/OPERATIONS.md`).
+    confirmation_deadline = factory.LazyFunction(
+        lambda: timezone.now() + dt.timedelta(days=settings.TENANCY_CONFIRMATION_WINDOW_DAYS)
+    )
 
 
 class CaretakerAssignmentFactory(TenantScopedFactory):

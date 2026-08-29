@@ -1,6 +1,7 @@
 import { axe } from "vitest-axe";
 import { describe, expect, it } from "vitest";
 
+import { AA_NORMAL } from "./contrast-floors";
 import { HOSTILE_PALETTES } from "./hostile-palettes";
 import { buildTokens, contrastRatio, parseHsl, type Hsl } from "./tokens";
 import { renderWithProviders } from "@/test/utils";
@@ -45,7 +46,7 @@ describe.each(HOSTILE_PALETTES)("the shell under $name", (palette) => {
       const background = parseHsl(tokens[`--${name}`]) as Hsl;
       const foreground = parseHsl(tokens[`--${name}-foreground`]) as Hsl;
 
-      expect(contrastRatio(background, foreground)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(background, foreground)).toBeGreaterThanOrEqual(AA_NORMAL);
     }
   });
 
