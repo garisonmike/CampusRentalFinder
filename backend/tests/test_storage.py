@@ -139,3 +139,60 @@ class TestStorageIsNeverLocalDisk:
 
         for alias, backend in backends.items():
             assert "FileSystemStorage" not in backend, f"{alias} writes to local disk"
+
+
+class TestStoredKeysCannotBeActiveContent:
+    """An allowlist of permitted extensions, enforced where keys are made.
+
+    The first version of this rule was a test asserting no key ends in `.svg`
+    -- a denylist of one, which leaves `.html`, `.xhtml`, `.xml`, `.svgz`,
+    `.js` and whatever a browser decides to render next.
+
+    The risk is specific. Object stores derive `Content-Type` from the key's
+    extension; MinIO returns `image/svg+xml` for a `.svg` key, and an SVG is a
+    script container. Served from a host inside the app's cookie scope -- one
+    branded media domain and one domain cookie away (ADR-001) -- that is
+    stored XSS.
+    """
+
+    @pytest.mark.parametrize(
+        "extension",
+        [".svg", ".svgz", ".html", ".xhtml", ".xml", ".js", ".mhtml", ".htm"],
+    )
+    def test_active_content_extensions_are_refused(self, extension):
+        from config.storage import UnsafeStorageKeyError, assert_storage_key_is_safe
+
+        with pytest.raises(UnsafeStorageKeyError):
+            assert_storage_key_is_safe(f"units/1/abc{extension}")
+
+    @pytest.mark.parametrize("extension", [".jpg", ".jpeg", ".png", ".webp", ".pdf"])
+    def test_the_permitted_ones_pass(self, extension):
+        from config.storage import assert_storage_key_is_safe
+
+        assert assert_storage_key_is_safe(f"units/1/abc{extension}").endswith(extension)
+
+    def test_a_key_with_no_extension_is_refused(self):
+        """`Content-Type` for an extensionless object is the store's guess,
+        and a guess is not a guarantee."""
+        from config.storage import UnsafeStorageKeyError, assert_storage_key_is_safe
+
+        with pytest.raises(UnsafeStorageKeyError):
+            assert_storage_key_is_safe("units/1/no-extension-here")
+
+    def test_case_does_not_get_past_it(self):
+        from config.storage import UnsafeStorageKeyError, assert_storage_key_is_safe
+
+        with pytest.raises(UnsafeStorageKeyError):
+            assert_storage_key_is_safe("units/1/abc.SVG")
+
+    def test_it_is_enforced_at_generation_not_only_in_this_file(self, unit_factory):
+        """A rule enforced by a test holds for the code the test knows about.
+        A rule enforced at the point of construction holds for code nobody has
+        written yet."""
+        import inspect
+
+        from accounts.documents import random_document_key
+        from properties import services
+
+        assert "assert_storage_key_is_safe" in inspect.getsource(random_document_key)
+        assert "assert_storage_key_is_safe" in inspect.getsource(services.add_photo)

@@ -532,7 +532,9 @@ def add_photo(*, unit: Unit, upload, caption: str = "", uploaded_by=None) -> Uni
         ) from error
     upload.seek(0)
 
-    key = f"units/{unit.pk}/{uuid4().hex}.{extension}"
+    from config.storage import assert_storage_key_is_safe
+
+    key = assert_storage_key_is_safe(f"units/{unit.pk}/{uuid4().hex}.{extension}")
     storages["default"].save(key, ContentFile(clean))
 
     last = UnitPhoto.all_objects.filter(unit=unit).order_by("-sort_order").first()

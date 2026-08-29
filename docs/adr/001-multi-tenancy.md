@@ -95,6 +95,41 @@ Views that need cross-tenant access (platform staff tooling) use an explicitly
 named escape hatch — `Property.objects.across_tenants()` — so that every such
 site is greppable in one search.
 
+## Constraint: session and CSRF cookies are host-only
+
+**`SESSION_COOKIE_DOMAIN` and `CSRF_COOKIE_DOMAIN` must remain unset.** A
+domain-wide cookie across the tenant subdomains contradicts the strict
+subdomain scoping this ADR already requires, and it is refused at startup by a
+system check rather than left as a convention.
+
+The first reason is this ADR's own. Tenants are separated by subdomain, and the
+separation is the product's security boundary: a session that is valid on
+`kyu.` and `jkuat.` alike is a session that has stopped distinguishing the
+thing the subdomains exist to distinguish. The pressure to set it is real —
+somebody will want single sign-on across a student's two universities, or will
+be debugging a login loop — and the answer is that cross-tenant identity is a
+feature to design, not a cookie attribute to widen.
+
+The second reason is the media host, and it is the one that turns a
+questionable convenience into a vulnerability. Public listing photos are served
+from object storage (ADR-007). Today that is R2's own hostname, so it shares no
+cookies with the application by construction. Two ordinary changes remove that:
+
+1. a branded media domain (`media.campusrentalfinder.co.ke`) configured as
+   `custom_domain` on the storage backend, for CDN and appearance; and
+2. `SESSION_COOKIE_DOMAIN = ".campusrentalfinder.co.ke"`, to share sessions
+   across tenant subdomains.
+
+Either alone is harmless. Together, the media host sits inside the
+application's cookie scope, and any file that can be served with an
+active content type — `image/svg+xml` carries script — becomes stored XSS
+against the app, with the session cookie in reach.
+
+Neither change is exotic and neither would look dangerous in review. So the
+constraint is enforced at boot (`config.security_checks`), and the storage
+layer refuses to generate a key whose extension could be served as active
+content (ADR-007).
+
 ## Consequences
 
 ### What this buys us
@@ -134,7 +169,42 @@ site is greppable in one search.
   wildcard DNS record. Cheap, but it is a prerequisite for the first deploy,
   not an afterthought.
 
-### Consequences of the canonical-host resolution
+### Constraint: session and CSRF cookies are host-only
+
+**`SESSION_COOKIE_DOMAIN` and `CSRF_COOKIE_DOMAIN` must remain unset.** A
+domain-wide cookie across the tenant subdomains contradicts the strict
+subdomain scoping this ADR already requires, and it is refused at startup by a
+system check rather than left as a convention.
+
+The first reason is this ADR's own. Tenants are separated by subdomain, and the
+separation is the product's security boundary: a session that is valid on
+`kyu.` and `jkuat.` alike is a session that has stopped distinguishing the
+thing the subdomains exist to distinguish. The pressure to set it is real —
+somebody will want single sign-on across a student's two universities, or will
+be debugging a login loop — and the answer is that cross-tenant identity is a
+feature to design, not a cookie attribute to widen.
+
+The second reason is the media host, and it is the one that turns a
+questionable convenience into a vulnerability. Public listing photos are served
+from object storage (ADR-007). Today that is R2's own hostname, so it shares no
+cookies with the application by construction. Two ordinary changes remove that:
+
+1. a branded media domain (`media.campusrentalfinder.co.ke`) configured as
+   `custom_domain` on the storage backend, for CDN and appearance; and
+2. `SESSION_COOKIE_DOMAIN = ".campusrentalfinder.co.ke"`, to share sessions
+   across tenant subdomains.
+
+Either alone is harmless. Together, the media host sits inside the
+application's cookie scope, and any file that can be served with an
+active content type — `image/svg+xml` carries script — becomes stored XSS
+against the app, with the session cookie in reach.
+
+Neither change is exotic and neither would look dangerous in review. So the
+constraint is enforced at boot (`config.security_checks`), and the storage
+layer refuses to generate a key whose extension could be served as active
+content (ADR-007).
+
+## Consequences of the canonical-host resolution
 
 - **Two URL shapes to maintain.** `www` for public listings, subdomains for
   everything else. The router and every link-building helper must know which

@@ -54,6 +54,49 @@ class PrivateDocumentStorage(S3Storage if S3Storage else InMemoryStorage):  # ty
     default_acl = None
 
 
+#: Every extension a stored object key may end in.
+#:
+#: **An allowlist, at the point keys are generated.** The first version of this
+#: rule was a test asserting no key ends in `.svg` -- a denylist of one, which
+#: leaves `.html`, `.xhtml`, `.xml`, `.svgz`, `.js`, `.mhtml` and whatever a
+#: browser decides to render next.
+#:
+#: The risk is specific: object stores derive `Content-Type` from the key's
+#: extension. MinIO returns `image/svg+xml` for a `.svg` key, and an SVG is a
+#: script container. Served from a host inside the application's cookie scope
+#: -- one branded media domain and one domain cookie away, see ADR-001 -- that
+#: is stored XSS.
+#:
+#: Nothing here is active content in any browser. Adding to this list is a
+#: security decision and should read like one in a diff.
+ALLOWED_STORED_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".pdf"})
+
+
+class UnsafeStorageKeyError(ValueError):
+    """This key would be served as something a browser executes."""
+
+
+def assert_storage_key_is_safe(key: str) -> str:
+    """Refuse a key whose extension could be served as active content.
+
+    Called wherever a key is generated, not only asserted in a test: a rule
+    enforced by a test holds for the code the test knows about, and a rule
+    enforced at the point of construction holds for the code nobody has
+    written yet.
+    """
+    _, _, extension = key.rpartition(".")
+    suffix = f".{extension.lower()}" if extension and extension != key else ""
+
+    if suffix not in ALLOWED_STORED_EXTENSIONS:
+        raise UnsafeStorageKeyError(
+            f"{key!r} ends in {suffix or 'no extension'}, which is not in "
+            f"ALLOWED_STORED_EXTENSIONS. Object stores derive Content-Type "
+            f"from the key, so this could be served as active content."
+        )
+
+    return key
+
+
 def _bucket_of(alias: str) -> str | None:
     """The bucket a configured storage alias points at, if it has one."""
     try:

@@ -45,8 +45,10 @@ def _variant_key(original_key: str, variant: str) -> str:
     Deterministic, so a regenerated variant overwrites its predecessor's slot
     rather than accumulating orphans in the bucket.
     """
+    from config.storage import assert_storage_key_is_safe
+
     base, _, _extension = original_key.rpartition(".")
-    return f"{base or original_key}.{variant}.webp"
+    return assert_storage_key_is_safe(f"{base or original_key}.{variant}.webp")
 
 
 def generate_photo_variants(photo_id: int) -> None:

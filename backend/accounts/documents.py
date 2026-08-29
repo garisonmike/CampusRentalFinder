@@ -157,7 +157,9 @@ def random_document_key(extension: str) -> str:
     every student's ID document, and misconfigured buckets are the single most
     common way this data leaks.
     """
-    return f"verification/{secrets.token_urlsafe(32)}{extension}"
+    from config.storage import assert_storage_key_is_safe
+
+    return assert_storage_key_is_safe(f"verification/{secrets.token_urlsafe(32)}{extension}")
 
 
 EXTENSIONS = {
