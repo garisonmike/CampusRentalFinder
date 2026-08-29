@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import luminance from "./photo-luminance.json";
+import { AA_NORMAL, BLACK_OR_WHITE_CROSSOVER_LUMINANCE, BLACK_OR_WHITE_WORST_CASE } from "./contrast-floors";
 import { HOSTILE_PALETTES } from "./hostile-palettes";
 import { buildTokens, parseHsl, relativeLuminance, type Hsl } from "./tokens";
 
@@ -22,7 +23,7 @@ import { buildTokens, parseHsl, relativeLuminance, type Hsl } from "./tokens";
  */
 
 const PHOTOS = Object.entries(luminance) as Array<
-  [string, { min: number; mean: number; max: number }]
+  [string, { min: number; max: number; present: number[]; pixels: number }]
 >;
 
 function contrastAgainst(colour: Hsl, photoLuminance: number): number {
@@ -32,17 +33,25 @@ function contrastAgainst(colour: Hsl, photoLuminance: number): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-/** Every luminance the photo actually contains, sampled across its range. */
-function luminanceRange(photo: { min: number; max: number }): number[] {
-  const steps = 40;
-  return Array.from(
-    { length: steps + 1 },
-    (_, step) => photo.min + ((photo.max - photo.min) * step) / steps,
-  );
+/**
+ * Every luminance that actually occurs under the control -- **pointwise**.
+ *
+ * The first version recorded min, mean and max over an approximated strip and
+ * sampled evenly between the extremes. That is conservative rather than
+ * narrow, since it tests values that may not be present, but it recorded a
+ * `mean` nothing used and invited exactly the misreading it should not: a mean
+ * of 0.179 could be half black and half white.
+ *
+ * So the fixture now records the set of 1/64 luminance buckets present in the
+ * arrow's real footprint at both edges, from every pixel, and this iterates
+ * those. What is checked is what is there.
+ */
+function luminanceRange(photo: { present: number[] }): number[] {
+  return photo.present;
 }
 
-/** The worst any single flat colour does anywhere in one photo. */
-function worstCase(colour: Hsl, photo: { min: number; max: number }): number {
+/** The worst any single flat colour does anywhere under the control. */
+function worstCase(colour: Hsl, photo: { present: number[] }): number {
   return Math.min(...luminanceRange(photo).map((value) => contrastAgainst(colour, value)));
 }
 
@@ -51,8 +60,13 @@ describe("the measurement the last round could only reason about", () => {
     // A luminance file that quietly became empty would make every assertion
     // below vacuous.
     expect(PHOTOS.length).toBeGreaterThan(3);
-    for (const [, photo] of PHOTOS) {
+    for (const [name, photo] of PHOTOS) {
       expect(photo.max).toBeGreaterThan(photo.min);
+      // Measured per pixel, not summarised. A handful of buckets would mean
+      // the footprint was nearly uniform and the test would be proving
+      // something about a flat colour.
+      expect(photo.present.length, `${name} has too few distinct luminances`).toBeGreaterThan(20);
+      expect(photo.pixels, `${name} covers too few pixels`).toBeGreaterThan(1000);
     }
   });
 
@@ -70,7 +84,7 @@ describe("the measurement the last round could only reason about", () => {
 
       // Below AA. Somewhere in one of these photographs the control's own
       // fill is not distinguishable from what is behind it.
-      expect(worst).toBeLessThan(4.5);
+      expect(worst).toBeLessThan(AA_NORMAL);
     },
   );
 
@@ -83,7 +97,7 @@ describe("the measurement the last round could only reason about", () => {
 
     const worst = Math.min(...PHOTOS.map(([, photo]) => worstCase(border, photo)));
 
-    expect(worst).toBeLessThan(4.5);
+    expect(worst).toBeLessThan(AA_NORMAL);
   });
 
   it("a two-tone edge does survive, which is what the control needs", () => {
@@ -104,7 +118,9 @@ describe("the measurement the last round could only reason about", () => {
       for (const value of luminanceRange(photo)) {
         const best = Math.max(contrastAgainst(dark, value), contrastAgainst(light, value));
 
-        expect(best, `${name} at luminance ${value.toFixed(3)}`).toBeGreaterThanOrEqual(4.5);
+        expect(best, `${name} at luminance ${value.toFixed(3)}`).toBeGreaterThanOrEqual(
+          AA_NORMAL,
+        );
       }
     }
   });
@@ -125,8 +141,8 @@ describe("the measurement the last round could only reason about", () => {
       }
     }
 
-    expect(worstAt).toBeCloseTo(0.179, 2);
-    expect(worst).toBeGreaterThanOrEqual(4.5);
-    expect(worst).toBeLessThan(4.6);
+    expect(worstAt).toBeCloseTo(BLACK_OR_WHITE_CROSSOVER_LUMINANCE, 2);
+    expect(worst).toBeGreaterThanOrEqual(AA_NORMAL);
+    expect(worst).toBeLessThan(BLACK_OR_WHITE_WORST_CASE + 0.02);
   });
 });

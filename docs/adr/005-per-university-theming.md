@@ -180,6 +180,51 @@ white background may be too dark to read. The applier adjusts lightness for the
 dark theme (raising L by ~5 points, as the stock palette already does: light
 `142 71% 45%` → dark `142 71% 50%`) and re-runs the contrast derivation.
 
+## Rule: the background is not ours to theme, so neither is the edge
+
+**Any element composited over user-supplied imagery must be legible by
+construction, not by token contrast.**
+
+This is a rule rather than a note because the reasoning behind every contrast
+guarantee in this project stops exactly at the edge of a photograph. The
+derivation proves that a tenant's colour pairs readably with the foreground we
+derive *for it*; `theme/contrast.test.ts` sweeps ~30,000 colours to prove it.
+None of that says anything about a control sitting on a landlord's photograph,
+because no palette computation can make a claim about an image nobody has seen.
+
+Measured, not asserted. `theme/gallery-over-photos.test.ts` reads the
+per-pixel luminances actually present under the gallery arrows in real
+photographs and finds that **every** tenant fill drops below AA somewhere in an
+ordinary photo — 1.69:1 for the dark navy, 2.61:1 for the low-chroma grey,
+3.87:1 for the saturated red. So does `--border`. A photograph contains a
+bright window and a dark doorway; no single colour contrasts with both.
+
+A black-and-white pair does, and its worst case is the crossover where both are
+weakest at once: L = 0.179, giving **4.58:1** — the same number the tenant
+derivation floors at, because both are the crossover of "pick the better of
+black and white". It is declared once in `theme/contrast-floors.ts`.
+
+### What this means in practice
+
+- An element over imagery uses a **two-tone edge**, an **opaque scrim**, or
+  both. One flat colour, however chosen, is not enough.
+- Those colours are **deliberately not tokens**. A tenant cannot theme what
+  sits behind them, so letting a tenant theme what sits in front is how the
+  guarantee is lost.
+- The palette suite's silence about these elements is **correct behaviour**,
+  not a gap to close later. Reading that silence as approval is the mistake
+  (`docs/OPERATIONS.md`, "checks whose scope is narrower than the belief
+  attached to them").
+
+### Where it currently applies
+
+The gallery arrows, and nothing else — the audit that produced this rule found
+no price badge, verified badge, image counter, favourite control, gradient
+scrim or text rendered over a listing photo anywhere in the interface. Every
+other overlay candidate sits on the card background, which **is** ours to
+theme. That is worth recording, because the next such element will be added by
+somebody who has not read this, and the rule is what they need to meet.
+
 ## Consequences
 
 ### What this buys us
