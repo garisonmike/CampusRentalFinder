@@ -424,6 +424,28 @@ Three consequences, all now in `tools/verify_commits.sh`:
   total: everything else fails loudly or fails alone, whereas a verifier that
   cannot see red reports green for an entire range and is believed.
 
+### The two defences were tested against each other
+
+Claiming a guard works is the thing this whole document is about not doing, so
+both were run against the real defect: `check()` rewritten to pipe into `tail`,
+exactly as the original mistake did.
+
+| | `set -euo pipefail` | Result |
+| --- | --- | --- |
+| pipe reintroduced | present | **failure detected** — `pipefail` returns pytest's status through the pipe, so the defect never lands |
+| pipe reintroduced | removed | verifier reports green on a red suite — and **`--self-test` catches it**, exiting 3 with "a deliberately failing suite was reported as passing" |
+
+Which corrects something the commit that added them said. `set -euo pipefail`
+was described there as changing nothing on its own, on the grounds that every
+command already ran through `check` or an explicit `||`. That is true of the
+script as written and false as a statement about the option: `pipefail` is what
+makes instance eight non-fatal *inside* this script, and it is the reason the
+first row above passes.
+
+The two are independent rather than redundant — one prevents the defect, the
+other detects it — which is the arrangement worth having for a tool whose
+failure mode is total.
+
 **Number 2 is the variant to watch for** among the code-level ones, because it
 is the one a grep for duplicated values will not find. There, the second
 "place" was not a line anywhere in the repository — it was a **library or database default that
