@@ -227,6 +227,20 @@ class Campus(TenantScopedModel):
     )
     is_main = models.BooleanField(_("main campus"), default=False)
 
+    join_radius_km = models.FloatField(
+        _("join radius (km)"),
+        null=True,
+        blank=True,
+        help_text=_(
+            "How far a property can be from this campus and still be listed "
+            "against it. Blank uses the platform default "
+            "(CAMPUS_JOIN_RADIUS_KM). A city campus with dense housing next "
+            "door and a rural one where students commute from the nearest "
+            "town are not the same question, and one number for both is a "
+            "decision nobody made."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -33,7 +33,11 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from properties.models import Property
-from properties.services import backfill_campus_joins, properties_missing_a_join_to
+from properties.services import (
+    backfill_campus_joins,
+    join_radius_for,
+    properties_missing_a_join_to,
+)
 from universities.models import Campus
 
 
@@ -58,8 +62,10 @@ class Command(BaseCommand):
         if options["campus"]:
             campuses = campuses.filter(pk=options["campus"])
 
-        radius = settings.CAMPUS_JOIN_RADIUS_KM
-        self.stdout.write(f"Join radius: {radius} km (CAMPUS_JOIN_RADIUS_KM)\n")
+        self.stdout.write(
+            f"Default join radius: {settings.CAMPUS_JOIN_RADIUS_KM} km "
+            f"(CAMPUS_JOIN_RADIUS_KM). Campuses may set their own.\n"
+        )
 
         total = 0
         for campus in campuses:
@@ -68,9 +74,15 @@ class Command(BaseCommand):
                 continue
 
             total += len(missing)
+            # The campus's own radius, named, because a reader deciding
+            # whether to apply this needs to know which number produced the
+            # list -- the platform default or a choice somebody made here.
+            radius = join_radius_for(campus)
+            source = "campus" if campus.join_radius_km is not None else "default"
             self.stdout.write(
                 self.style.WARNING(
-                    f"{campus.university.name} / {campus.name}: "
+                    f"{campus.university.name} / {campus.name} "
+                    f"[{radius:g} km, {source}]: "
                     f"{len(missing)} published propert"
                     f"{'y' if len(missing) == 1 else 'ies'} in range with no join"
                 )

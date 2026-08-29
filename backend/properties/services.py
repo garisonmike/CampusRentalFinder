@@ -57,9 +57,10 @@ def assert_property_is_publishable(property_obj: Property) -> None:
 
     if not property_obj.campus_distances.exists():
         missing["campus_distances"] = _(
-            "This property is not within %(radius).0f km of any campus we "
-            "serve, so no student would see it. Check the coordinates."
-        ) % {"radius": settings.CAMPUS_JOIN_RADIUS_KM}
+            "This property is not within reach of any campus we serve, so no "
+            "student would see it. Check the coordinates -- the widest "
+            "catchment any campus has is %(radius).0f km."
+        ) % {"radius": _widest_join_radius()}
 
     if missing:
         raise PropertyNotPublishableError(missing)
@@ -637,6 +638,22 @@ def delete_photo(photo: UnitPhoto) -> None:
 # through a different door.
 
 
+def join_radius_for(campus, radius_km: float | None = None) -> float:
+    """The radius that applies to one campus.
+
+    Explicit argument, then the campus's own value, then the platform
+    default. **Per campus** because a city campus with dense housing next door
+    and a rural one where students commute from the nearest town are not the
+    same question, and a single number for both is a decision nobody made --
+    the global 15 was a proposal with no basis behind it.
+    """
+    if radius_km is not None:
+        return radius_km
+    if getattr(campus, "join_radius_km", None) is not None:
+        return campus.join_radius_km
+    return settings.CAMPUS_JOIN_RADIUS_KM
+
+
 def properties_in_range_of(campus, radius_km: float | None = None):
     """Published, pinned properties within the join radius of one campus.
 
@@ -646,7 +663,7 @@ def properties_in_range_of(campus, radius_km: float | None = None):
     """
     from .distances import bounding_box, haversine_km
 
-    radius = settings.CAMPUS_JOIN_RADIUS_KM if radius_km is None else radius_km
+    radius = join_radius_for(campus, radius_km)
     min_lat, max_lat, min_lon, max_lon = bounding_box(campus.latitude, campus.longitude, radius)
 
     candidates = Property.all_objects.filter(
@@ -690,6 +707,16 @@ def properties_missing_a_join_to(campus, radius_km: float | None = None) -> list
     return [prop.pk for prop in properties_in_range_of(campus, radius_km) if prop.pk not in joined]
 
 
+def _widest_join_radius() -> float:
+    """The largest radius any campus claims, for the bounding-box prefilter."""
+    from django.db.models import Max
+
+    from universities.models import Campus
+
+    widest = Campus.all_objects.aggregate(widest=Max("join_radius_km"))["widest"]
+    return max(widest or 0.0, settings.CAMPUS_JOIN_RADIUS_KM)
+
+
 @transaction.atomic
 def backfill_property_joins(property_obj: Property, radius_km: float | None = None) -> int:
     """Join one property to every campus in range of it.
@@ -712,7 +739,12 @@ def backfill_property_joins(property_obj: Property, radius_km: float | None = No
     if property_obj.latitude is None or property_obj.longitude is None:
         return 0
 
-    radius = settings.CAMPUS_JOIN_RADIUS_KM if radius_km is None else radius_km
+    # The property side searches out to the **widest** radius any campus
+    # claims, then filters each candidate against that campus's own -- a
+    # campus that reaches 40 km must be found from 40 km away, and one that
+    # reaches 5 km must not pick up a property 12 km out just because another
+    # campus is generous.
+    radius = radius_km if radius_km is not None else _widest_join_radius()
     min_lat, max_lat, min_lon, max_lon = bounding_box(
         property_obj.latitude, property_obj.longitude, radius
     )
@@ -732,12 +764,9 @@ def backfill_property_joins(property_obj: Property, radius_km: float | None = No
     ).select_related("university"):
         if campus.pk in joined:
             continue
-        if (
-            haversine_km(
-                property_obj.latitude, property_obj.longitude, campus.latitude, campus.longitude
-            )
-            > radius
-        ):
+        if haversine_km(
+            property_obj.latitude, property_obj.longitude, campus.latitude, campus.longitude
+        ) > join_radius_for(campus, radius_km):
             continue
 
         PropertyCampusDistance.all_objects.create(

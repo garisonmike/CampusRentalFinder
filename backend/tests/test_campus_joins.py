@@ -394,3 +394,107 @@ class TestWhetherTheTwentyFiveWereArtefact:
 
         assert 0 not in distances, "a property is sitting exactly on a campus"
         assert len(distances) == 2, "two properties produced one distance"
+
+
+class TestThePerCampusRadius:
+    """15 km was a proposal with no basis, and one number for a Nairobi campus
+    and a rural one is a decision nobody made.
+
+    Per-campus makes it a decision somebody makes. Blank still means the
+    platform default, so nothing has to be decided before it can be.
+    """
+
+    def test_a_campus_can_narrow_its_own_catchment(
+        self, property_factory, campus_factory, university
+    ):
+        campus = campus_factory(
+            university=university,
+            latitude=CAMPUS[0],
+            longitude=CAMPUS[1],
+            join_radius_km=0.5,
+        )
+        # ~700 m away: inside the 15 km default, outside this campus's 500 m.
+        prop = property_factory(
+            status=PropertyStatus.PUBLISHED, latitude=NEARBY[0], longitude=NEARBY[1]
+        )
+        PropertyCampusDistance.all_objects.filter(property=prop).delete()
+
+        assert properties_missing_a_join_to(campus) == []
+
+    def test_a_campus_can_widen_it(self, property_factory, campus_factory, university):
+        """The rural case: students commute from the nearest town."""
+        campus = campus_factory(
+            university=university,
+            latitude=CAMPUS[0],
+            longitude=CAMPUS[1],
+            join_radius_km=80,
+        )
+        far = property_factory(
+            status=PropertyStatus.PUBLISHED, latitude=CAMPUS[0] - 0.55, longitude=CAMPUS[1]
+        )
+        PropertyCampusDistance.all_objects.filter(property=far).delete()
+
+        assert far.pk in properties_missing_a_join_to(campus)
+
+    def test_blank_falls_back_to_the_platform_default(self, campus_factory, university):
+        from django.conf import settings
+
+        from properties.services import join_radius_for
+
+        campus = campus_factory(university=university, join_radius_km=None)
+
+        assert join_radius_for(campus) == settings.CAMPUS_JOIN_RADIUS_KM
+
+    def test_publishing_respects_a_narrow_campus(
+        self, property_factory, campus_factory, university, landlord_profile
+    ):
+        """The property side searches out to the widest radius any campus
+        claims, then filters each candidate against that campus's own -- so a
+        generous neighbour cannot drag a property into a strict campus."""
+        from properties.services import PropertyNotPublishableError, publish
+
+        campus_factory(
+            university=university,
+            latitude=CAMPUS[0],
+            longitude=CAMPUS[1],
+            join_radius_km=0.1,
+        )
+        prop = property_factory(
+            status=PropertyStatus.DRAFT, latitude=NEARBY[0], longitude=NEARBY[1]
+        )
+        PropertyCampusDistance.all_objects.filter(property=prop).delete()
+
+        with pytest.raises(PropertyNotPublishableError):
+            publish(prop)
+
+    def test_a_generous_campus_does_not_widen_a_strict_one(
+        self, property_factory, campus_factory, university_factory, landlord_profile
+    ):
+        from properties.services import publish
+
+        strict = campus_factory(
+            university=university_factory(),
+            latitude=CAMPUS[0],
+            longitude=CAMPUS[1],
+            join_radius_km=0.1,
+        )
+        generous = campus_factory(
+            university=university_factory(),
+            latitude=CAMPUS[0],
+            longitude=CAMPUS[1],
+            join_radius_km=50,
+        )
+        prop = property_factory(
+            status=PropertyStatus.DRAFT, latitude=NEARBY[0], longitude=NEARBY[1]
+        )
+        PropertyCampusDistance.all_objects.filter(property=prop).delete()
+
+        publish(prop)
+
+        joined = set(
+            PropertyCampusDistance.all_objects.filter(property=prop).values_list(
+                "campus_id", flat=True
+            )
+        )
+        assert generous.pk in joined
+        assert strict.pk not in joined

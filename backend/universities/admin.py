@@ -86,7 +86,11 @@ class UniversityAdmin(admin.ModelAdmin):
 
 @admin.register(Campus)
 class CampusAdmin(admin.ModelAdmin):
-    list_display = ("name", "university", "town", "county", "is_main")
+    # `join_radius_km` is in the list, not buried in the form: it decides
+    # which properties are visible to this campus's students, and a setting
+    # with that reach should be readable at a glance rather than one click
+    # into each row. Blank shows as the platform default.
+    list_display = ("name", "university", "town", "county", "is_main", "join_radius_km")
     list_filter = ("is_main", "county", "university")
     search_fields = ("name", "town", "university__name")
     ordering = ("university", "name")
