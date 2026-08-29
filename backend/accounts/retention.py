@@ -253,8 +253,26 @@ def sweep_expired_documents(limit: int = 500, now: dt.datetime | None = None) ->
     return len(document_ids)
 
 
-def orphaned_document_objects(prefix: str = "verification") -> list[str]:
+def orphaned_document_objects(
+    prefix: str = "verification", *, now: dt.datetime | None = None
+) -> list[str]:
     """Objects in the document bucket that **no row points at**.
+
+    **Only objects older than `DOCUMENT_ORPHAN_GRACE_SECONDS`.** An upload
+    stores its bytes inside the transaction that creates the row, so between
+    the store and the commit there is a window in which the object exists and
+    the row is not yet visible to another connection. Without a grace period
+    this scan would find that object, call it an orphan, and a sweep acting on
+    the finding would delete the bytes out from under a request that is about
+    to succeed -- turning a reconciler into the thing it exists to catch.
+
+    Sixty seconds. The window it has to cover is one `storages.save()` plus
+    the remainder of a request transaction: sub-second on a healthy path, and
+    the number is two orders of magnitude above that because the cost of being
+    generous is that a genuinely orphaned file survives one extra sweep, while
+    the cost of being tight is deleting a student's identity document mid-
+    upload. It is a settings value rather than a literal so the two places
+    that care -- this scan and the alert threshold -- read the same number.
 
     Every sweep in this module enumerates rows, so an object whose row never
     existed -- or no longer does -- is invisible to all of them for ever.
@@ -283,7 +301,28 @@ def orphaned_document_objects(prefix: str = "verification") -> list[str]:
         VerificationDocument.objects.exclude(storage_key="").values_list("storage_key", flat=True)
     )
 
-    return sorted(f"{prefix}/{name}" for name in files if f"{prefix}/{name}" not in known)
+    cutoff = (now or timezone.now()) - dt.timedelta(seconds=settings.DOCUMENT_ORPHAN_GRACE_SECONDS)
+    storage = _storage()
+
+    orphans = []
+    for name in files:
+        key = f"{prefix}/{name}"
+        if key in known:
+            continue
+
+        try:
+            written = storage.get_created_time(key)
+        except Exception:
+            # No timestamp means the grace period cannot be applied, and a
+            # scan that cannot tell a new object from an old one must not
+            # report either. Skipped and logged rather than guessed.
+            logger.warning("orphan_scan_no_timestamp", key=key)
+            continue
+
+        if written <= cutoff:
+            orphans.append(key)
+
+    return sorted(orphans)
 
 
 def unconfirmed_deletions():

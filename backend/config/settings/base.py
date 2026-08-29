@@ -486,6 +486,19 @@ VERIFICATION_URL_EXPIRY_SECONDS = config("VERIFICATION_URL_EXPIRY_SECONDS", defa
 # Two INDEPENDENT retention deadlines (ADR-003, docs/OPERATIONS.md). The first
 # alone would let an unreviewed document live for ever, and an unworked queue
 # is the likeliest real-world case.
+# How long an object in the documents bucket must have existed before a
+# missing row makes it an orphan.
+#
+# An upload stores its bytes inside the transaction that creates the row, so
+# there is a window where the object exists and the row is not yet visible to
+# another connection. A scan without a grace period would find that object,
+# call it an orphan, and a sweep acting on the finding would delete a
+# student's identity document out from under a request about to succeed.
+#
+# Sixty seconds against a sub-second window: being generous costs one extra
+# sweep before a real orphan is reported, being tight costs a live upload.
+DOCUMENT_ORPHAN_GRACE_SECONDS = config("DOCUMENT_ORPHAN_GRACE_SECONDS", default=60, cast=int)
+
 VERIFICATION_DECISION_RETENTION_DAYS = config(
     "VERIFICATION_DECISION_RETENTION_DAYS", default=7, cast=int
 )

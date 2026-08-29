@@ -178,17 +178,45 @@ class TestRetentionAgainstRealAge:
     def test_the_orphan_scan_works_at_all(self, compliance):
         """It is the only thing that can see an object the database has never
         heard of, so a scan that silently returned nothing would restore the
-        blindness it exists to remove."""
+        blindness it exists to remove.
+
+        Scanned with the clock advanced past the grace period, because a
+        freshly written object is deliberately not an orphan yet -- see the
+        next test.
+        """
+        from django.conf import settings
         from django.core.files.base import ContentFile
         from django.core.files.storage import storages
 
         planted = "verification/planted-orphan-for-this-test.jpg"
         storages["documents"].save(planted, ContentFile(b"not a real document"))
+        later = timezone.now() + dt.timedelta(seconds=settings.DOCUMENT_ORPHAN_GRACE_SECONDS + 10)
 
         try:
-            assert planted in orphaned_document_objects()
+            assert planted in orphaned_document_objects(now=later)
         finally:
             storages["documents"].delete(planted)
+
+    def test_a_freshly_written_object_is_not_an_orphan_yet(self, compliance):
+        """The race the grace period exists for.
+
+        An upload writes its bytes inside the transaction that creates the
+        row, so between the store and the commit the object exists and the row
+        is not yet visible to another connection. A scan without a grace
+        period would find that object, call it an orphan, and a sweep acting
+        on the finding would delete a student's identity document out from
+        under a request that is about to succeed.
+        """
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import storages
+
+        in_flight = "verification/being-uploaded-right-now.jpg"
+        storages["documents"].save(in_flight, ContentFile(b"mid-upload"))
+
+        try:
+            assert in_flight not in orphaned_document_objects()
+        finally:
+            storages["documents"].delete(in_flight)
 
 
 class TestErasureAgainstAPopulatedDatabase:

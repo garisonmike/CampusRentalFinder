@@ -248,7 +248,14 @@ class Command(BaseCommand):
         parser.add_argument(
             "--flush",
             action="store_true",
-            help="Delete existing seeded data first.",
+            help="Delete existing seeded data first, storage included.",
+        )
+        parser.add_argument(
+            "--keep-storage",
+            action="store_true",
+            help="With --flush, leave the buckets alone. Prints what it is "
+            "orphaning and how to find it later, because a hole a developer "
+            "falls into weekly is a hole an operator falls into once.",
         )
 
     def handle(self, *args, **options):
@@ -311,6 +318,7 @@ class Command(BaseCommand):
         self.compliance_cases: list[tuple[str, int]] = []
         self.real_images = options["real_images"]
         self.compliance = options["compliance"]
+        self.keep_storage = options["keep_storage"]
         self.seed = options["seed"]
         self.today = timezone.localdate()
         self.now = timezone.now()
@@ -404,6 +412,10 @@ class Command(BaseCommand):
     def flush_object_storage(self) -> None:
         """Delete the stored objects, not only the rows that point at them.
 
+        See the body for what happens with `--keep-storage`.
+        """
+        """Delete the stored objects, not only the rows that point at them.
+
         A `--flush` that clears the database and leaves the bucket alone
         orphans every file it had -- and **nothing will ever delete them**,
         because every retention sweep enumerates rows. Two hundred and fifty
@@ -411,14 +423,32 @@ class Command(BaseCommand):
         before anything looked, which is the same failure mode the production
         hole has, arrived at by a route a developer takes weekly.
 
-        Deleted by key from the rows about to be removed, plus anything the
-        orphan scan finds, so a previous flush's leftovers go too.
+        `--keep-storage` still allows it, and says so loudly with the count
+        and the command that finds them later. Refusing outright would be
+        wrong -- there are reasons to keep a bucket -- but leaving it as the
+        silent default was how the 250 accumulated.
         """
         from django.core.files.storage import storages
 
         from accounts.retention import orphaned_document_objects
 
-        documents = storages["documents"]
+        if self.keep_storage:
+            document_count = VerificationDocument.objects.exclude(storage_key="").count()
+            photo_count = UnitPhoto.all_objects.count()
+            self.stdout.write(
+                self.style.WARNING(
+                    f"--keep-storage: leaving {document_count} identity document(s) "
+                    f"and {photo_count} photo(s) in object storage with no rows "
+                    f"pointing at them.\n"
+                    f"  Nothing will ever delete them: every retention sweep "
+                    f"enumerates rows.\n"
+                    f"  Find them later with "
+                    f"accounts.retention.orphaned_document_objects()."
+                )
+            )
+            return
+
+        document_storage = storages["documents"]
         keys = (
             list(
                 VerificationDocument.objects.exclude(storage_key="").values_list(
@@ -429,7 +459,7 @@ class Command(BaseCommand):
         )
 
         for key in keys:
-            documents.delete(key)
+            document_storage.delete(key)
 
         media = storages["default"]
         for photo_key in UnitPhoto.all_objects.values_list("original_key", flat=True):

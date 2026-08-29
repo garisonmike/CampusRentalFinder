@@ -504,8 +504,27 @@ def submit_verification_document(profile: StudentProfile, data: bytes) -> Verifi
     clean = strip_image_metadata(data, content_type)
     key = random_document_key(EXTENSIONS[content_type])
 
-    _private_storage().save(key, ContentFile(clean))
-
+    # **Row first, bytes second, and the row is written inside a transaction
+    # that only commits once the object is stored.**
+    #
+    # The old order was the reverse: store, then open the transaction. A
+    # transaction that failed after the store -- a constraint, a lost
+    # connection, a rollback higher up -- left a national ID document in the
+    # private bucket with nothing pointing at it, and every retention sweep
+    # enumerates rows, so nothing would ever have deleted it.
+    #
+    # This is the ordering closed rather than orphans accepted and swept. The
+    # choice is between a *leaked* file nothing can see and a *dangling row*
+    # pointing at an object that was never written -- and the second is
+    # visible, self-announcing, and harmless: the retention sweep tries to
+    # delete a key that does not exist, the store answers successfully, the
+    # re-read confirms it is gone, and the row is closed out correctly.
+    # Failing towards a record with no file is failing towards the direction
+    # the whole table is designed for, since the row is a tombstone anyway.
+    #
+    # The bucket-side scan (`orphaned_document_objects`) stays, because this
+    # ordering makes orphans rare rather than impossible: a process killed
+    # between the store and the commit still leaves one.
     with transaction.atomic():
         document = VerificationDocument.objects.create(
             storage_key=key, content_type=content_type, byte_size=len(clean)
@@ -515,6 +534,10 @@ def submit_verification_document(profile: StudentProfile, data: bytes) -> Verifi
         )
         profile.verification_status = VerificationStatus.PENDING
         profile.save(update_fields=["verification_status", "updated_at"])
+
+        # Inside the transaction, so a store failure rolls the rows back and
+        # the student sees an error rather than a request pointing at nothing.
+        _private_storage().save(key, ContentFile(clean))
 
     return request
 
