@@ -437,6 +437,24 @@ ERASURE_COOLING_OFF_DAYS = config("ERASURE_COOLING_OFF_DAYS", default=7, cast=in
 # older than the stale threshold is still SHOWN -- never hidden, never
 # zeroed -- with its age attached, because a stale number the reader can judge
 # beats no number at all.
+# How far from a campus a property can be and still be joined to it (ADR-002).
+#
+# **There was no such number before, and this one is a proposal rather than a
+# measurement.** The join is what makes a property visible to a university at
+# all, so this is not the same question as `?max_distance_km=`, which a student
+# sets to 1 or 2 when they want a short walk. This is the outer bound on what
+# counts as "near that campus" for the catalogue.
+#
+# 15 km, and deliberately generous. Being too wide costs a join row and a
+# listing a student can filter away in one tap. Being too narrow makes a
+# property invisible to a university with no error anywhere -- which is the
+# exact silent-invisibility failure the publish gate exists to prevent, and the
+# one this radius is being introduced to close by a different door.
+#
+# It wants replacing with a real figure once there is a catalogue to measure:
+# the distance beyond which students at each campus stop enquiring.
+CAMPUS_JOIN_RADIUS_KM = config("CAMPUS_JOIN_RADIUS_KM", default=15.0, cast=float)
+
 VACANCY_FRESH_DAYS = config("VACANCY_FRESH_DAYS", default=7, cast=int)
 VACANCY_STALE_DAYS = config("VACANCY_STALE_DAYS", default=30, cast=int)
 

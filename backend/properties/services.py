@@ -24,7 +24,7 @@ from django.utils.translation import gettext_lazy as _
 
 from .constants import PhotoProcessingStatus, PropertyStatus, VacancyFreshness
 from .jobs import enqueue_photo_variants
-from .models import Property, Unit, UnitPhoto
+from .models import Property, PropertyCampusDistance, Unit, UnitPhoto
 
 
 class PropertyNotPublishableError(ValidationError):
@@ -57,9 +57,9 @@ def assert_property_is_publishable(property_obj: Property) -> None:
 
     if not property_obj.campus_distances.exists():
         missing["campus_distances"] = _(
-            "Link the property to at least one campus before publishing. A "
-            "property with no campus is invisible to every university."
-        )
+            "This property is not within %(radius).0f km of any campus we "
+            "serve, so no student would see it. Check the coordinates."
+        ) % {"radius": settings.CAMPUS_JOIN_RADIUS_KM}
 
     if missing:
         raise PropertyNotPublishableError(missing)
@@ -70,7 +70,15 @@ def publish(property_obj: Property) -> Property:
 
     The single write path. ``published_at`` is set here because the model
     constraint requires it and nothing else should be choosing that timestamp.
+
+    The campus joins are created here first. The gate below requires at least
+    one, and until this line existed nothing in the product ever made one --
+    so the gate was unsatisfiable by any available action, and every landlord
+    who pinned a property correctly was refused with a message telling them to
+    do something they could not do.
     """
+    backfill_property_joins(property_obj)
+
     assert_property_is_publishable(property_obj)
 
     property_obj.status = PropertyStatus.PUBLISHED
@@ -612,3 +620,161 @@ def delete_photo(photo: UnitPhoto) -> None:
         if replacement is not None:
             replacement.is_primary = True
             replacement.save(update_fields=["is_primary", "updated_at"])
+
+
+# ---------------------------------------------------------------------------
+# Campus joins (ADR-002)
+# ---------------------------------------------------------------------------
+#
+# The join row is what makes a property visible to a university. Without one
+# the property is not "far away" -- it does not exist for that tenant.
+#
+# `route_stale_distances` walks the rows that exist, so a campus created after
+# a property was published never gets one: no row, no routing, and the listing
+# is invisible to that campus permanently, with nothing erroring. That is the
+# absence-blindness `docs/OPERATIONS.md` describes, and the same
+# silent-invisibility failure the publish gate exists to prevent, arriving
+# through a different door.
+
+
+def properties_in_range_of(campus, radius_km: float | None = None):
+    """Published, pinned properties within the join radius of one campus.
+
+    Filtered by bounding box first and haversine second, which is what
+    `PropertyFilter` already does -- a box is an index-friendly prefilter and
+    the circle is the answer.
+    """
+    from .distances import bounding_box, haversine_km
+
+    radius = settings.CAMPUS_JOIN_RADIUS_KM if radius_km is None else radius_km
+    min_lat, max_lat, min_lon, max_lon = bounding_box(campus.latitude, campus.longitude, radius)
+
+    candidates = Property.all_objects.filter(
+        status=PropertyStatus.PUBLISHED,
+        latitude__isnull=False,
+        longitude__isnull=False,
+        latitude__gte=min_lat,
+        latitude__lte=max_lat,
+        longitude__gte=min_lon,
+        longitude__lte=max_lon,
+    )
+
+    # The queryset already excludes null coordinates; narrowed here so the
+    # type checker knows it too, rather than being told to ignore it.
+    return [
+        prop
+        for prop in candidates
+        if prop.latitude is not None
+        and prop.longitude is not None
+        and haversine_km(prop.latitude, prop.longitude, campus.latitude, campus.longitude) <= radius
+    ]
+
+
+def properties_missing_a_join_to(campus, radius_km: float | None = None) -> list[int]:
+    """Published properties in range of this campus with **no row at all**.
+
+    Absence, not staleness. `straight_line_km` is computed by haversine on
+    save and is NOT NULL, so a row always has a distance -- a property with no
+    row has never been joined, which is a different fact from a row whose
+    routing is old. Counting the two together would let a permanent
+    invisibility hide inside a routing backlog.
+
+    Reported as its own number with its own alert (`docs/OPERATIONS.md`).
+    """
+    joined = set(
+        PropertyCampusDistance.all_objects.filter(campus=campus).values_list(
+            "property_id", flat=True
+        )
+    )
+
+    return [prop.pk for prop in properties_in_range_of(campus, radius_km) if prop.pk not in joined]
+
+
+@transaction.atomic
+def backfill_property_joins(property_obj: Property, radius_km: float | None = None) -> int:
+    """Join one property to every campus in range of it.
+
+    The other direction, and the one that was missing entirely. `publish()`
+    refuses a property with no campus join -- correctly, since it would be
+    invisible -- and **nothing in the product created one**. The seed wrote
+    them directly and the tests built them by hand, so a landlord using the
+    write surface could pin a property, satisfy every other rule, and be
+    refused for ever by a gate no available action could satisfy.
+
+    Called from `publish()` before the gate runs, so the gate keeps its
+    meaning: it now refuses only a property that is genuinely near no campus
+    this platform serves, which is a real refusal with a real explanation.
+    """
+    from universities.models import Campus
+
+    from .distances import bounding_box, haversine_km
+
+    if property_obj.latitude is None or property_obj.longitude is None:
+        return 0
+
+    radius = settings.CAMPUS_JOIN_RADIUS_KM if radius_km is None else radius_km
+    min_lat, max_lat, min_lon, max_lon = bounding_box(
+        property_obj.latitude, property_obj.longitude, radius
+    )
+
+    joined = set(
+        PropertyCampusDistance.all_objects.filter(property=property_obj).values_list(
+            "campus_id", flat=True
+        )
+    )
+
+    created = 0
+    for campus in Campus.all_objects.filter(
+        latitude__gte=min_lat,
+        latitude__lte=max_lat,
+        longitude__gte=min_lon,
+        longitude__lte=max_lon,
+    ).select_related("university"):
+        if campus.pk in joined:
+            continue
+        if (
+            haversine_km(
+                property_obj.latitude, property_obj.longitude, campus.latitude, campus.longitude
+            )
+            > radius
+        ):
+            continue
+
+        PropertyCampusDistance.all_objects.create(
+            property=property_obj,
+            university=campus.university,
+            campus=campus,
+            is_primary=not joined and created == 0,
+        )
+        created += 1
+
+    return created
+
+
+@transaction.atomic
+def backfill_campus_joins(campus, radius_km: float | None = None) -> int:
+    """Create the missing join rows for one campus.
+
+    **`walking_minutes` is left null.** Only the routing job may fill it
+    (ADR-002): a walking time the platform invented is the thing that erodes
+    exactly the trust the platform sells, and a straight line quietly promoted
+    into a walk is the specific way that happens. The row carries
+    `straight_line_km` -- which is computed, not guessed -- and the routing
+    sweep picks it up on its next pass because a null `routed_at` sorts first.
+    """
+    created = 0
+
+    for property_id in properties_missing_a_join_to(campus, radius_km):
+        prop = Property.all_objects.get(pk=property_id)
+        PropertyCampusDistance.all_objects.create(
+            property=prop,
+            university=campus.university,
+            campus=campus,
+            # is_primary only if this property has no other join yet: the
+            # first campus a property is joined to is its primary one, and a
+            # backfill must not demote an existing choice.
+            is_primary=not PropertyCampusDistance.all_objects.filter(property=prop).exists(),
+        )
+        created += 1
+
+    return created

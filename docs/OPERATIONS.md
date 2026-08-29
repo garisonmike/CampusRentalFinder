@@ -479,7 +479,28 @@ Every sweep and reconciler in the project, checked for the same shape:
 no `PropertyCampusDistance` row, and the sweep only routes rows that exist. The
 property is then invisible to that campus for ever, with no error anywhere —
 the same silent-invisibility failure the publish gate exists to prevent,
-arriving by a different door. Nothing creates the join retrospectively.
+arriving by a different door.
+
+`properties_missing_a_join_to()` now answers from the other side and has its
+own alert row above. Absence, not staleness: `straight_line_km` is haversine on
+save and NOT NULL, so a row always carries a distance — a property with **no
+row** has never been joined, which is a different fact from a row whose routing
+is old, and counting the two together would let a permanent invisibility hide
+inside a routing backlog.
+
+**The repair is an operator action, not a signal.** `manage.py
+backfill_campus_joins` reports by default and only writes with `--apply`,
+because a join makes a property visible to a university's students: repairing
+on every campus save would turn tenant visibility into a function of geography
+that nobody decided, and two universities 12 km apart would begin sharing every
+listing the moment a row was saved.
+
+The **property** side is automatic, because it is the landlord's own act on
+their own property: `publish()` joins the campuses that already exist. Until it
+did, nothing in the product created a join at all — the seed wrote them
+directly and the tests built them by hand — so the publish gate was
+unsatisfiable by any available action, and a landlord who pinned a property
+correctly was refused for ever.
 
 **`sweep_expired_documents`.** `submit_verification_document` writes the object
 to the bucket **before** opening the transaction that creates the row. If that
@@ -594,6 +615,7 @@ volume threshold will not fire on it. Every threshold below is an age.
 | Rating drift | Any sampled aggregate differing from its recomputed value | Page |
 | Rating aggregate missing | Any published review whose property or unit has **no aggregate row at all** | Page |
 | Orphaned document object | Any object in the documents bucket with **no `VerificationDocument` row** (`orphaned_document_objects()`) | Page |
+| Property missing a campus join | Any published property within `CAMPUS_JOIN_RADIUS_KM` of a campus with **no `PropertyCampusDistance` row** (`properties_missing_a_join_to()`) | Warn |
 | Reconciler stalled | Oldest aggregate `computed_at` > **48 hours** | Warn |
 | Worker absent | No RQ job of any kind completed in **15 minutes** | Page |
 
