@@ -357,7 +357,7 @@ That is worth grepping for directly. **Any value that appears twice is a
 candidate**, and the question is always: *which copy does the machine actually
 read?*
 
-### The five
+### The eight
 
 | # | The two places | Which won | What it looked like |
 |---|---|---|---|
@@ -366,6 +366,9 @@ read?*
 | 3 | the test file's skip condition; the CI service-container config | the skip | a green build with the compliance test never executed |
 | 4 | `--cov-fail-under=88` in `addopts`; `fail_under = 89` in `[tool.coverage.report]` | the flag | CI printing "88% reached" on the commit that raised it to 89 |
 | 5 | a phase summary asserting a bug and its fix; the commit that supposedly contained them | **the summary** | a `vacant_count` reconciliation bug reported, accepted, and specced against — for a function that has never existed |
+| 6 | the AA contrast floor `4.5`, written six times across three test files | they agreed, so nothing won yet | a number that would eventually be raised in five places |
+| 7 | `TENANCY_CONFIRMATION_WINDOW_DAYS` in settings; a literal `7` in `TenancyClaimFactory` | **the fixture**, for most of the suite | raising the setting would leave every factory-made claim on the old window while the service test kept passing |
+| 8 | a command's own exit status; the exit status of whatever it was piped into | **the pipe** | `pytest \| tail -3` reported a red suite as green, twice, and two commits were built on top of it |
 
 **Number 5 is the one with no code in it at all**, and it is the most dangerous
 because it is the fastest to propagate. A phase summary described a
@@ -387,6 +390,39 @@ everyone downstream and then built upon.
 > including your own.** `git show <sha> | grep <symbol>` costs ten seconds and
 > is the only thing that distinguishes a finding from a plausible story about
 > one. A summary that names a function is asserting that function exists.
+
+### Instance eight generalises further than the section was written
+
+The prediction was "the check and the checked thing configured in two places,
+the wrong one winning silently", and the expectation was that it would arrive
+in application code again. It arrived in the **tooling**, and not as
+configuration at all:
+
+> **A check's verdict must come from the thing being checked. A pipeline hands
+> you the verdict of whatever ran last.**
+
+`pytest -q | tail -3` exits with `tail`'s status, which is 0 whether the suite
+passed or not. The output on screen said `3 failed`; the shell said success;
+the `&&` chain after it ran anyway and committed. Twice.
+
+What makes it the same family rather than a separate lesson: the verdict
+existed in two places — pytest's exit code and the pipeline's — and the one
+that was read was not the one that knew anything. That is the shape, with
+"configured" widened to "produced".
+
+Three consequences, all now in `tools/verify_commits.sh`:
+
+- **`set -euo pipefail`**, so a swallowed status in the future aborts rather
+  than continues.
+- **No unchecked status**, including the two generator steps whose failure was
+  invisible: `spectacular` and `openapi-typescript` wrote to fixed paths in
+  `/tmp` reused across every commit in the loop, so a failed generation left
+  the *previous* commit's file in place and the diff compared the wrong two
+  things. That was the same defect, inside the tool built to catch it.
+- **`--self-test`**, which plants a failing test and requires the verifier to
+  see it. This script is the only tool in the repository whose failure mode is
+  total: everything else fails loudly or fails alone, whereas a verifier that
+  cannot see red reports green for an entire range and is believed.
 
 **Number 2 is the variant to watch for** among the code-level ones, because it
 is the one a grep for duplicated values will not find. There, the second
