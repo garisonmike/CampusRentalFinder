@@ -15,12 +15,14 @@ forty rows, which is precisely the size where nobody notices until it is live.
 from __future__ import annotations
 
 from django.db.models import Min, Prefetch
+from django.utils.decorators import method_decorator
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework.exceptions import NotFound
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 
+from config.api.caching import cacheable_at_the_edge
 from config.api.throttling import Scope
 from config.api.views import SchemaSafeQuerysetMixin
 from config.middleware import get_current_university
@@ -45,6 +47,18 @@ def _require_tenant():
     if university is None:
         raise NotFound("No university is configured for this host.")
     return university
+
+
+class EdgeCacheableMixin:
+    """Marks this view's anonymous GETs cacheable by a shared cache.
+
+    On the mixin rather than on each method, so a view that gains a second
+    read method does not silently lose the header.
+    """
+
+    @method_decorator(cacheable_at_the_edge)
+    def dispatch(self, request, *args, **kwargs):
+        return super().dispatch(request, *args, **kwargs)
 
 
 class PublishedPropertyMixin:
@@ -89,7 +103,9 @@ class PublishedPropertyMixin:
         ],
     )
 )
-class PropertyListView(SchemaSafeQuerysetMixin, PublishedPropertyMixin, ListAPIView):
+class PropertyListView(
+    EdgeCacheableMixin, SchemaSafeQuerysetMixin, PublishedPropertyMixin, ListAPIView
+):
     """Listing search."""
 
     serializer_class = PropertySummarySerializer
@@ -141,7 +157,7 @@ class PropertyListView(SchemaSafeQuerysetMixin, PublishedPropertyMixin, ListAPIV
         ),
     )
 )
-class PropertyDetailView(PublishedPropertyMixin, RetrieveAPIView):
+class PropertyDetailView(EdgeCacheableMixin, PublishedPropertyMixin, RetrieveAPIView):
     """One property."""
 
     serializer_class = PropertyDetailSerializer
@@ -175,7 +191,7 @@ class PropertyDetailView(PublishedPropertyMixin, RetrieveAPIView):
         ),
     )
 )
-class UnitDetailView(RetrieveAPIView):
+class UnitDetailView(EdgeCacheableMixin, RetrieveAPIView):
     """One unit."""
 
     serializer_class = UnitDetailSerializer

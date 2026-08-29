@@ -34,6 +34,24 @@ What would need to be measured, per scope:
 | `privacy` | Is a burst here ever legitimate, or is any burst a signal? |
 | `write` | What does a landlord with forty units doing a vacancy sweep on Monday morning actually generate? |
 
+**The keying is now asserted; the number is not.**
+`backend/tests/test_public_read_caching.py` models a lecture hall behind one
+address and proves that `public_read` is spent per address rather than per
+person — so the assumption stops being invisible even though the rate stays an
+open question. Two things it also established, worth knowing before anyone
+writes another throttle test:
+
+- `override_settings(REST_FRAMEWORK=...)` does **not** reach the throttle. DRF
+  binds `SimpleRateThrottle.THROTTLE_RATES` as a class attribute at import, so
+  an override updates `api_settings`, reports itself as applied, and the
+  requests run against the real rate. A test written that way proves nothing
+  and looks like it proves something.
+- Public listing reads are now `Cache-Control: public, s-maxage=…,
+  stale-while-revalidate=…`, so a CDN can answer most of them. That removes
+  traffic from the origin and therefore from the throttle. **It does not make
+  the keying correct** — it makes the wrong keying hurt less, which is a
+  different thing and should not be mistaken for the fix.
+
 **The NAT case is the one to measure first.** Kenyan campus wifi puts hundreds of
 students behind one address, and DRF's default anonymous throttling keys on IP.
 A `public_read` limit that is generous for one person is a limit divided by four
@@ -44,6 +62,28 @@ intake.
 Needs: a load generator with a realistic mix (mostly reads, occasional writes),
 a NAT simulation, and a run against staging. Not reachable by seeding, because
 seeding produces data and this is about arrival rates.
+
+---
+
+## 1b. Public listing reads must stay cacheable at the edge
+
+**Status: headers set, CDN behaviour unverified.**
+
+`Cache-Control` is emitted by `config/api/caching.py` on the three public read
+endpoints and asserted in tests. What has never been checked is whether a real
+CDN in front of a real deployment honours it — that it caches on the canonical
+host, that it does not key on the tenant subdomain in a way that shards the
+cache per university, and that a signed-in reader's `private` response is not
+stored.
+
+The last one is the dangerous one. The decorator refuses to mark an
+authenticated response `public`, but a misconfigured edge that ignores
+`private` would serve one student's response to another. It needs watching
+against the real CDN, not asserting in a unit test.
+
+**To remove this entry:** a request through the production edge, twice, with
+the second served from cache; and an authenticated request through the same
+edge that is demonstrably not stored.
 
 ---
 

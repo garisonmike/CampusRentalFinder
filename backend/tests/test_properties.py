@@ -792,3 +792,118 @@ class TestAnUploadIsJudgedByItsBytes:
 
         stored = storages["default"].open(photo.original_key).read()
         assert stored == original
+
+
+class TestHostileUploadsOnBothPaths:
+    """The same three files against the photo path and the document path.
+
+    They fail differently and both paths must survive all three:
+
+    - a **PDF renamed `.jpg`** with `image/jpeg` on the part -- the case that
+      showed `add_photo` was reading the client's own header;
+    - an **SVG with a script tag** -- text, so it has no magic signature the
+      allowlist recognises, and an allowlist is what makes that a refusal
+      rather than an oversight;
+    - a **truncated file** with a valid header, which no header check can
+      catch because the header is genuine.
+    """
+
+    PDF_AS_JPEG = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"0" * 512
+    SVG_WITH_SCRIPT = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+        b"<script>alert(document.cookie)</script></svg>"
+    )
+
+    @staticmethod
+    def truncated_png() -> bytes:
+        import io
+
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (64, 64), "white").save(buffer, format="PNG")
+        whole = buffer.getvalue()
+        return whole[: len(whole) // 3]
+
+    # -- the photo path (public bucket) ------------------------------------
+
+    def upload_photo(self, unit, data: bytes, name: str, content_type: str):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from properties.services import add_photo
+
+        return add_photo(
+            unit=unit, upload=SimpleUploadedFile(name, data, content_type=content_type)
+        )
+
+    def test_photo_path_refuses_a_pdf_named_jpg(self, unit_factory):
+        with pytest.raises(ValidationError):
+            self.upload_photo(unit_factory(), self.PDF_AS_JPEG, "room.jpg", "image/jpeg")
+
+    def test_photo_path_refuses_an_svg(self, unit_factory):
+        """It never reaches the public bucket, which is what matters: an SVG
+        served from a host is a script running on that host."""
+        with pytest.raises(ValidationError):
+            self.upload_photo(unit_factory(), self.SVG_WITH_SCRIPT, "logo.svg", "image/svg+xml")
+
+    def test_photo_path_refuses_an_svg_claiming_to_be_a_png(self, unit_factory):
+        """The extension and the header both lying at once."""
+        with pytest.raises(ValidationError):
+            self.upload_photo(unit_factory(), self.SVG_WITH_SCRIPT, "logo.png", "image/png")
+
+    def test_photo_path_refuses_a_truncated_file(self, unit_factory):
+        with pytest.raises(ValidationError, match="incomplete"):
+            self.upload_photo(unit_factory(), self.truncated_png(), "cut.png", "image/png")
+
+    def test_no_stored_photo_key_can_end_in_svg(self, unit_factory):
+        """The extension comes from the **sniffed** type, so an SVG cannot be
+        stored under a name the bucket would serve as `image/svg+xml`.
+
+        That is what stands between the public media bucket and stored XSS
+        today -- not a bucket policy. Asserted here so it stays true.
+        """
+        import io
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+
+        from properties.services import add_photo
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8), "white").save(buffer, format="PNG")
+
+        photo = add_photo(
+            unit=unit_factory(),
+            upload=SimpleUploadedFile("trythis.svg", buffer.getvalue(), content_type="image/png"),
+        )
+
+        assert photo.original_key.endswith(".png")
+
+    # -- the document path (private bucket) --------------------------------
+
+    def test_document_path_refuses_a_pdf_that_is_not_one(self, student_profile):
+        """A PDF header is in the allowlist, so this asserts the opposite
+        direction: bytes that are not any allowed type."""
+        from accounts.documents import DocumentTypeNotAllowedError, submit_verification_document
+
+        with pytest.raises(DocumentTypeNotAllowedError):
+            submit_verification_document(student_profile, b"just some text, honestly")
+
+    def test_document_path_refuses_an_svg(self, student_profile):
+        from accounts.documents import DocumentTypeNotAllowedError, submit_verification_document
+
+        with pytest.raises(DocumentTypeNotAllowedError):
+            submit_verification_document(student_profile, self.SVG_WITH_SCRIPT)
+
+    def test_document_path_refuses_a_truncated_image(self, student_profile):
+        """A genuine PNG header and no body. The sniff passes and the decode
+        is what notices -- the strip re-encodes, so an undecodable file cannot
+        reach storage."""
+        from accounts.documents import submit_verification_document
+
+        with pytest.raises(Exception) as refusal:
+            submit_verification_document(student_profile, self.truncated_png())
+
+        assert (
+            "truncated" in str(refusal.value).lower() or "incomplete" in str(refusal.value).lower()
+        )

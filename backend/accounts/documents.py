@@ -501,7 +501,25 @@ def submit_verification_document(profile: StudentProfile, data: bytes) -> Verifi
 
     assert_verification_method_is_enabled(profile.university, VerificationMethod.STUDENT_ID_UPLOAD)
     attempt = _assert_within_resubmission_limit(profile)
-    clean = strip_image_metadata(data, content_type)
+
+    try:
+        clean = strip_image_metadata(data, content_type)
+    except OSError as error:
+        # A valid header and a missing body -- what a dropped upload leaves.
+        # The sniff cannot catch it, because the header is genuinely a PNG's.
+        #
+        # The photo path grew this guard first (efdae0f) and this one did not,
+        # so an interrupted upload here surfaced as an unhandled OSError: a
+        # 500 where a sentence belongs, on the endpoint a student uses to
+        # prove who they are.
+        raise DocumentTypeNotAllowedError(
+            {
+                "document": _(
+                    "That file could not be read -- it looks incomplete. If "
+                    "the upload was interrupted, try it again."
+                )
+            }
+        ) from error
     key = random_document_key(EXTENSIONS[content_type])
 
     # **Row first, bytes second, and the row is written inside a transaction

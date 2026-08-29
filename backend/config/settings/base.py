@@ -437,6 +437,23 @@ ERASURE_COOLING_OFF_DAYS = config("ERASURE_COOLING_OFF_DAYS", default=7, cast=in
 # older than the stale threshold is still SHOWN -- never hidden, never
 # zeroed -- with its age attached, because a stale number the reader can judge
 # beats no number at all.
+# Edge caching for public listing reads (ADR-001, config/api/caching.py).
+#
+# `max_age` is what a browser keeps; `s_maxage` is what a CDN keeps and is
+# longer, because a shared cache serving a stale listing for a minute is the
+# trade that keeps the origin up. `stale_while_revalidate` lets the CDN answer
+# from the old copy while it fetches a new one, which is the difference between
+# a slow page and a spinning one.
+#
+# Deliberately short. A vacancy count that is five minutes old is fine; one
+# that is an hour old is the staleness the freshness banding exists to expose,
+# and it should not be introduced by our own cache.
+PUBLIC_READ_MAX_AGE_SECONDS = config("PUBLIC_READ_MAX_AGE_SECONDS", default=60, cast=int)
+PUBLIC_READ_SHARED_MAX_AGE_SECONDS = config(
+    "PUBLIC_READ_SHARED_MAX_AGE_SECONDS", default=300, cast=int
+)
+PUBLIC_READ_STALE_SECONDS = config("PUBLIC_READ_STALE_SECONDS", default=600, cast=int)
+
 # How far from a campus a property can be and still be joined to it (ADR-002).
 #
 # **There was no such number before, and this one is a proposal rather than a
