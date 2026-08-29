@@ -564,6 +564,54 @@ stay that has ended; a de-duplication assertion needs one person with two
 stays. If every fixture row is identical along the axis being asserted, the
 assertion is describing a constant.
 
+## An agreement test only compares the inputs it walks
+
+Consolidating the three stay-length implementations turned up a method worth
+keeping: **the copies were found by grepping the arithmetic, not the name.**
+`end_date`, `start_date`, `.days` — the name is the one thing copies do not
+share, which is why `stay_days` and `TenancyClaim.stay_days()` and
+`effective_stay_days` were three answers to one question and only two of them
+looked related.
+
+The test guarding that pair was `test_it_agrees_with_the_tenancies_definition`,
+which asserted the two returned the same number. It passed for the entire
+window the bug was live, because the copies agreed until one was fixed. **An
+agreement test cannot notice a second implementation; it can only notice one
+that has already drifted** — and then only on inputs it happens to walk.
+
+Applied across the domain, five concepts have two implementations each. What
+was found:
+
+| Concept | The two | Verdict |
+| --- | --- | --- |
+| stay length | `reviews.services.stay_days`, `TenancyClaim.stay_days()`, `tenancies.services.effective_stay_days` | **three, two deleted** |
+| dispute annotation | `review_dispute_annotation` (per review) and the batched annotation in the list endpoint | both needed — agreement now walks all four branches, not the one |
+| tenancy currency | `Tenancy.is_current()`/`currency()` in Python, `TenancyQuerySet.current()/past()/upcoming()` in SQL | both needed — agreement now walks every status, not the default one |
+| review eligibility | one definition (`review_eligibility_date`), latched into `review_eligible_at` | not a duplicate |
+| distance formatting | `formatKm` in `lib/format.ts`, used by both components | not a duplicate |
+
+The two "both needed" rows are the interesting ones, because a single
+implementation is not available: one is a per-row derivation and the other is
+a set-shaped query written to avoid N+1. They cannot be merged, so the only
+defence is comparison — and comparison is worth exactly as much as the inputs
+it walks.
+
+- The **dispute annotation** agreement walked disputed-and-not-withdrawn, one
+  branch of four. The two are furthest apart in shape on the noisy-disputer
+  branch: the batched path collects noisy disputers into a set in one query,
+  the single path counts that disputer's claims on demand. That branch was
+  the one not covered.
+- The **currency** agreement walked five date shapes at the default status.
+  The two express the status half differently — `is_current` tests membership
+  of `LIVE_TENANCY_STATUSES` in Python, the queryset calls `.live()` in SQL —
+  so adding a status to one list and not the other would have left it green.
+  It now walks the cross product, and the implementations do agree.
+
+**The question this adds:** for a pair of implementations kept deliberately,
+ask which dimension makes them different in shape, and check the agreement
+test varies *that* one. A test comparing them on the easy input is measuring
+that both were written by somebody who understood the easy input.
+
 ## Reconcilers are blind to absence by construction
 
 **A reconciler that samples the derived side can only compare rows that exist.**

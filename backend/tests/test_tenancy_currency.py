@@ -171,11 +171,44 @@ class TestCurrent:
 
     def test_the_model_method_agrees_with_the_queryset(self, tenancy_factory):
         """Two implementations of one predicate is how they drift, so the
-        agreement is asserted rather than assumed."""
-        for starts, ends in ((30, -30), (200, 30), (-30, -200), (30, None), (0, 0)):
-            tenancy = stay(tenancy_factory, starts=starts, ends=ends)
+        agreement is asserted rather than assumed.
 
-            assert tenancy.is_current() == (tenancy in scoped().current())
+        **Every status, not only the default one.** The two implementations
+        express the status half differently -- `is_current` tests membership of
+        `LIVE_TENANCY_STATUSES` in Python, the queryset calls `.live()` in SQL
+        -- which is precisely where they can disagree, and walking date shapes
+        at one status never touches it. Adding a status to one list and not the
+        other would have left this green.
+        """
+        for status in TenancyStatus.values:
+            for starts, ends in ((30, -30), (200, 30), (-30, -200), (30, None), (0, 0)):
+                tenancy = stay(tenancy_factory, starts=starts, ends=ends, status=status)
+
+                assert tenancy.is_current() == (tenancy in scoped().current()), (
+                    f"{status} from {starts} to {ends}"
+                )
+
+    def test_currency_agrees_with_the_three_querysets_for_every_status(self, tenancy_factory):
+        """The same comparison for the three-way derivation rather than the
+        boolean one. `currency()` and `current()`/`past()`/`upcoming()` are the
+        single-row and set-shaped forms of one rule.
+        """
+        buckets = {
+            TenancyCurrency.CURRENT: lambda: scoped().current(),
+            TenancyCurrency.PAST: lambda: scoped().past(),
+            TenancyCurrency.UPCOMING: lambda: scoped().upcoming(),
+        }
+
+        for status in TenancyStatus.values:
+            for starts, ends in ((30, -30), (200, 30), (-30, -200), (30, None), (0, 0)):
+                tenancy = stay(tenancy_factory, starts=starts, ends=ends, status=status)
+                verdict = tenancy.currency()
+
+                for name, queryset in buckets.items():
+                    assert (verdict == name) == (tenancy in queryset()), (
+                        f"{status} from {starts} to {ends}: currency()={verdict}, "
+                        f"but membership of {name} disagrees"
+                    )
 
 
 class TestVoidTenanciesAreNeitherCurrentNorPast:
