@@ -583,3 +583,44 @@ that no user has ever seen this.
 It is deliberately not a backlog. Each entry says what would have to be
 *watched working* to remove it, because the standard everywhere else in this
 project is that a guarantee nobody has observed is a guarantee nobody has.
+
+## Factories exercise rules; they do not assert them
+
+A fixture that writes a **derived or latched** field states the answer the code
+is supposed to compute, and every test downstream then agrees with the fixture
+rather than with the system.
+
+The seed did exactly this with `review_eligible_at`: it stamped the latch on
+creation, so every seeded stay read as having already earned its review right,
+`termination_would_defeat_review` returned False for all of them, and the
+escalation it guards could not be reached at any proposed date. The comment
+above the line claimed the opposite.
+
+An audit of `tests/factories.py` for the same shape found the factories clean
+on the field that mattered and one real duplicate:
+
+| Field | Verdict |
+|---|---|
+| `review_eligible_at` | never set by a factory — the services own it |
+| rating aggregates | no factory; tests call `recompute_*`. The one direct `update()` deliberately introduces drift to prove the reconciler finds it, which is exercising |
+| `VerifiedStudentProfileFactory` | sets status, method and timestamp together, which is the triple a real verification writes and a check constraint requires |
+| `TenancyClaimFactory.confirmation_deadline` | **was a literal `7`** where the service reads `TENANCY_CONFIRMATION_WINDOW_DAYS`. Fixed |
+
+Two acceptable ones, named so nobody mistakes them for coverage they are not:
+
+**`TenancyFactory` sets `status`, `confirmation_source`, `confirmed_by` and
+`confirmed_at` directly.** None is derived — currency comes from the dates —
+and the values are the same ones a real acceptance writes. But no
+factory-made tenancy has been through `accept_application` or `confirm_claim`,
+so `was_disputed` is always `False` by construction rather than by history. A
+test asserting something *about* a confirmed tenancy is testing the queryset,
+not the path that creates one. The seed covers the path.
+
+**`ReadyUnitPhotoFactory` sets `processing_status=READY` with its three variant
+keys**, bypassing `generate_photo_variants`. Assertions about a ready photo
+prove the serializer, not the job; `test_jobs.py` drives the real job.
+
+The rule, for the next factory: **set the inputs, never the conclusions.** If a
+field is written by a service the moment something becomes true, a fixture that
+writes it has decided the thing is true, and the test that reads it back is
+asking the fixture.
