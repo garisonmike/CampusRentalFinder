@@ -71,8 +71,9 @@ class TestTheSurfaceItself:
         now = timezone.now()
         boundary = settings.VERIFICATION_ABSOLUTE_RETENTION_DAYS
 
+        # Within a day, for the same midnight-straddling reason as above.
         assert any(
-            (now - document.uploaded_at).days == boundary
+            abs((now - document.uploaded_at).days - boundary) <= 1
             for document in VerificationDocument.objects.all()
         ), "no boundary case, so `lte` versus `lt` is untested"
 
@@ -97,14 +98,20 @@ class TestRetentionAgainstRealAge:
         from django.conf import settings
 
         now = timezone.now()
-        boundary = now - dt.timedelta(days=settings.VERIFICATION_ABSOLUTE_RETENTION_DAYS)
-        document = (
-            VerificationDocument.objects.filter(uploaded_at__date=boundary.date())
-            .order_by("uploaded_at")
-            .first()
+        boundary = settings.VERIFICATION_ABSOLUTE_RETENTION_DAYS
+
+        # Selected by age rather than by calendar date. The first version
+        # matched `uploaded_at__date` against `(now - 30 days).date()`, where
+        # `now` is read here and the seed read its own moments earlier -- so
+        # the two disagreed by a day whenever a run straddled midnight, which
+        # this one did. A test that fails once a day is a test people learn to
+        # re-run.
+        document = min(
+            VerificationDocument.objects.all(),
+            key=lambda candidate: abs((now - candidate.uploaded_at).days - boundary),
         )
 
-        assert document is not None
+        assert abs((now - document.uploaded_at).days - boundary) <= 1
         assert documents_due_for_deletion(now).filter(pk=document.pk).exists()
 
     def test_a_document_within_both_windows_is_left_alone(self, compliance):
@@ -238,3 +245,68 @@ class TestErasureAgainstAPopulatedDatabase:
             assert row.reviewer_label
             # What does not: any route back to the person.
             assert row.verification_request_id is None
+
+
+class TestTheReportItself:
+    """`run_compliance_sweeps` is how these jobs get watched.
+
+    A reporting command with no test is a command that breaks silently and is
+    then not run -- which returns these jobs to the state this whole round
+    existed to leave: working or not, with nobody looking.
+    """
+
+    def report(self) -> str:
+        import io
+
+        buffer = io.StringIO()
+        with override_settings(DEBUG=True):
+            call_command("run_compliance_sweeps", stdout=buffer)
+        return buffer.getvalue()
+
+    def test_it_runs_and_reports_every_section(self, compliance):
+        output = self.report()
+
+        for heading in ("Documents", "After the sweep", "Access log", "Erasure"):
+            assert heading in output, f"the report lost its {heading} section"
+
+    def test_it_reports_confirmed_deletions(self, compliance):
+        output = self.report()
+
+        assert "deletions confirmed:" in output
+        assert "deletions unconfirmed:   0" in output
+
+    def test_it_shows_what_the_expired_student_was_told(self, compliance):
+        """The question is not whether a rejection happened but whether it
+        reads as "try again" rather than "you were refused"."""
+        output = self.report()
+
+        assert "auto-rejected on expiry" in output
+        # The report truncates the message at 80 characters, so this matches
+        # its opening rather than the word "resubmit" at the end of it.
+        assert "did not review this in time" in output
+
+    def test_it_reports_erasure_as_pseudonymisation(self, compliance):
+        output = self.report()
+
+        assert "email=pseudonymised" in output
+        assert "STILL REAL" not in output
+
+    def test_it_refuses_to_run_outside_debug(self):
+        """It executes real deletions. Development only."""
+        from django.core.management.base import CommandError
+
+        with override_settings(DEBUG=False), pytest.raises(CommandError):
+            call_command("run_compliance_sweeps")
+
+    def test_advancing_the_clock_changes_what_is_due(self, compliance):
+        """The jobs take `now` rather than being mocked, precisely so history
+        can be examined without lying to the clock."""
+        import io
+
+        buffer = io.StringIO()
+        with override_settings(DEBUG=True):
+            call_command("run_compliance_sweeps", "--advance-days", "60", stdout=buffer)
+        output = buffer.getvalue()
+
+        # Sixty days on, everything seeded is past its absolute deadline.
+        assert "due for deletion:        6" in output

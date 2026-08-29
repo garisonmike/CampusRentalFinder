@@ -16,6 +16,16 @@
 set -uo pipefail
 
 BASE="${1:-origin/main}"
+
+# Its own database, so a developer running the suite in another terminal does
+# not collide with it. pytest-django derives `test_<name>` from the URL, and
+# two runs sharing that name fight over creating and dropping it -- which
+# showed up as two commits failing `pytest` for reasons that had nothing to do
+# with the commits. A verifier that reports false failures is worse than no
+# verifier: it teaches you to disbelieve it.
+if [ -n "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL="${DATABASE_URL%/*}/campus_rental_verify"
+fi
 ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE="$(mktemp -d)/verify"
 FAILED=0
