@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Q
@@ -103,8 +104,13 @@ class Command(BaseCommand):
         # Routes come from `reverse`, not from literals. A capture holding
         # hard-coded paths keeps returning 200 from a URL the app has moved,
         # or starts failing for a reason that has nothing to do with the data.
+        # The host is built from `SITE_DOMAIN`, not from a literal. Tenant
+        # resolution strips the configured site domain to find the subdomain,
+        # so a hard-coded `.localhost` captures a 404 anywhere that setting
+        # differs -- and a capture command that silently records error pages
+        # is worse than one that does not run.
         kyu = University.objects.get(subdomain="kyu")
-        host = f"{kyu.subdomain}.localhost"
+        host = f"{kyu.subdomain}.{settings.SITE_DOMAIN}"
         client = Client()
 
         # Which property to capture is the whole question.
@@ -157,7 +163,7 @@ class Command(BaseCommand):
                 university.subdomain: self.get(
                     client,
                     reverse("universities:tenant-config"),
-                    f"{university.subdomain}.localhost",
+                    f"{university.subdomain}.{settings.SITE_DOMAIN}",
                 )
                 for university in University.objects.order_by("subdomain")
             },

@@ -256,6 +256,43 @@ class TestRetentionAgainstRealAge:
             with pytest.raises(OrphanScanUnavailableError):
                 reconcile_document_objects()
 
+    def test_the_reconciler_counts_and_alerts_with_the_keys(self, compliance):
+        """The path that runs every night.
+
+        "Seventeen" is not a compliance answer -- the operator's next question
+        is which ones -- so the alert carries keys, and this asserts it does
+        rather than asserting only the count.
+        """
+        from django.conf import settings
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import storages
+
+        from accounts.retention import reconcile_document_objects
+
+        planted = "verification/planted-for-the-reconciler.jpg"
+        storages["documents"].save(planted, ContentFile(b"orphan"))
+        later = timezone.now() + dt.timedelta(seconds=settings.DOCUMENT_ORPHAN_GRACE_SECONDS + 10)
+
+        try:
+            assert reconcile_document_objects(now=later) >= 1
+            assert planted in orphaned_document_objects(now=later)
+        finally:
+            storages["documents"].delete(planted)
+
+    def test_the_count_it_reports_is_the_scan_it_ran(self, compliance):
+        """Distinct from the unlistable case above, which raises.
+
+        Not asserted as zero: this suite shares one in-memory store across the
+        session, so a bare `== 0` would be a claim about whatever earlier tests
+        left behind rather than about the reconciler. What must hold is that
+        the number reported is the length of the list the scan produced.
+        """
+        from accounts.retention import reconcile_document_objects
+
+        now = timezone.now()
+
+        assert reconcile_document_objects(now=now) == len(orphaned_document_objects(now=now))
+
     def test_the_reconciler_is_scheduled(self):
         """The upload ordering narrows the orphan window rather than closing
         it, so this scan is load-bearing. A load-bearing check that runs only
