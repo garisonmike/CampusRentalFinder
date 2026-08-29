@@ -74,26 +74,6 @@ class ReviewFrozenError(ValidationError):
     """The edit window on this review has closed."""
 
 
-def stay_days(tenancy: Tenancy, *, today: dt.date | None = None) -> int:
-    """How long the stay has lasted so far.
-
-    **One definition, in `tenancies.services`.** This was a second copy of the
-    same arithmetic and it carried the same defect: `end_date` was used
-    whenever one was set, so a twelve-month lease reported 365 days on its
-    first morning. 3889249 fixed the copy in `tenancies` and left this one --
-    which is the shape `docs/OPERATIONS.md` collects, produced by the fix for
-    an instance of itself.
-
-    It mattered here in a different way. The eligibility gate reads the latch,
-    so this figure only reached the error message -- but `ReviewSerializer`
-    also renders it as `stay_months`, a public field, so a review card could
-    say "stayed 12 months" about somebody three days into a lease.
-    """
-    from tenancies.services import effective_stay_days
-
-    return effective_stay_days(tenancy, today=today)
-
-
 def assert_tenancy_is_reviewable(tenancy: Tenancy, *, today: dt.date | None = None) -> None:
     """The minimum-stay rule, in one place.
 
@@ -111,10 +91,10 @@ def assert_tenancy_is_reviewable(tenancy: Tenancy, *, today: dt.date | None = No
     # right to be reviewed, moving `end_date` backwards cannot take it away --
     # otherwise a landlord could delete a review right by terminating early,
     # which is correction_defeats_review at a different door (ADR-004 §2b).
-    from tenancies.services import review_eligibility_date
+    from tenancies.services import effective_stay_days, review_eligibility_date
 
     if review_eligibility_date(tenancy, today=today) is None:
-        days = stay_days(tenancy, today=today)
+        days = effective_stay_days(tenancy, today=today)
         raise TenancyNotReviewableError(
             {
                 "tenancy": _(

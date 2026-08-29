@@ -843,9 +843,3 @@ class TenancyClaim(TenantScopedModel):
         disputed status but was still disputed.
         """
         return self.disputed_at is not None
-
-    def stay_days(self) -> int | None:
-        """Length of the claimed stay, or None while it is ongoing."""
-        if self.end_date is None:
-            return None
-        return (self.end_date - self.start_date).days

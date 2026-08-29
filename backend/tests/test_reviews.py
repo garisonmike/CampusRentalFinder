@@ -32,7 +32,6 @@ from reviews.services import (
     respond_to_review,
     review_dispute_annotation,
     review_is_verified,
-    stay_days,
     update_review,
 )
 from tenancies.constants import ConfirmationSource, DisputeReason
@@ -40,6 +39,7 @@ from tenancies.services import (
     accept_correction,
     confirm_claim,
     create_claim,
+    effective_stay_days,
     raise_dispute,
 )
 
@@ -166,7 +166,7 @@ class TestMinimumStay:
             start_date=dt.date.today() - dt.timedelta(days=MINIMUM + 5), end_date=None
         )
 
-        assert stay_days(tenancy) == MINIMUM + 5
+        assert effective_stay_days(tenancy) == MINIMUM + 5
         assert_tenancy_is_reviewable(tenancy)
 
     def test_an_ongoing_stay_that_is_still_too_new_is_refused(self, tenancy_factory):
@@ -488,8 +488,13 @@ class TestReviewScoping:
 
 
 class TestStayLengthHasOneDefinition:
-    """`stay_days` was a second copy of `effective_stay_days`, carrying the
-    same defect after that one was fixed.
+    """There is one definition of how long a stay has lasted, in `tenancies`.
+
+    There were three. `reviews.services.stay_days` was a copy carrying the
+    same defect after the original was fixed, and `TenancyClaim.stay_days()`
+    was a third, used nowhere in the product and kept alive by a single test.
+    Both are deleted rather than delegating: two callers of one helper is
+    fine, two functions is what the defect cost.
 
     The eligibility gate reads the latch, so the wrong figure never reached a
     decision -- but `ReviewSerializer.stay_months` renders it, so a review card
@@ -503,7 +508,7 @@ class TestStayLengthHasOneDefinition:
             end_date=dt.date.today() + dt.timedelta(days=362),
         )
 
-        assert stay_days(tenancy) == 3
+        assert effective_stay_days(tenancy) == 3
 
     def test_the_review_card_does_not_overstate_the_stay(
         self, review_factory, tenancy_factory, unit_factory
@@ -522,11 +527,20 @@ class TestStayLengthHasOneDefinition:
 
         assert ReviewSerializer(review).data["stay_months"] == 1
 
-    def test_it_agrees_with_the_tenancies_definition(self, tenancy_factory, unit_factory):
-        """Delegation rather than a matching implementation: two functions that
-        agree today are two functions that can stop agreeing."""
-        from tenancies.services import effective_stay_days
+    def test_there_is_no_second_implementation_left(self):
+        """Asserted structurally, not by agreement.
 
+        A test that two functions return the same answer passes right up until
+        somebody edits one of them; a test that the second function does not
+        exist cannot.
+        """
+        import reviews.services
+        from tenancies.models import TenancyClaim
+
+        assert not hasattr(reviews.services, "stay_days")
+        assert not hasattr(TenancyClaim, "stay_days")
+
+    def test_the_one_definition_handles_every_shape(self, tenancy_factory, unit_factory):
         for start_offset, end_offset in [(-3, 362), (-200, -50), (-40, None)]:
             tenancy = tenancy_factory(
                 unit=unit_factory(),
@@ -536,4 +550,4 @@ class TestStayLengthHasOneDefinition:
                 ),
             )
 
-            assert stay_days(tenancy) == effective_stay_days(tenancy)
+            assert effective_stay_days(tenancy) >= 0

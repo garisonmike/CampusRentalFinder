@@ -384,7 +384,10 @@ class TestCorrectionDefeatsReview:
         impossible. After it, an admin sees the case under a label naming
         precisely what is being attempted.
         """
-        assert claim.stay_days() == LONG_ENOUGH
+        # The claimed length, from the dates. `TenancyClaim.stay_days()` was
+        # a third implementation of "how long was the stay", kept alive by
+        # this one assertion and used nowhere in the product.
+        assert (claim.end_date - claim.start_date).days == LONG_ENOUGH
 
         self.disputed_short(claim, landlord)
         result = accept_correction(claim)

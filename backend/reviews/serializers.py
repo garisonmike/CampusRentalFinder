@@ -214,9 +214,14 @@ class ReviewSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.IntegerField())
     def get_stay_months(self, review: Review) -> int:
-        from .services import stay_days
+        from tenancies.services import effective_stay_days
 
-        return stay_days(review.tenancy) // 30
+        # One definition of how long a stay has lasted, in `tenancies`. This
+        # used to read a copy in `reviews.services` that carried the same
+        # defect after the original was fixed, which is why the copy is gone
+        # rather than delegating: two functions that agree today are two
+        # functions that can stop agreeing.
+        return effective_stay_days(review.tenancy) // 30
 
 
 class ReviewWriteSerializer(serializers.ModelSerializer):
