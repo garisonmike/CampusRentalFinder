@@ -310,3 +310,87 @@ class TestTheListingBecomesVisible:
 
         assert response.status_code == 200
         assert prop.slug in [row["slug"] for row in response.data["results"]]
+
+
+class TestWhetherTheTwentyFiveWereArtefact:
+    """Auto-joining on campus save turned 25 tenant-scoping assertions red.
+
+    Last round I called that an artefact of `CampusFactory` placing every
+    campus at one coordinate, and reasoned it rather than testing it -- which
+    is the shape `docs/OPERATIONS.md` calls a summary asserting a finding the
+    evidence does not support. This is the evidence.
+
+    The claim under test: the geography is correct, and the red assertions
+    came from fixtures placing different universities on top of each other
+    rather than from the join being wrong.
+    """
+
+    def test_a_distant_campus_does_not_join_another_universitys_property(
+        self, property_factory, campus_factory, university_factory
+    ):
+        """Two universities 60 km apart, which is what they actually are.
+
+        Kenyatta's Kahawa campus and JKUAT's Juja campus are about 13 km
+        apart in reality -- close enough that a 15 km join radius really would
+        overlap them, which is a finding of its own and the reason
+        `CAMPUS_JOIN_RADIUS_KM` becomes per-campus. At 60 km there is no
+        ambiguity, and this asserts the mechanism rather than the tuning.
+        """
+        near = property_factory(
+            status=PropertyStatus.PUBLISHED, latitude=CAMPUS[0], longitude=CAMPUS[1]
+        )
+        far_campus = campus_factory(
+            university=university_factory(),
+            latitude=CAMPUS[0] - 0.55,
+            longitude=CAMPUS[1],
+        )
+
+        backfill_campus_joins(far_campus)
+
+        assert not PropertyCampusDistance.all_objects.filter(
+            property=near, campus=far_campus
+        ).exists()
+
+    def test_a_nearby_campus_of_another_university_does_join(
+        self, property_factory, campus_factory, university_factory
+    ):
+        """The other half, and the reason auto-joining stayed an operator
+        command: at 2 km the join is geographically correct and still changes
+        which university's students can see the listing. That is a decision,
+        not a repair.
+        """
+        near = property_factory(
+            status=PropertyStatus.PUBLISHED, latitude=CAMPUS[0], longitude=CAMPUS[1]
+        )
+        other = campus_factory(
+            university=university_factory(),
+            latitude=CAMPUS[0] + 0.018,
+            longitude=CAMPUS[1],
+        )
+
+        backfill_campus_joins(other)
+
+        assert PropertyCampusDistance.all_objects.filter(property=near, campus=other).exists()
+
+    def test_the_fixtures_no_longer_collapse_the_distance(
+        self, property_factory, campus_factory, campus_distance_factory, university
+    ):
+        """Every campus and every property shared one coordinate, so every
+        distance the suite could compute was 0.0 km.
+
+        A fixture that collapses the dimension under test makes every
+        assertion along it vacuous, and it passes.
+        """
+        campus = campus_factory(university=university)
+        first = property_factory(status=PropertyStatus.PUBLISHED)
+        second = property_factory(status=PropertyStatus.PUBLISHED)
+
+        distances = {
+            campus_distance_factory(
+                property=prop, university=university, campus=campus
+            ).straight_line_km
+            for prop in (first, second)
+        }
+
+        assert 0 not in distances, "a property is sitting exactly on a campus"
+        assert len(distances) == 2, "two properties produced one distance"

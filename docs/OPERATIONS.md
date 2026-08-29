@@ -466,6 +466,82 @@ currently-running tenancies cannot see a bug that needs history — which is
 exactly how the `vacant_count` bug survived eleven filters with the same shape.
 `docs/ENGINEERING.md` records why the default factory shape is the awkward case.
 
+## Fixtures that collapse the dimension under test
+
+**A fixture that removes the variation an assertion depends on makes every
+assertion along that dimension vacuous — and they all pass.**
+
+Two instances, found a round apart, and the second is the one that shows the
+shape is not about any particular field.
+
+### The seed lie
+
+`seed_platform` stamped `review_eligible_at` on creation, under a comment
+saying it left the latch to the services. Every seeded stay therefore read as
+having already earned its review right, `termination_would_defeat_review`
+returned False for all of them, and the escalation it guards could not be
+reached at any proposed date. The fix was to write the inputs and let the
+services write the conclusions (`docs/ENGINEERING.md`).
+
+### One coordinate for every campus, and every property
+
+`CampusFactory` and `PropertyFactory` both sat at `-1.286389, 36.817223`. Not
+merely co-located universities — **campus and property on the identical
+point**, so every distance the suite could compute was `0.0 km`.
+
+Everything downstream of a distance was therefore being asserted against a
+single value: nearest-campus ordering, `?max_distance_km=`, the campus-distance
+annotation, the `straight_line_km` rendering, and the publish gate's notion of
+"near a campus". None of them failed, because none of them could.
+
+It also produced a wrong conclusion that was then reported. When the campus
+backfill was briefly made automatic, 25 tenant-scoping assertions went red and
+I called it an artefact of co-location — reasoned, not tested, which is the
+summary-over-diff shape from the section below. It is now tested
+(`test_campus_joins.py::TestWhetherTheTwentyFiveWereArtefact`): with two
+universities genuinely 60 km apart the join does not cross tenants, and with
+them 2 km apart it does and should. The mechanism was right; the fixture was
+what made it look wrong.
+
+Giving campuses distinct coordinates *far* apart broke 70 tests and produced
+79 errors, because the sequence counter runs across a session and the
+thirtieth campus ends up fifteen degrees south of Nairobi. That is its own
+finding: **the suite assumes campus-near-property throughout**, and tenant
+isolation in it comes from the join row rather than from geography. The
+fixtures now spread campuses ~1.1 km and properties ~100 m, which makes
+distances non-zero, distinct and orderable while leaving that assumption
+intact.
+
+### A gate no product action could satisfy
+
+Same family, found the same way. `publish()` refuses a property with no
+`PropertyCampusDistance` row — correctly, since such a listing is invisible to
+every university (ADR-002). **Nothing in the product ever created one.** The
+seed wrote the rows directly and the tests built them by hand, so a landlord
+using the write surface could pin a property, satisfy every other rule, and be
+refused for ever by a gate that no available action could clear.
+
+Every test of the gate passed, because every test supplied the row itself. The
+fixture was not merely collapsing a dimension here — it was standing in for a
+product path that did not exist, which is the same failure at one remove: the
+suite proved the gate rejected and accepted correctly, and never asked where
+the thing it accepts comes from.
+
+`publish()` now creates the joins before running the gate, so the gate refuses
+only a property genuinely near no campus we serve.
+
+**The question this adds:** for every precondition a test satisfies by
+construction, ask which product action satisfies it in production. If the
+answer is "none", the test is describing a state the system cannot reach.
+
+### How to spot it
+
+Ask what the test varies, then check the fixture actually varies it. A
+geographic assertion needs two different places; a currency assertion needs a
+stay that has ended; a de-duplication assertion needs one person with two
+stays. If every fixture row is identical along the axis being asserted, the
+assertion is describing a constant.
+
 ## Reconcilers are blind to absence by construction
 
 **A reconciler that samples the derived side can only compare rows that exist.**

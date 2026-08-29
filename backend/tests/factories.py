@@ -104,10 +104,35 @@ class CampusFactory(TenantScopedFactory):
     name = factory.Sequence(lambda n: f"Campus {n}")
     town = "Nairobi"
     county = "nairobi"
-    # Nairobi, which is close enough to the equator that a latitude-correction
-    # bug divides by zero -- see ADR-006.
-    latitude = -1.286389
-    longitude = 36.817223
+    # **Each campus somewhere different.**
+    #
+    # Every campus used to sit at one coordinate, and so did every property --
+    # the same one. Every distance the suite could compute was therefore
+    # 0.0 km, which means every assertion along the geographic dimension was
+    # being made against a fixture that had collapsed that dimension. They
+    # passed. `docs/OPERATIONS.md` records the shape.
+    #
+    # About 1.1 km apart per campus, all of them inside
+    # `CAMPUS_JOIN_RADIUS_KM` of the properties below.
+    #
+    # A first attempt spread them half a degree apart -- 55 km, deliberately
+    # beyond the join radius so that "another university's campus" would be
+    # genuinely out of range. That broke 70 tests and 79 errors, because the
+    # sequence counter runs across the whole session: by the thirtieth test
+    # the campus is fifteen degrees south of Nairobi and nothing is near
+    # anything. The lesson is that tenant isolation in this suite comes from
+    # the **join row**, not from distance, and the fixtures were right to
+    # assume proximity.
+    #
+    # What was wrong was sharing one point with `PropertyFactory`, which made
+    # every distance exactly 0.0 km. Distances are now non-zero, distinct and
+    # orderable, which is what the geographic assertions need in order to mean
+    # anything.
+    #
+    # Nairobi: close enough to the equator that a latitude-correction bug
+    # divides by zero, which is why the base point is here (ADR-006).
+    latitude = factory.Sequence(lambda n: -1.286389 + n * 0.01)
+    longitude = factory.Sequence(lambda n: 36.817223 - n * 0.01)
     is_main = False
 
 
@@ -227,10 +252,19 @@ class PropertyFactory(TenantScopedFactory):
     town = "Nairobi"
     estate = "Kahawa Wendani"
     landmark = "opposite Naivas"
+    # Near campus 0, and not exactly on it.
+    #
+    # A fixed point shared with `CampusFactory` made every property-to-campus
+    # distance exactly zero, so "nearest campus" ordering, the distance
+    # filters and the km rendering were all being asserted against a single
+    # value. The jitter is ~100 m per property: enough that distances differ
+    # and order is meaningful, small enough that every property stays inside
+    # any radius a test would set.
+    #
     # Nairobi. Close enough to the equator that a latitude-correction bug
     # divides by zero -- see ADR-006.
-    latitude = -1.286389
-    longitude = 36.817223
+    latitude = factory.Sequence(lambda n: -1.286389 + n * 0.001)
+    longitude = factory.Sequence(lambda n: 36.817223 + n * 0.001)
     has_water_tank = True
     status = PropertyStatus.PUBLISHED
     published_at = factory.LazyFunction(timezone.now)
