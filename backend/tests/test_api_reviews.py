@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from django.db import connection
@@ -171,6 +172,60 @@ class TestTheAnnotationIsBatched:
         assert isinstance(tenancy, Tenancy), "the correction should have confirmed"
         return create_review(tenancy, rating=2, comment="Disputed stay.")
 
+    def plain_review(self, unit, *, offset: int):
+        """An application-sourced stay: no claim, so no dispute to annotate."""
+        from tests.factories import StudentProfileFactory, TenancyFactory
+
+        student = StudentProfileFactory()
+        start = dt.date.today() - dt.timedelta(days=400 + offset)
+        tenancy = cast(
+            Tenancy,
+            TenancyFactory(
+                unit=unit,
+                tenant=student.user,
+                start_date=start,
+                end_date=start + dt.timedelta(days=MINIMUM_STAY),
+            ),
+        )
+        return create_review(tenancy, rating=4, comment="Undisputed stay.")
+
+    def withdrawn_dispute_review(self, unit, landlord, *, offset: int):
+        """Disputed and then withdrawn. The annotation must clear -- an
+        annotation that outlives the dispute is the veto returning by another
+        route (ADR-004 §2.1)."""
+        from django.utils import timezone
+
+        from tests.factories import StudentProfileFactory
+
+        student = StudentProfileFactory()
+        review = self.disputed_review(unit, student.user, landlord, offset=offset)
+        claim = review.tenancy.claim
+        claim.dispute_withdrawn_at = timezone.now()
+        claim.save(update_fields=["dispute_withdrawn_at", "updated_at"])
+        return review
+
+    def noisy_disputer_review(self, unit, landlord, *, offset: int):
+        """A landlord who disputes everything.
+
+        The branch where the two implementations are furthest apart in shape:
+        the batched path computes noise per disputer into a set, the single
+        path counts per claim.
+        """
+        from django.conf import settings
+
+        from tests.factories import StudentProfileFactory
+
+        student = StudentProfileFactory()
+        review = self.disputed_review(unit, student.user, landlord, offset=offset)
+
+        # Enough resolved disputes by the same landlord to clear the minimum
+        # sample the heuristic requires before it will call anybody noisy.
+        for extra in range(settings.REVIEW_ANNOTATION_MINIMUM_DISPUTE_SAMPLE + 1):
+            other = StudentProfileFactory()
+            self.disputed_review(unit, other.user, landlord, offset=offset + 200 + extra * 40)
+
+        return review
+
     def make_reviews(self, block, tenancy_factory, student_profile_factory, count: int):
         _prop, unit = block
         for index in range(count):
@@ -267,13 +322,50 @@ class TestTheAnnotationIsBatched:
 
     def test_the_batch_and_the_single_path_agree(self, api_client, block, host, tenant, landlord):
         """Two code paths computing the same thing is two chances to disagree,
-        so this pins them together."""
+        so this pins them together.
+
+        **Across every branch, not one.** The earlier version of this asserted
+        agreement for a single disputed review, which is one of at least four
+        paths through the derivation -- and not the one likely to diverge. The
+        batched version computes the noise heuristic per disputer into a set
+        while the single version counts per claim, so that branch is where the
+        two implementations are furthest apart in shape.
+        """
         from reviews.services import dispute_annotations_for, review_dispute_annotation
 
         _prop, unit = block
-        review = self.disputed_review(unit, tenant, landlord, offset=0)
+        cases = {
+            "disputed": self.disputed_review(unit, tenant, landlord, offset=0),
+            "not disputed": self.plain_review(unit, offset=40),
+            "dispute withdrawn": self.withdrawn_dispute_review(unit, landlord, offset=80),
+            "noisy disputer": self.noisy_disputer_review(unit, landlord, offset=120),
+        }
 
-        assert dispute_annotations_for([review])[review.pk] == review_dispute_annotation(review)
+        batched = dispute_annotations_for(list(cases.values()))
+
+        for label, review in cases.items():
+            assert batched[review.pk] == review_dispute_annotation(review), (
+                f"the two paths disagree for a {label} review"
+            )
+
+    def test_the_agreement_test_covers_more_than_one_answer(
+        self, api_client, block, host, tenant, landlord
+    ):
+        """Otherwise both paths could return None for everything and agree.
+
+        An agreement test whose cases all share one answer proves the two
+        implementations are equally silent, which is exactly what a broken
+        pair would look like.
+        """
+        from reviews.services import review_dispute_annotation
+
+        _prop, unit = block
+        answers = {
+            review_dispute_annotation(self.disputed_review(unit, tenant, landlord, offset=0)),
+            review_dispute_annotation(self.plain_review(unit, offset=40)),
+        }
+
+        assert len(answers) > 1
 
     def test_a_disputed_review_is_not_hidden_or_demoted(
         self, api_client, block, host, tenant, landlord
