@@ -50,6 +50,13 @@ jobs:
 
     defaults:
       run:
+        # `bash`, not the default shell. GitHub's default for a `run:` block is
+        # `bash -e {0}` -- **without `pipefail`** -- so the moment anybody adds
+        # a pipe to a step, the step's verdict becomes the last command's.
+        # That is catalogue instance eight, and it is the one place in this
+        # repository still shaped to allow it. Naming `bash` here gets
+        # `bash --noprofile --norc -eo pipefail {0}`.
+        shell: bash
         working-directory: backend
 
     steps:
@@ -149,6 +156,8 @@ jobs:
 
     defaults:
       run:
+        # See the backend job: `bash` buys `-eo pipefail`, the default does not.
+        shell: bash
         working-directory: frontend
 
     steps:

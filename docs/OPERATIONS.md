@@ -424,6 +424,36 @@ Three consequences, all now in `tools/verify_commits.sh`:
   total: everything else fails loudly or fails alone, whereas a verifier that
   cannot see red reports green for an entire range and is believed.
 
+### Why the sweep is believed to be complete
+
+`set -euo pipefail` in `tools/verify_commits.sh` changed no behaviour on the
+day it landed — every command there already ran through `check` or an explicit
+`||`. That is a claim about the script as written, and on its own it is not
+evidence that every swallowed status was found. Two enumerations, not a grep:
+
+**The verifier**, command by command. Every one now runs through `check`,
+which reads the status directly, or through an `if` whose branch names its own
+failure. The two that did not were `spectacular` and `openapi-typescript` —
+status ignored *and* output written to a fixed `/tmp` path reused across every
+commit in the loop, so a failed generation left the previous commit's file and
+the diff compared the wrong two things. Same defect, inside the tool built to
+catch it.
+
+**CI**, block by block. Four `run: |` blocks. Every pipe in them is either
+inside an `if !` condition, where the pipeline's status is deliberately what is
+being tested, or feeds `head` purely to print a diff after the decision has
+already been made. The MinIO retry loop ends without `break` if all thirty
+attempts fail, and the next `mc mb` then fails under `-e`. So no step's verdict
+currently comes from the wrong command.
+
+**But CI was still shaped to allow it.** GitHub's default for a `run:` block is
+`bash -e {0}` — `-e`, and **no `pipefail`**. Nothing was broken; the next pipe
+anybody adds to a step would have been. Both jobs now declare `shell: bash`,
+which is `bash --noprofile --norc -eo pipefail {0}`.
+
+Which is the honest form of the answer. The sweep found two live instances and
+one open door, and the door is the part that would have produced the next one.
+
 ### The two defences were tested against each other
 
 Claiming a guard works is the thing this whole document is about not doing, so
@@ -534,6 +564,63 @@ fixtures now spread campuses ~1.1 km and properties ~100 m, which makes
 distances non-zero, distinct and orderable while leaving that assumption
 intact.
 
+### The twenty-five, re-run rather than reasoned
+
+Last round, auto-joining on campus save turned 25 tenant-scoping assertions
+red, and that was called an artefact of `CampusFactory` placing every campus at
+one coordinate. Called, not shown — which is the shape this document files
+under instance five: a summary asserting a finding the evidence does not
+support.
+
+The experiment, now that the coordinates are distinct: reconnect the auto-join
+to `post_save` on `Campus` and run the whole suite.
+
+**1334 passed, 1 skipped.** Nothing red.
+
+So all twenty-five were artefact, and none was true. With every campus and
+every property at one point, any campus saved anywhere joined every property
+in the database — including other universities' — because the distance was
+always 0.0 and 0.0 is inside every radius. The join was doing what it says;
+the fixture had removed the only thing that could make it discriminate.
+
+**What this changes and what it does not.** The technical obstacle to
+auto-joining is gone: it breaks nothing. The reason it stays an operator
+command is now the product decision alone — geography should not silently
+become tenant visibility, and a campus opened 2 km from a listing genuinely
+changes which university's students can see it. That is a decision somebody
+should make, not a consequence of saving a row. Worth stating plainly, because
+"the tests fail" and "we decided not to" are very different reasons to leave
+something out, and only the second one is still true.
+
+### What else had been running against co-located campuses
+
+Asked properly, and answered by widening the spread rather than by reading the
+suite: 21 of 40 backend test files build a campus or a campus join, which is
+most of the product surface — a `PropertyCampusDistance` row is what makes a
+property visible to a university at all (ADR-002).
+
+Widening `CampusFactory` to 0.5° per campus produced 36 failures and 25 errors
+across those files, and **every one of them was the same database constraint**:
+
+    CheckConstraint(straight_line_km__gte=0 & straight_line_km__lte=500,
+                    name="pcd_distance_sane")
+
+rejecting inserts at 550–940 km. Not a behavioural failure. The schema already
+refuses a campus join that could not be a walk, so a fixture too far apart
+fails loudly at insert time rather than quietly producing wrong answers.
+
+That is the useful half of the answer: **the co-located fixture was not hiding
+a second class of bug.** What it hid is narrower and was already stated — every
+distance was 0.0, so every assertion along the geographic dimension was
+vacuous. Nothing was silently passing that would fail at a realistic spread;
+things were passing without measuring.
+
+It also surfaced an assumption worth naming: the factory `Sequence` counter
+runs across the whole session, so a per-campus offset is multiplied by test
+position. A spread that is fine for the third campus is 1100 km for the
+hundredth. Any future change to these coordinates has to be sized against the
+longest run, not against one file.
+
 ### A gate no product action could satisfy
 
 Same family, found the same way. `publish()` refuses a property with no
@@ -579,8 +666,8 @@ window the bug was live, because the copies agreed until one was fixed. **An
 agreement test cannot notice a second implementation; it can only notice one
 that has already drifted** — and then only on inputs it happens to walk.
 
-Applied across the domain, five concepts have two implementations each. What
-was found:
+Applied across the domain, six candidates were checked. Two turned out to have
+two implementations each; three have one; the sixth had three. What was found:
 
 | Concept | The two | Verdict |
 | --- | --- | --- |
@@ -588,6 +675,7 @@ was found:
 | dispute annotation | `review_dispute_annotation` (per review) and the batched annotation in the list endpoint | both needed — agreement now walks all four branches, not the one |
 | tenancy currency | `Tenancy.is_current()`/`currency()` in Python, `TenancyQuerySet.current()/past()/upcoming()` in SQL | both needed — agreement now walks every status, not the default one |
 | review eligibility | one definition (`review_eligibility_date`), latched into `review_eligible_at` | not a duplicate |
+| dispute state | stored on `status`, with `DISPUTE_TRANSITIONS` generating the DB check constraint; `was_disputed_at_any_point` reads one timestamp | not a duplicate |
 | distance formatting | `formatKm` in `lib/format.ts`, used by both components | not a duplicate |
 
 The two "both needed" rows are the interesting ones, because a single
