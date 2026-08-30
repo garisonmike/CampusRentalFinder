@@ -594,32 +594,42 @@ something out, and only the second one is still true.
 
 ### What else had been running against co-located campuses
 
-Asked properly, and answered by widening the spread rather than by reading the
-suite: 21 of 40 backend test files build a campus or a campus join, which is
-most of the product surface — a `PropertyCampusDistance` row is what makes a
-property visible to a university at all (ADR-002).
+**Nothing.** Spread the campuses across a realistic box — a 30x30 grid at 0.05
+degrees, so up to about 165 km apart, Kenyan-country scale — and the whole
+suite is green: 1334 passed, 1 skipped. No part of it was depending on
+campuses sitting on top of each other.
 
-Widening `CampusFactory` to 0.5° per campus produced 36 failures and 25 errors
-across those files, and **every one of them was the same database constraint**:
+The first answer given here was wrong, and the way it was wrong is the
+document's own subject:
 
-    CheckConstraint(straight_line_km__gte=0 & straight_line_km__lte=500,
-                    name="pcd_distance_sane")
+> "36 failures and 25 errors, and every one is the same check constraint,
+> `pcd_distance_sane`."
 
-rejecting inserts at 550–940 km. Not a behavioural failure. The schema already
-refuses a campus join that could not be a walk, so a fixture too far apart
-fails loudly at insert time rather than quietly producing wrong answers.
+Three defects in one sentence. The counts came from a **five-file subset**
+presented as the suite. The constraint was named from inspecting **one**
+failure — the full run has two, and the dominant one is `campus_latitude_range`
+at 42 against `pcd_distance_sane`'s 18. And the experiment itself was invalid:
+the spread was `n * 0.5` on a **session-wide counter**, so the hundred-and-
+eightieth campus was not in Kenya, it was off the planet. Every one of those
+failures was the schema correctly rejecting coordinates that cannot exist.
 
-That is the useful half of the answer: **the co-located fixture was not hiding
-a second class of bug.** What it hid is narrower and was already stated — every
-distance was 0.0, so every assertion along the geographic dimension was
-vacuous. Nothing was silently passing that would fail at a realistic spread;
-things were passing without measuring.
+So the experiment measured the fixture, not the suite — which is the same
+error as the one being investigated, committed while investigating it. A
+degenerate fixture makes assertions vacuous; a runaway fixture makes them
+assert something else entirely. Both pass or fail for reasons that have
+nothing to do with the code under test.
 
-It also surfaced an assumption worth naming: the factory `Sequence` counter
-runs across the whole session, so a per-campus offset is multiplied by test
-position. A spread that is fine for the third campus is 1100 km for the
-hundredth. Any future change to these coordinates has to be sized against the
-longest run, not against one file.
+`CampusFactory` now uses a bounded grid rather than a line, so a long session
+cannot walk the coordinates off the map, and it is offset west of the shared
+Nairobi origin while `PropertyFactory` goes east — otherwise the first campus
+and the first property sit on the same point and that one pair reproduces the
+original bug in miniature.
+
+**The question this adds:** when an experiment produces failures, check that
+the failures are about the thing being tested before reporting what they mean.
+A number from a subset, a cause from one sample, and a setup that left the
+domain of the problem are three separate ways to be confidently wrong, and
+they compose.
 
 ### A gate no product action could satisfy
 

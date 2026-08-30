@@ -131,8 +131,27 @@ class CampusFactory(TenantScopedFactory):
     #
     # Nairobi: close enough to the equator that a latitude-correction bug
     # divides by zero, which is why the base point is here (ADR-006).
-    latitude = factory.Sequence(lambda n: -1.286389 + n * 0.01)
-    longitude = factory.Sequence(lambda n: 36.817223 - n * 0.01)
+    #
+    # **A grid, not a line.** A linear sequence runs away: the counter is
+    # session-wide, so `n * 0.01` puts the two-thousandth campus 2200 km from
+    # the first, and a wide enough spread stops testing the product and starts
+    # testing `campus_latitude_range` and `pcd_distance_sane` -- the schema
+    # correctly rejecting coordinates that are not on Earth. That is a fixture
+    # generating nonsense, not a suite depending on proximity, and telling the
+    # two apart cost a wrong answer once already.
+    #
+    # 30 x 30 at 0.05 degrees: every coordinate distinct for the first 900
+    # campuses, and the box stays about 165 km on a side -- Kenyan-country
+    # scale, not planetary.
+    #
+    # Offset off the shared base point, and westward while `PropertyFactory`
+    # goes east, so a campus can never land exactly on a property. Both
+    # factories start from the same Nairobi origin and each has its own
+    # counter, so without this the first campus and the first property sit on
+    # top of each other and the distance is 0.0 -- the original bug, surviving
+    # in miniature for one pair.
+    latitude = factory.Sequence(lambda n: -1.286389 + 0.02 + (n % 30) * 0.05)
+    longitude = factory.Sequence(lambda n: 36.817223 - 0.02 - (n // 30) * 0.05)
     is_main = False
 
 
