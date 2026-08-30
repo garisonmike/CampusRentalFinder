@@ -49,6 +49,13 @@ ROOT="$(git rev-parse --show-toplevel)"
 # bisecting into one line.
 EXPECTED_PYTHON="${EXPECTED_PYTHON:-3.13}"
 
+# The `postgres` database on the same server, used only to prove the server
+# answers. The per-run verify database does not exist yet at this point.
+ADMIN_URL_PROBE=""
+if [ -n "${DATABASE_URL:-}" ]; then
+  ADMIN_URL_PROBE="${DATABASE_URL%/*}/postgres"
+fi
+
 require() {
   local label="$1" expected="$2" actual="$3"
   if [[ "$actual" != *"$expected"* ]]; then
@@ -66,6 +73,41 @@ require ruff    "ruff"             "$("$ROOT/.venv/bin/ruff" --version 2>&1)"
 require mypy    "mypy"             "$("$ROOT/.venv/bin/mypy" --version 2>&1)"
 require node    "v"                "$(node --version 2>&1)"
 require npm     "."                "$(npm --version 2>&1)"
+
+# --------------------------------------------------------------------------
+# The services, asserted for the same reason as the toolchain
+# --------------------------------------------------------------------------
+#
+# The versions above were added because the system Python moved under this
+# venv mid-round and every commit would have gone red for a reason that had
+# nothing to do with the commits. The services are the same failure with a
+# different cause and it has now happened: a restart took the Postgres, Redis
+# and MinIO containers with it, and a run started against nothing would have
+# reported an entire range as broken.
+#
+# Red for the wrong reason is worse than red, because a range of commits
+# reported as failing sends somebody to bisect them. `pytest` cannot tell you
+# apart from a genuine failure -- it just cannot connect -- so the distinction
+# has to be drawn here, before any commit is checked.
+#
+# Postgres is fatal: nothing in the backend suite runs without it. MinIO is
+# not -- its absence means the gated tests skip, which is a smaller run rather
+# than a wrong one -- so it is reported in the section below rather than here.
+require_service() {
+  local label="$1" probe="$2" hint="$3"
+  if ! eval "$probe" >/dev/null 2>&1; then
+    echo "service: $label is unreachable." >&2
+    echo "  $hint" >&2
+    echo "Refusing to run: every commit would fail for a reason that is not the commit." >&2
+    exit 2
+  fi
+  printf '  %-8s reachable\n' "$label"
+}
+
+if [ -n "${DATABASE_URL:-}" ]; then
+  require_service postgres "psql \"$ADMIN_URL_PROBE\" -qc 'select 1'" \
+    "Start it, e.g. \`docker start crf-pg\`, and check DATABASE_URL's host and port."
+fi
 echo
 
 # --------------------------------------------------------------------------
